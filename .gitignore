@@ -49,3 +49,13 @@ cscope.*
 .gdb_history
 .gdbinit
 core
+
+
+CMakeFiles/
+cmake_install.cmake
+libntirpc.map
+ntirpc/version.h
+src/libntirpc.so
+src/libntirpc.so.4.0
+tests/rpcping
+
