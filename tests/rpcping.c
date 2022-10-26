@@ -213,7 +213,7 @@ free_request(struct svc_req *req, enum xprt_stat stat)
 	free(req);
 }
 
-static void usage()
+static void usage(void)
 {
 	printf("Usage: rpcping <raw|rdma|tcp|udp> <host> [--rpcbind] [--count=<n>] [--threads=<n>] [--workers=<n>] [--port=<n>] [--program=<n>] [--version=<n>] [--procedure=<n>]\n");
 }
