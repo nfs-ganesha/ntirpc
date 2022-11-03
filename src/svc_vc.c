@@ -760,6 +760,18 @@ svc_vc_recv(SVCXPRT *xprt)
 			return SVC_STAT(xprt);
 		}
 
+		if (unlikely(xd->sx_fbtbc > xd->sx_dr.recvsz)) {
+			__warnx(TIRPC_DEBUG_FLAG_ERROR,
+				"%s: %p fd %d fragment is larger than the max buffer size (will set dead)",
+				__func__, xprt, xprt->xp_fd);
+			SVC_DESTROY(xprt);
+#ifdef USE_LTTNG_NTIRPC
+			tracepoint(xprt, recv_exit, __func__, __LINE__,
+				   xprt, "NO RECORD", 0);
+#endif /* USE_LTTNG_NTIRPC */
+			return SVC_STAT(xprt);
+		}
+
 #ifdef USE_LTTNG_NTIRPC
 		tracepoint(xprt, recv_frag, __func__, __LINE__,
 			   xprt, xd->sx_fbtbc);
