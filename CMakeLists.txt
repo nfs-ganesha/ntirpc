@@ -15,7 +15,7 @@ project(NTIRPC C)
 # version numbers
 set(NTIRPC_MAJOR_VERSION 4)
 # This is .0 for a release, .N for a stable branch, blank for development
-set(NTIRPC_MINOR_VERSION .0)
+set(NTIRPC_MINOR_VERSION .1)
 # -something for dev releases
 set(NTIRPC_VERSION_EXTRA )
 set(VERSION_COMMENT
