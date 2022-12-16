@@ -458,7 +458,14 @@ svc_vc_rendezvous(SVCXPRT *xprt)
 	newxprt = makefd_xprt(fd, req_xd->sx_dr.sendsz, req_xd->sx_dr.recvsz,
 			      &si, SVC_XPRT_FLAG_CLOSE);
 	if ((!newxprt) || (!(newxprt->xp_flags & SVC_XPRT_FLAG_INITIAL))) {
-		close(fd);
+
+		if (newxprt) {
+			SVC_DESTROY(newxprt);
+			/* Was never added to epoll */
+			SVC_RELEASE(newxprt, SVC_RELEASE_FLAG_NONE);
+		} else {
+			close(fd);
+		}
 		return (XPRT_DIED);
 	}
 
