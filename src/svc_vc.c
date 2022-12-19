@@ -79,6 +79,7 @@
 #include "svc_xprt.h"
 #include "rpc_dplx_internal.h"
 #include "svc_ioq.h"
+#include "haproxy.h"
 
 static void svc_vc_rendezvous_ops(SVCXPRT *);
 static void svc_vc_override_ops(SVCXPRT *, SVCXPRT *);
@@ -679,6 +680,7 @@ svc_vc_recv(SVCXPRT *xprt)
 	ssize_t rlen;
 	u_int flags;
 	int code;
+	bool hap_again = false;
 
 #ifdef USE_LTTNG_NTIRPC
 	tracepoint(xprt, funcin, __func__, __LINE__, xprt);
@@ -698,14 +700,17 @@ svc_vc_recv(SVCXPRT *xprt)
 	}
 
 	if (!xd->sx_fbtbc) {
+again:
+
 		rlen = recv(xprt->xp_fd, &xd->sx_fbtbc, BYTES_PER_XDR_UNIT,
-			    MSG_WAITALL);
+			    hap_again ? MSG_DONTWAIT : MSG_WAITALL);
 
 		if (unlikely(rlen < 0)) {
 			code = errno;
 
 			if (code == EAGAIN || code == EWOULDBLOCK) {
-				__warnx(TIRPC_DEBUG_FLAG_WARN,
+				__warnx(hap_again ? TIRPC_DEBUG_FLAG_SVC_VC
+						  : TIRPC_DEBUG_FLAG_WARN,
 					"%s: %p fd %d recv errno %d (try again)",
 					"svc_vc_wait", xprt, xprt->xp_fd, code);
 				if (unlikely(svc_rqst_rearm_events(
@@ -748,6 +753,134 @@ svc_vc_recv(SVCXPRT *xprt)
 		}
 
 		xd->sx_fbtbc = (int32_t)ntohl((long)xd->sx_fbtbc);
+
+		__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
+			"sx_fbtbc = %08x", (int)xd->sx_fbtbc);
+
+		if (xd->sx_fbtbc == PP2_SIG_UINT32) {
+			/* HA Proxy V2? */
+			uint32_t rest[2];
+			struct proxy_header_part s;
+			union proxy_addr *pa;
+
+			rlen = recv(xprt->xp_fd, rest, sizeof(rest),
+				    MSG_WAITALL);
+			if (rlen != sizeof(rest)) {
+				__warnx(TIRPC_DEBUG_FLAG_ERROR,
+					"%s: %p fd %d proxy header failed rest rlen = %z (will set dead)",
+				__func__, xprt, xprt->xp_fd, rlen);
+				SVC_DESTROY(xprt);
+				return SVC_STAT(xprt);
+			}
+			rest[0] = ntohl(rest[0]);
+			rest[1] = ntohl(rest[1]);
+
+			if (rest[0] != PP2_SIG_UINT32_2 ||
+			    rest[1] != PP2_SIG_UINT32_3) {
+				__warnx(TIRPC_DEBUG_FLAG_ERROR,
+					"%s: %p fd %d proxy header failed rest1=%08x rest2=%08x (will set dead)",
+				__func__, xprt, xprt->xp_fd, (int) rest[1], (int) rest[2]);
+				SVC_DESTROY(xprt);
+			}
+
+			rlen = recv(xprt->xp_fd, &s, sizeof(s),
+				    MSG_WAITALL);
+
+			if (rlen != sizeof(s)) {
+				__warnx(TIRPC_DEBUG_FLAG_ERROR,
+					"%s: %p fd %d proxy header failed header rlen = %z (will set dead)",
+				__func__, xprt, xprt->xp_fd, rlen);
+				SVC_DESTROY(xprt);
+				return SVC_STAT(xprt);
+			}
+
+			s.len = ntohs(s.len);
+			pa = mem_zalloc(s.len);
+			rlen = recv(xprt->xp_fd, pa, s.len, MSG_WAITALL);
+
+			if (rlen != s.len) {
+				__warnx(TIRPC_DEBUG_FLAG_ERROR,
+					"%s: %p fd %d proxy header rest len failed header rlen = %z (will set dead)",
+				__func__, xprt, xprt->xp_fd, rlen);
+				SVC_DESTROY(xprt);
+				return SVC_STAT(xprt);
+			}
+
+			if (s.ver_cmd == PP2_VERSIOB2_CMD_PROXY) {
+				if (s.fam == PP2_TRANS_STREAM_FAM_INET) {
+					struct sockaddr_in *ss4;
+
+					xprt->xp_proxy = xprt->xp_remote;
+					ss4 = (struct sockaddr_in *)
+							&xprt->xp_remote.ss;
+					ss4->sin_family = AF_INET;
+					memcpy(&ss4->sin_addr,
+					       &pa->ip4.src_addr,
+					       sizeof(struct in_addr));
+					ss4->sin_port = pa->ip4.src_port;
+
+				} else if (s.fam ==
+						   PP2_TRANS_STREAM_FAM_INET6) {
+					struct sockaddr_in6 *ss6;
+
+					xprt->xp_proxy = xprt->xp_remote;
+					ss6 = (struct sockaddr_in6 *)
+							&xprt->xp_remote.ss;
+					xprt->xp_remote.ss.ss_family = AF_INET6;
+					memcpy(&ss6->sin6_addr,
+					       &pa->ip6.src_addr,
+					       sizeof(struct in6_addr));
+					ss6->sin6_port = pa->ip6.src_port;
+
+				} else {
+					/* NOTE: we don't support UNIX or UDP
+					 * sockets
+					 */
+					__warnx(TIRPC_DEBUG_FLAG_ERROR,
+						"%s: %p fd %d invalid proxy protocol = %0x2 (will set dead)",
+						__func__, xprt, xprt->xp_fd,
+						(int) s.fam);
+					SVC_DESTROY(xprt);
+					return SVC_STAT(xprt);
+				}
+
+				/* Now look to see if there's more... */
+				hap_again = true;
+				goto again;
+
+			} else if (s.ver_cmd == PP2_VERSION2_CMD_LOCAL) {
+				__warnx(TIRPC_DEBUG_FLAG_EVENT,
+					"%s: %p fd %d proxy ignored for local",
+					__func__, xprt, xprt->xp_fd);
+			} else {
+				__warnx(TIRPC_DEBUG_FLAG_ERROR,
+					"%s: %p fd %d invalid proxy command = %0x2 (will set dead)",
+					__func__, xprt, xprt->xp_fd,
+					(int) s.ver_cmd);
+				SVC_DESTROY(xprt);
+				return SVC_STAT(xprt);
+			}
+
+			if (unlikely(svc_rqst_rearm_events(xprt,
+						   SVC_XPRT_FLAG_ADDED_RECV))) {
+				__warnx(TIRPC_DEBUG_FLAG_ERROR,
+					"%s: %p fd %d svc_rqst_rearm_events failed (will set dead)",
+				__func__, xprt, xprt->xp_fd);
+				SVC_DESTROY(xprt);
+#ifndef USE_LTTNG_NTIRPC
+			}
+#else
+				tracepoint(xprt, recv_exit, __func__, __LINE__,
+					   xprt, "REARM FAILED", -1);
+			} else {
+				tracepoint(xprt, recv_exit, __func__, __LINE__,
+					   xprt, "MORE", 0);
+			}
+#endif /* USE_LTTNG_NTIRPC */
+			return SVC_STAT(xprt);
+			/* return (XPRT_IDLE); */
+		}
+	
 		flags = UIO_FLAG_FREE | UIO_FLAG_MORE;
 
 		if (xd->sx_fbtbc & LAST_FRAG) {
