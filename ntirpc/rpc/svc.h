@@ -254,6 +254,7 @@ struct svc_xprt {
 
 	struct rpc_address xp_local;	/* local address, length, port */
 	struct rpc_address xp_remote;	/* remote address, length, port */
+	struct rpc_address xp_proxy;	/* proxy address, length, port */
 
 #if defined(HAVE_BLKIN)
 	/* blkin tracing */

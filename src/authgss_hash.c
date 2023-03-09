@@ -116,7 +116,7 @@ svc_rpc_gss_cmpf(const struct opr_rbtree_node *lhs,
 }
 
 static void
-authgss_hash_init()
+authgss_hash_init(void)
 {
 	int ix, code = 0;
 

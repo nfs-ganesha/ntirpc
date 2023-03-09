@@ -350,7 +350,7 @@ svc_xprt_dump_xprts(const char *tag)
 }
 
 void
-svc_xprt_shutdown()
+svc_xprt_shutdown(void)
 {
 	struct rbtree_x_part *t;
 	struct opr_rbtree_node *n;

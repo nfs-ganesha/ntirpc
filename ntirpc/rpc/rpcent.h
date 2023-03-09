@@ -67,7 +67,12 @@ extern struct rpcent *getrpcbynumber(int);
 extern struct rpcent *getrpcent(void);
 #endif
 
+#ifdef __THROW
+extern void setrpcent(int) __THROW;
+extern void endrpcent(void) __THROW;
+#else
 extern void setrpcent(int);
 extern void endrpcent(void);
+#endif
 __END_DECLS
 #endif				/* !_RPC_CENT_H */

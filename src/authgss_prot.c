@@ -177,7 +177,7 @@ gss_log_error(char *m, OM_uint32 maj_stat, OM_uint32 min_stat)
 {
 	OM_uint32 min;
 	gss_buffer_desc msg1, msg2;
-	int msg_ctx = 0;
+	unsigned int msg_ctx = 0;
 
 	gss_display_status(&min, maj_stat, GSS_C_GSS_CODE, GSS_C_NULL_OID,
 			   &msg_ctx, &msg1);

@@ -136,8 +136,6 @@ clnt_raw_call(struct clnt_req *cc)
 	struct cm_data *cm = CM_DATA(cx);
 	XDR *xdrs = &cm->xdr_stream;
 	u_int32_t *uint32p;
-	struct rpc_msg msg;
-	struct rpc_err error;
 
 	cc->cc_error.re_status = RPC_SUCCESS;
 
@@ -163,7 +161,12 @@ clnt_raw_call(struct clnt_req *cc)
 	(void)XDR_GETPOS(xdrs);	/* called just to cause overhead */
 	mutex_unlock(&clnt->cl_lock);
 
-#if 0
+#ifndef FIXME
+	return(RPC_SUCCESS);
+#else
+	struct rpc_msg msg;
+	struct rpc_err error;
+
 	/*
 	 * We have to call server input routine here because this is
 	 * all going on in one process. Yuk.
@@ -195,10 +198,10 @@ clnt_raw_call(struct clnt_req *cc)
 		xdrs->x_op = op;
 		return (RPC_CANTDECODERES);
 	}
-#endif
 	_seterr_reply(&msg, &error);
 
 	return (error.re_status);
+#endif
 }
 
 /* ARGSUSED */

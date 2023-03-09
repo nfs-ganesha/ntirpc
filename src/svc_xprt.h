@@ -63,6 +63,6 @@ typedef bool(*svc_xprt_each_func_t) (SVCXPRT *, void *);
 int svc_xprt_foreach(svc_xprt_each_func_t, void *);
 
 void svc_xprt_dump_xprts(const char *);
-void svc_xprt_shutdown();
+void svc_xprt_shutdown(void);
 
 #endif				/* TIRPC_SVC_XPRT_H */
