@@ -779,7 +779,7 @@ again:
 			    rest[1] != PP2_SIG_UINT32_3) {
 				__warnx(TIRPC_DEBUG_FLAG_ERROR,
 					"%s: %p fd %d proxy header failed rest1=%08x rest2=%08x (will set dead)",
-				__func__, xprt, xprt->xp_fd, (int) rest[1], (int) rest[2]);
+				__func__, xprt, xprt->xp_fd, (int) rest[0], (int) rest[1]);
 				SVC_DESTROY(xprt);
 			}
 
