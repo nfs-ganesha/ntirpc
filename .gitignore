@@ -56,6 +56,6 @@ cmake_install.cmake
 libntirpc.map
 ntirpc/version.h
 src/libntirpc.so
-src/libntirpc.so.4.0
+src/libntirpc.so.*
 tests/rpcping
 
