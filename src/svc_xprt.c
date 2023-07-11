@@ -244,12 +244,25 @@ svc_xprt_clear(SVCXPRT *xprt)
 		 * this lock (and generation test) prevents repeats.
 		 */
 		atomic_dec_uint32_t(&svc_xprt_fd.connections);
-		rwlock_wrlock(&t->lock);
-		opr_rbtree_remove(&t->t, &REC_XPRT(xprt)->fd_node);
-		rwlock_unlock(&t->lock);
+
+		uint16_t xp_flags = atomic_postclear_uint16_t_bits(
+			&xprt->xp_flags, SVC_XPRT_TREE_LOCKED);
+		if (xp_flags & SVC_XPRT_TREE_LOCKED) {
+			opr_rbtree_remove(&t->t, &REC_XPRT(xprt)->fd_node);
+		} else {
+			rwlock_wrlock(&t->lock);
+			opr_rbtree_remove(&t->t, &REC_XPRT(xprt)->fd_node);
+			rwlock_unlock(&t->lock);
+		}
 	}
 }
 
+/**
+ * Perform custom task for each xprt
+ *
+ * @note Locking
+ * - Callback is called with the tree write locked
+ */
 int
 svc_xprt_foreach(svc_xprt_each_func_t each_f, void *arg)
 {
@@ -278,8 +291,7 @@ svc_xprt_foreach(svc_xprt_each_func_t each_f, void *arg)
 		if (++restarts > 5)
 			return (1);
 
-		/* start with rlock */
-		rwlock_rdlock(&t->lock);	/* t RLOCKED */
+		rwlock_wrlock(&t->lock);	/* t WLOCKED */
 		tgen = t->t.gen;
 		x_ix = 0;
 		n = opr_rbtree_first(&t->t);
@@ -289,25 +301,40 @@ svc_xprt_foreach(svc_xprt_each_func_t each_f, void *arg)
 			rec = opr_containerof(n, struct rpc_dplx_rec, fd_node);
 			sk.xprt.xp_fd = rec->xprt.xp_fd;
 
-			/* call each_func with t !LOCKED */
-			rwlock_unlock(&t->lock);
+			/* Intimate the inner APIs that tree is locked */
+			atomic_set_uint16_t_bits(
+				&rec->xprt.xp_flags, SVC_XPRT_TREE_LOCKED);
 
 			/* restart if each_f disposed xprt */
-			if (each_f(&rec->xprt, arg))
+			if (each_f(&rec->xprt, arg)) {
+				/* If exits earlier,
+				* clear the flag explicitly */
+				atomic_clear_uint16_t_bits(
+					&rec->xprt.xp_flags,
+					SVC_XPRT_TREE_LOCKED);
+				/* already cleaned */
+				rwlock_unlock(&t->lock);
+				/* t !LOCKED */
 				goto restart;
-
-			/* validate */
-			rwlock_rdlock(&t->lock);
+			}
 
 			if (tgen != t->t.gen) {
 				n = opr_rbtree_lookup(&t->t, &sk.fd_node);
 				if (!n) {
+					/* If exits earlier,
+					* clear the flag explicitly */
+					atomic_clear_uint16_t_bits(
+						&rec->xprt.xp_flags,
+						SVC_XPRT_TREE_LOCKED);
 					/* invalidated, try harder */
 					rwlock_unlock(&t->lock);
 							/* t !LOCKED */
 					goto restart;
 				}
 			}
+			/* If exits earlier, clear the flag explicitly */
+			atomic_clear_uint16_t_bits(
+				&rec->xprt.xp_flags, SVC_XPRT_TREE_LOCKED);
 			n = opr_rbtree_next(n);
 		}		/* curr partition */
 		rwlock_unlock(&t->lock); /* t !LOCKED */

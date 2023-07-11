@@ -160,6 +160,7 @@ typedef struct svc_init_params {
 #define SVC_XPRT_FLAG_DESTROYING	0x0020	/* SVC_DESTROY() was called */
 #define SVC_XPRT_FLAG_RELEASING		0x0040	/* (*xp_destroy) was called */
 #define SVC_XPRT_FLAG_UREG		0x0080
+#define SVC_XPRT_TREE_LOCKED		0x0100
 
 #define SVC_XPRT_FLAG_DESTROYED (SVC_XPRT_FLAG_DESTROYING \
 				| SVC_XPRT_FLAG_RELEASING)
