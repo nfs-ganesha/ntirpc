@@ -377,9 +377,8 @@ void authgss_ctx_hash_clear(void)
 {
 	struct rbtree_x_part *xp;
 	struct authgss_x_part *axp;
-	struct svc_rpc_gss_data *gd;
+	struct svc_rpc_gss_data *gd, *gd_next;
 	int ix;
-	int removed_count = 0;
 
 	authgss_hash_init();
 
@@ -388,28 +387,18 @@ void authgss_ctx_hash_clear(void)
 		axp = (struct authgss_x_part *)xp->u1;
 		mutex_lock(&xp->mtx);
 
- again:
-		gd = TAILQ_FIRST(&axp->lru_q);
-		if (!gd)
-			goto next_t;
+		TAILQ_FOREACH_SAFE(gd, &axp->lru_q, lru_q, gd_next) {
+			/* Remove entry */
+			rbtree_x_cached_remove(&authgss_hash_st.xt, xp,
+				&gd->node_k, gd->hk.k);
+			TAILQ_REMOVE(&axp->lru_q, gd, lru_q);
+			TAILQ_INIT_ENTRY(gd, lru_q);
+			--(axp->size);
+			(void)atomic_dec_uint32_t(&authgss_hash_st.size);
 
-		/* Remove entry */
-		rbtree_x_cached_remove(&authgss_hash_st.xt, xp, &gd->node_k, gd->hk.k);
-		TAILQ_REMOVE(&axp->lru_q, gd, lru_q);
-		TAILQ_INIT_ENTRY(gd, lru_q);
-		--(axp->size);
-		(void)atomic_dec_uint32_t(&authgss_hash_st.size);
-
-		/* Drop sentinel ref (may free gd) */
-		unref_svc_rpc_gss_data(gd);
-
-		++removed_count;
-		goto again;
-
- next_t:
+			/* Drop sentinel ref (may free gd) */
+			unref_svc_rpc_gss_data(gd);
+		}
 		mutex_unlock(&xp->mtx);
 	}
-
-	__warnx(TIRPC_DEBUG_FLAG_RPCSEC_GSS,
-		"%s: Total authgss_ctx entries removed: %d", __func__, removed_count);
 }
