@@ -42,6 +42,8 @@
 
 /* GSS context cache */
 
+extern bool svcauth_gss_enabled;
+
 struct authgss_x_part {
 	uint32_t gen;
 	uint32_t size;
@@ -166,6 +168,16 @@ authgss_ctx_hash_get(struct rpc_gss_cred *gc)
 	struct authgss_x_part *axp;
 	struct rbtree_x_part *t;
 
+        /**
+         * If auth-gss is disabled, we need to stop requests from using cached
+         * gss-contexts.
+         */
+        if (!svcauth_gss_enabled) {
+                __warnx(TIRPC_DEBUG_FLAG_RPCSEC_GSS,
+                        "%s: auth_gss disabled: GET cached context skipped", __func__);
+                return NULL;
+        }
+
 	authgss_hash_init();
 
 	gss_ctx = (gss_union_ctx_id_desc *) (gc->gc_ctx.value);
@@ -173,7 +185,17 @@ authgss_ctx_hash_get(struct rpc_gss_cred *gc)
 	gk.ctx = (gc->gc_ctx.value);
 
 	t = rbtx_partition_of_scalar(&authgss_hash_st.xt, gk.hk.k);
+
 	mutex_lock(&t->mtx);
+
+	/* Recheck the above condition after obtaining lock */
+	if (!svcauth_gss_enabled) {
+		mutex_unlock(&t->mtx);
+		__warnx(TIRPC_DEBUG_FLAG_RPCSEC_GSS,
+			"%s: auth_gss disabled: GET cached context skipped", __func__);
+		return NULL;
+	}
+
 	ngd =
 	    rbtree_x_cached_lookup(&authgss_hash_st.xt, t, &gk.node_k, gk.hk.k);
 	if (ngd) {
@@ -199,6 +221,16 @@ authgss_ctx_hash_set(struct svc_rpc_gss_data *gd)
 	gss_union_ctx_id_desc *gss_ctx;
 	bool rslt;
 
+        /**
+         * If auth-gss is disabled, we need to stop requests from writing possibly
+         * older gss-contexts to the cache.
+         */
+        if (!svcauth_gss_enabled) {
+                __warnx(TIRPC_DEBUG_FLAG_RPCSEC_GSS,
+                        "%s: auth_gss disabled: SET cached context skipped", __func__);
+                return false;
+        }
+
 	authgss_hash_init();
 
 	gss_ctx = (gss_union_ctx_id_desc *) (gd->ctx);
@@ -206,7 +238,23 @@ authgss_ctx_hash_set(struct svc_rpc_gss_data *gd)
 
 	(void)atomic_inc_uint32_t(&gd->refcnt);
 	t = rbtx_partition_of_scalar(&authgss_hash_st.xt, gd->hk.k);
+
 	mutex_lock(&t->mtx);
+
+	/**
+	 * When auth-gss is disabled, there could be inflight requests waiting for
+	 * the mutex to write gss-contexts to the cache. While gss-auth disabling
+	 * would clear the context cache, we need to prevent these waiting in-flight
+	 * requests from writing potentially invalid data to the cache. So, we make
+	 * them recheck the global status after obtaining the mutex.
+	 */
+	if (!svcauth_gss_enabled) {
+		mutex_unlock(&t->mtx);
+		(void)atomic_dec_uint32_t(&gd->refcnt);
+		__warnx(TIRPC_DEBUG_FLAG_RPCSEC_GSS,
+			"%s: auth_gss disabled: SET cached context skipped", __func__);
+		return false;
+	}
 	rslt =
 	    rbtree_x_cached_insert(&authgss_hash_st.xt, t, &gd->node_k,
 				   gd->hk.k);
