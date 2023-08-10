@@ -158,6 +158,7 @@ NTIRPC_${NTIRPC_VERSION_BASE} {
     svcauth_gss_import_name;
     svcauth_gss_nextverf;
     svcauth_gss_release_cred;
+    svcauth_gss_set_status;
     svcauth_gss_set_svc_name;
     svcerr_auth;
     svcerr_decode;
