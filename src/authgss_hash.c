@@ -324,3 +324,33 @@ void authgss_ctx_gc_idle(void)
 	/* perturb by 1 */
 	(void)IDLE_NEXT();
 }
+
+void authgss_ctx_hash_clear(void)
+{
+	struct rbtree_x_part *xp;
+	struct authgss_x_part *axp;
+	struct svc_rpc_gss_data *gd, *gd_next;
+	int ix;
+
+	authgss_hash_init();
+
+	for (ix = 0; ix < authgss_hash_st.xt.npart; ++ix) {
+		xp = &(authgss_hash_st.xt.tree[ix]);
+		axp = (struct authgss_x_part *)xp->u1;
+		mutex_lock(&xp->mtx);
+
+		TAILQ_FOREACH_SAFE(gd, &axp->lru_q, lru_q, gd_next) {
+			/* Remove entry */
+			rbtree_x_cached_remove(&authgss_hash_st.xt, xp,
+				&gd->node_k, gd->hk.k);
+			TAILQ_REMOVE(&axp->lru_q, gd, lru_q);
+			TAILQ_INIT_ENTRY(gd, lru_q);
+			--(axp->size);
+			(void)atomic_dec_uint32_t(&authgss_hash_st.size);
+
+			/* Drop sentinel ref (may free gd) */
+			unref_svc_rpc_gss_data(gd);
+		}
+		mutex_unlock(&xp->mtx);
+	}
+}
