@@ -77,6 +77,9 @@ static struct svcauth_gss_name_holder server_gss_name = {
 	.gss_name_lock = RWLOCK_INITIALIZER
 };
 
+/* Global flag to indicate if svcauth_gss is enabled (default: enabled) */
+bool svcauth_gss_enabled = true;
+
 bool
 svcauth_gss_set_svc_name(gss_name_t name)
 {
@@ -619,6 +622,13 @@ _svcauth_gss(struct svc_req *req, bool *no_dispatch)
 
 		if (req->rq_msg.cb_proc != NULLPROC) {
 			rc = AUTH_FAILED; /* XXX ? */
+			goto gd_free;
+		}
+
+		/* Fail new INIT / CONTINUE_INIT requests if svcauth_gss is disabled */
+		if (!svcauth_gss_enabled) {
+			__warnx(TIRPC_DEBUG_FLAG_AUTH, "%s: auth-gss disabled. Failing", __func__);
+			rc = AUTH_REJECTEDCRED;
 			goto gd_free;
 		}
 
