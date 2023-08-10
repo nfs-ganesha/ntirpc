@@ -79,6 +79,97 @@ static struct svcauth_gss_name_holder server_gss_name = {
 
 /* Global flag to indicate if svcauth_gss is enabled (default: enabled) */
 bool svcauth_gss_enabled = true;
+static mutex_t svcauth_gss_status_lock = MUTEX_INITIALIZER;
+
+/**
+ * @brief This function sets the global svcauth_gss authentication status
+ *
+ * The status can be ON or OFF, depending on the input.
+ * If the new status is OFF, we reset the global auth state variables and
+ * clear gss-context cache.
+ *
+ * We protect the entire function through a mutex to prevent conflicts between
+ * threads trying to set different statuses.
+ *
+ * @note When enabling the status, this function must be called after the
+ * auth-gss name and credentials have been initialised.
+ */
+void
+svcauth_gss_set_status(bool status_enabled)
+{
+	OM_uint32 maj_stat, min_stat;
+
+	/* Acquire mutex to prevent interference by another invocation */
+	mutex_lock(&svcauth_gss_status_lock);
+
+	if (svcauth_gss_enabled == status_enabled) {
+		mutex_unlock(&svcauth_gss_status_lock);
+		__warnx(TIRPC_DEBUG_FLAG_AUTH,
+			"%s: svcauth_gss status is already set to %d", __func__, status_enabled);
+		return;
+	}
+	svcauth_gss_enabled = status_enabled;
+
+	if (status_enabled) {
+		/* No further action required */
+		mutex_unlock(&svcauth_gss_status_lock);
+		return;
+	}
+
+	/* Reset all state related to svcauth_gss credentials */
+	rwlock_wrlock(&server_creds.gss_creds_lock);
+
+	if (server_creds.gss_creds != NULL) {
+		maj_stat = gss_release_cred(&min_stat, &server_creds.gss_creds);
+
+		if (maj_stat != GSS_S_COMPLETE) {
+			__warnx(TIRPC_DEBUG_FLAG_AUTH,
+				"%s: failed to release gss_creds major=%u minor=%u",
+				__func__, maj_stat, min_stat);
+			/* We abort since this scenario shouldn't happen */
+			abort();
+		}
+		server_creds.gss_creds = NULL;
+	}
+	if (server_creds.prev_gss_creds != NULL) {
+		maj_stat = gss_release_cred(&min_stat, &server_creds.prev_gss_creds);
+
+		if (maj_stat != GSS_S_COMPLETE) {
+			__warnx(TIRPC_DEBUG_FLAG_AUTH,
+				"%s: failed to release prev_gss_creds major=%u minor=%u",
+				__func__, maj_stat, min_stat);
+			/* We abort since this scenario shouldn't happen */
+			abort();
+		}
+		server_creds.prev_gss_creds = NULL;
+	}
+	/* Set expiry-time in the past to not use existing creds */
+	server_creds.gss_creds_expires = OLDEST_TIMESTAMP;
+
+	rwlock_unlock(&server_creds.gss_creds_lock);
+
+	/* Reset svcauth_gss service name */
+	rwlock_wrlock(&server_gss_name.gss_name_lock);
+
+	if (server_gss_name.gss_name != NULL) {
+		maj_stat = gss_release_name(&min_stat, &server_gss_name.gss_name);
+		if (maj_stat != GSS_S_COMPLETE) {
+			__warnx(TIRPC_DEBUG_FLAG_AUTH,
+				"%s: failed to release gss_name major=%u minor=%u",
+				__func__, maj_stat, min_stat);
+			/* We abort since this scenario shouldn't happen */
+			abort();
+		}
+		server_gss_name.gss_name = NULL;
+	}
+	rwlock_unlock(&server_gss_name.gss_name_lock);
+
+	/* Clear authgss-context cache */
+	authgss_ctx_hash_clear();
+
+	/* Now release the mutex to permit other threads */
+	mutex_unlock(&svcauth_gss_status_lock);
+}
 
 bool
 svcauth_gss_set_svc_name(gss_name_t name)
