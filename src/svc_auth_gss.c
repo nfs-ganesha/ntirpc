@@ -58,6 +58,10 @@ static gss_cred_id_t svcauth_prev_gss_creds;
 /* RW-Locks to synchronise reads and writes to global auth variables */
 static rwlock_t svcauth_gss_creds_lock = RWLOCK_INITIALIZER;
 static rwlock_t svcauth_gss_name_lock = RWLOCK_INITIALIZER;
+
+/* Global flag to indicate if svcauth_gss is enabled (default: enabled) */
+bool svcauth_gss_enabled = true;
+
 bool
 svcauth_gss_set_svc_name(gss_name_t name)
 {
