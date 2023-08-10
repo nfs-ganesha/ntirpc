@@ -49,153 +49,39 @@ static struct svc_auth_ops svc_auth_gss_ops;
 #define SVCAUTH_PRIVATE(auth) \
 	((struct svc_rpc_gss_data *)(auth)->svc_ah_private)
 
-#define OLDEST_TIMESTAMP 1
-
-struct svcauth_gss_creds_holder {
-	gss_cred_id_t gss_creds;
-	gss_cred_id_t prev_gss_creds;
-	int64_t gss_creds_expires;
-	/* RW-Lock to synchronise reads and writes to svcauth_gss_creds_holder */
-	rwlock_t gss_creds_lock;
-};
-
-struct svcauth_gss_name_holder {
-	gss_name_t gss_name;
-	/* RW-Lock to synchronise reads and writes to svcauth_gss_name_holder */
-	rwlock_t gss_name_lock;
-};
-
 /* Global server credentials. */
-static struct svcauth_gss_creds_holder server_creds = {
-	.gss_creds = NULL,
-	.prev_gss_creds = NULL,
-	.gss_creds_expires = OLDEST_TIMESTAMP,
-	.gss_creds_lock = RWLOCK_INITIALIZER
-};
+gss_cred_id_t svcauth_gss_creds;
+static gss_name_t svcauth_gss_name;
+static int64_t svcauth_gss_creds_expires;
+static gss_cred_id_t svcauth_prev_gss_creds;
 
-static struct svcauth_gss_name_holder server_gss_name = {
-	.gss_name = NULL,
-	.gss_name_lock = RWLOCK_INITIALIZER
-};
-
-/* Global flag to indicate if svcauth_gss is enabled (default: enabled) */
-bool svcauth_gss_enabled = true;
-static mutex_t svcauth_gss_status_lock = MUTEX_INITIALIZER;
-
-/**
- * @brief This function sets the global svcauth_gss authentication status
- *
- * The status can be ON or OFF, depending on the input.
- * If the new status is OFF, we reset the global auth state variables and
- * clear gss-context cache.
- *
- * We protect the entire function through a mutex to prevent conflicts between
- * threads trying to set different statuses.
- *
- * @note When enabling the status, this function must be called after the
- * auth-gss name and credentials have been initialised.
- */
-void
-svcauth_gss_set_status(bool status_enabled)
-{
-	OM_uint32 maj_stat, min_stat;
-
-	/* Acquire mutex to prevent interference by another invocation */
-	mutex_lock(&svcauth_gss_status_lock);
-
-	if (svcauth_gss_enabled == status_enabled) {
-		mutex_unlock(&svcauth_gss_status_lock);
-		__warnx(TIRPC_DEBUG_FLAG_AUTH,
-			"%s: svcauth_gss status is already set to %d", __func__, status_enabled);
-		return;
-	}
-	svcauth_gss_enabled = status_enabled;
-
-	if (status_enabled) {
-		/* No further action required */
-		mutex_unlock(&svcauth_gss_status_lock);
-		return;
-	}
-
-	/* Reset all state related to svcauth_gss credentials */
-	rwlock_wrlock(&server_creds.gss_creds_lock);
-
-	if (server_creds.gss_creds != NULL) {
-		maj_stat = gss_release_cred(&min_stat, &server_creds.gss_creds);
-
-		if (maj_stat != GSS_S_COMPLETE) {
-			__warnx(TIRPC_DEBUG_FLAG_AUTH,
-				"%s: failed to release gss_creds major=%u minor=%u",
-				__func__, maj_stat, min_stat);
-			/* We abort since this scenario shouldn't happen */
-			abort();
-		}
-		server_creds.gss_creds = NULL;
-	}
-	if (server_creds.prev_gss_creds != NULL) {
-		maj_stat = gss_release_cred(&min_stat, &server_creds.prev_gss_creds);
-
-		if (maj_stat != GSS_S_COMPLETE) {
-			__warnx(TIRPC_DEBUG_FLAG_AUTH,
-				"%s: failed to release prev_gss_creds major=%u minor=%u",
-				__func__, maj_stat, min_stat);
-			/* We abort since this scenario shouldn't happen */
-			abort();
-		}
-		server_creds.prev_gss_creds = NULL;
-	}
-	/* Set expiry-time in the past to not use existing creds */
-	server_creds.gss_creds_expires = OLDEST_TIMESTAMP;
-
-	rwlock_unlock(&server_creds.gss_creds_lock);
-
-	/* Reset svcauth_gss service name */
-	rwlock_wrlock(&server_gss_name.gss_name_lock);
-
-	if (server_gss_name.gss_name != NULL) {
-		maj_stat = gss_release_name(&min_stat, &server_gss_name.gss_name);
-		if (maj_stat != GSS_S_COMPLETE) {
-			__warnx(TIRPC_DEBUG_FLAG_AUTH,
-				"%s: failed to release gss_name major=%u minor=%u",
-				__func__, maj_stat, min_stat);
-			/* We abort since this scenario shouldn't happen */
-			abort();
-		}
-		server_gss_name.gss_name = NULL;
-	}
-	rwlock_unlock(&server_gss_name.gss_name_lock);
-
-	/* Clear authgss-context cache */
-	authgss_ctx_hash_clear();
-
-	/* Now release the mutex to permit other threads */
-	mutex_unlock(&svcauth_gss_status_lock);
-}
-
+/* RW-Locks to synchronise reads and writes to global auth variables */
+static rwlock_t svcauth_gss_creds_lock = RWLOCK_INITIALIZER;
+static rwlock_t svcauth_gss_name_lock = RWLOCK_INITIALIZER;
 bool
 svcauth_gss_set_svc_name(gss_name_t name)
 {
 	OM_uint32 maj_stat, min_stat;
 
-	/* Acquire write lock before updating server_gss_name.gss_name */
-	rwlock_wrlock(&server_gss_name.gss_name_lock);
+	/* Acquire write lock before updating svcauth_gss_name */
+	rwlock_wrlock(&svcauth_gss_name_lock);
 
-	if (server_gss_name.gss_name != NULL) {
-		maj_stat = gss_release_name(&min_stat, &server_gss_name.gss_name);
+	if (svcauth_gss_name != NULL) {
+		maj_stat = gss_release_name(&min_stat, &svcauth_gss_name);
 		if (maj_stat != GSS_S_COMPLETE) {
-			rwlock_unlock(&server_gss_name.gss_name_lock);
+			rwlock_unlock(&svcauth_gss_name_lock);
 			return (false);
 		}
-		server_gss_name.gss_name = NULL;
+		svcauth_gss_name = NULL;
 	}
 
 	/* XXX Ganesha */
-	if (server_gss_name.gss_name == GSS_C_NO_NAME) {
-		rwlock_unlock(&server_gss_name.gss_name_lock);
+	if (svcauth_gss_name == GSS_C_NO_NAME) {
+		rwlock_unlock(&svcauth_gss_name_lock);
 		return (true);
 	}
-	maj_stat = gss_duplicate_name(&min_stat, name, &server_gss_name.gss_name);
-	rwlock_unlock(&server_gss_name.gss_name_lock);
+	maj_stat = gss_duplicate_name(&min_stat, name, &svcauth_gss_name);
+	rwlock_unlock(&svcauth_gss_name_lock);
 
 	if (maj_stat != GSS_S_COMPLETE)
 		return (false);
@@ -253,19 +139,17 @@ svcauth_gss_acquire_cred(void)
 
 	now = get_time_fast();
 
-	rwlock_rdlock(&server_creds.gss_creds_lock);
-	if (server_creds.gss_creds && (!server_creds.gss_creds_expires ||
-		server_creds.gss_creds_expires > now)) {
-		rwlock_unlock(&server_creds.gss_creds_lock);
+	rwlock_rdlock(&svcauth_gss_creds_lock);
+	if (svcauth_gss_creds && (!svcauth_gss_creds_expires || svcauth_gss_creds_expires > now)) {
+		rwlock_unlock(&svcauth_gss_creds_lock);
 		return (true);
 	}
-	rwlock_unlock(&server_creds.gss_creds_lock);
+	rwlock_unlock(&svcauth_gss_creds_lock);
 
-	/* Now acquire write-lock for writing server_creds.gss_creds */
-	rwlock_wrlock(&server_creds.gss_creds_lock);
+	/* Now acquire write-lock for writing svcauth_gss_creds */
+	rwlock_wrlock(&svcauth_gss_creds_lock);
 
-	if (server_creds.gss_creds && (!server_creds.gss_creds_expires ||
-		server_creds.gss_creds_expires > now)) {
+	if (svcauth_gss_creds && (!svcauth_gss_creds_expires || svcauth_gss_creds_expires > now)) {
 		maj_stat = GSS_S_COMPLETE;
 	} else {
 		ancient_creds = server_creds.prev_gss_creds;
@@ -273,29 +157,28 @@ svcauth_gss_acquire_cred(void)
 		timerec = 0;
 		now = get_time_fast();
 
-		/* Acquire read-lock before reading server_gss_name.gss_name */
-		rwlock_rdlock(&server_gss_name.gss_name_lock);
+		/* Acquire read-lock before reading svcauth_gss_name */
+		rwlock_rdlock(&svcauth_gss_name_lock);
 		maj_stat =
-		    gss_acquire_cred(&min_stat, server_gss_name.gss_name, 0,
-				     GSS_C_NULL_OID_SET, GSS_C_ACCEPT, &server_creds.gss_creds, NULL,
-				     &timerec);
-		rwlock_unlock(&server_gss_name.gss_name_lock);
+		    gss_acquire_cred(&min_stat, svcauth_gss_name, 0, GSS_C_NULL_OID_SET,
+				     GSS_C_ACCEPT, &svcauth_gss_creds, NULL, &timerec);
+		rwlock_unlock(&svcauth_gss_name_lock);
 
 		if (maj_stat == GSS_S_COMPLETE) {
 			if (timerec == GSS_C_INDEFINITE)
-				server_creds.gss_creds_expires = 0;
+				svcauth_gss_creds_expires = 0;
 			else
-				server_creds.gss_creds_expires = now + timerec;
+				svcauth_gss_creds_expires = now + timerec;
 			if (old_creds) {
-				server_creds.prev_gss_creds = old_creds;
+				svcauth_prev_gss_creds = old_creds;
 			}
 			if (ancient_creds) {
 				(void) gss_release_cred(&min_stat, &ancient_creds);
 			}
 		}
 	}
-	/* Release the server_creds.gss_creds write-lock */
-	rwlock_unlock(&server_creds.gss_creds_lock);
+	/* Release the svcauth_gss_creds write-lock */
+	rwlock_unlock(&svcauth_gss_creds_lock);
 
 	if (maj_stat != GSS_S_COMPLETE) {
 		__warnx(TIRPC_DEBUG_FLAG_AUTH,
@@ -310,48 +193,23 @@ svcauth_gss_acquire_cred(void)
 bool
 svcauth_gss_release_cred(void)
 {
-	rwlock_wrlock(&server_creds.gss_creds_lock);
-	/** @todo: clean up if-else logic and release creds immediately */
+	rwlock_wrlock(&svcauth_gss_creds_lock);
 #if 0
 	OM_uint32 maj_stat, min_stat;
 
-	maj_stat = gss_release_cred(&min_stat, &server_creds.gss_creds);
+	maj_stat = gss_release_cred(&min_stat, &svcauth_gss_creds);
 	if (maj_stat != GSS_S_COMPLETE) {
-		rwlock_unlock(&server_creds.gss_creds_lock);
+		rwlock_unlock(&svcauth_gss_creds_lock);
 		return (false);
 	}
-	server_creds.gss_creds = NULL;
+	svcauth_gss_creds = NULL;
 #else
-	server_creds.gss_creds_expires = OLDEST_TIMESTAMP;
+	svcauth_gss_creds_expires = 1;
 	/* make any future callers to svcauth_gss_acquire_cred() should get a new cred. */
 #endif
 
-	rwlock_unlock(&server_creds.gss_creds_lock);
+	rwlock_unlock(&svcauth_gss_creds_lock);
 	return (true);
-}
-
-static void
-observe_gss_auth_op_latency(svc_auth_op_t op, rpc_gss_svc_t gss_svc,
-	const struct timespec *op_start)
-{
-	struct timespec op_end, latency;
-
-	clock_gettime(CLOCK_MONOTONIC, &op_end);
-	timespecsub(&op_end, op_start, &latency);
-	metrics_libntirpc_observe_gss_svc_auth_op_latency(op, gss_svc,
-		&latency);
-}
-
-static void
-observe_gss_auth_step_latency(gss_svc_auth_step_t step, rpc_gss_svc_t gss_svc,
-	bool step_succeeded, const struct timespec *step_start)
-{
-	struct timespec step_end, latency;
-
-	clock_gettime(CLOCK_MONOTONIC, &step_end);
-	timespecsub(&step_end, step_start, &latency);
-	metrics_libntirpc_observe_gss_svc_auth_step_latency(step, gss_svc,
-		step_succeeded, &latency);
 }
 
 static bool
@@ -379,21 +237,20 @@ svcauth_gss_accept_sec_context(struct svc_req *req,
 		return (false);
 	}
 
-	rwlock_rdlock(&server_creds.gss_creds_lock);
+	rwlock_rdlock(&svcauth_gss_creds_lock);
 
-	/* We can not accept incoming context, if server gss-creds are NULL. */
-	if (server_creds.gss_creds == NULL) {
-		rwlock_unlock(&server_creds.gss_creds_lock);
+	if (svcauth_gss_creds == NULL) {
+		rwlock_unlock(&svcauth_gss_creds_lock);
 		xdr_free((xdrproc_t)xdr_rpc_gss_init_args, (void *)&recv_tok);
 		return false;
 	}
 
 	gr->gr_major =
-	    gss_accept_sec_context(&gr->gr_minor, &gd->ctx, server_creds.gss_creds,
+	    gss_accept_sec_context(&gr->gr_minor, &gd->ctx, svcauth_gss_creds,
 				   &recv_tok, GSS_C_NO_CHANNEL_BINDINGS,
 				   &gd->client_name, &mech, &gr->gr_token,
 				   &ret_flags, &time_rec, NULL);
-	rwlock_unlock(&server_creds.gss_creds_lock);
+	rwlock_unlock(&svcauth_gss_creds_lock);
 
 	xdr_free((xdrproc_t)xdr_rpc_gss_init_args, (void *)&recv_tok);
 
@@ -415,12 +272,13 @@ svcauth_gss_accept_sec_context(struct svc_req *req,
 	/* ANDROS: change for debugging linux kernel version...
 	   gr->gr_win = 0x00000005;
 	 */
-	gr->gr_win = SVC_GSS_SEQ_WIN;
+	gr->gr_win = sizeof(gd->seqmask) * 8;
 
 	/* Save client info. */
 	gd->sec.mech = mech;
 	gd->sec.qop = GSS_C_QOP_DEFAULT;
 	gd->sec.svc = gc->gc_svc;
+	gd->win = gr->gr_win;
 
 	if (time_rec == GSS_C_INDEFINITE) time_rec = INDEF_EXPIRE;
 	if (time_rec > 10) time_rec -= 5;
