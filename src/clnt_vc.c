@@ -55,7 +55,6 @@
 #include <sys/socket.h>
 #include <misc/socket.h>
 #include <arpa/inet.h>
-#include <assert.h>
 #include <err.h>
 #include <errno.h>
 #include <netdb.h>

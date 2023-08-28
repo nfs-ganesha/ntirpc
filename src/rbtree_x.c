@@ -31,7 +31,6 @@
 #include <err.h>
 #endif
 #include <stdint.h>
-#include <assert.h>
 #include <errno.h>
 #include <rpc/types.h>
 #include <reentrant.h>

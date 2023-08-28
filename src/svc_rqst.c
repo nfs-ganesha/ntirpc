@@ -28,7 +28,6 @@
 #include <sys/types.h>
 #include <sys/poll.h>
 #include <stdint.h>
-#include <assert.h>
 #include <err.h>
 #include <errno.h>
 #include <unistd.h>

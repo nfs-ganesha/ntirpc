@@ -37,7 +37,6 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 
-#include <assert.h>
 #include <err.h>
 #include <errno.h>
 #include <fcntl.h>
