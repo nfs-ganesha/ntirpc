@@ -50,6 +50,7 @@
 #include <sys/types.h>
 #include <misc/abstract_atomic.h>
 #include <misc/portable.h>
+#include <assert.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>

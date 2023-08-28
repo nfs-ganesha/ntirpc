@@ -40,7 +40,6 @@
 #include "config.h"
 #include <pthread.h>
 #include <reentrant.h>
-#include <assert.h>
 #include <err.h>
 #include <stdio.h>
 #include <stdlib.h>
