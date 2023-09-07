@@ -72,8 +72,21 @@ typedef gss_union_ctx_id_desc *gss_union_ctx_id_t;
  * Due to the way we store the sequence window mask, this number MUST always
  * be a multiple of CHAR_BIT.
  */
+#define SVC_GSS_SEQ_WIN 256
+
+/* We additionally maintain an internal sequence window, that is double the
+ * size of the sequence window that is published to the client. This is done
+ * because, due to the asynchronous (= unordered) nature of request processing
+ * at the server, it is possible that in a window of N, assuming sequence
+ * numbers from 1 to N, the server processes and responds to the request with
+ * (N+1) sequence number before the request with sequence number `1` (that is,
+ * the server responds to `N`th request, then the client sends `N+1`th request,
+ * which also gets processed before the older request with sequence number `1`)
+ * In such a scenario, the request with sequence number `1` will fall outside
+ * the sequence window, and will be dropped. In order to reduce the chances of
+ * such a situation, we maintain a larger sequence window on the server
  */
-#define SVC_GSS_SEQ_WIN 512
+#define SVC_GSS_SEQ_WIN_INTERNAL (SVC_GSS_SEQ_WIN * 2)
 
 struct svc_rpc_gss_data {
 	struct opr_rbtree_node node_k;
@@ -90,7 +103,7 @@ struct svc_rpc_gss_data {
 	struct rpc_gss_sec sec;	/* security triple */
 	gss_buffer_desc cname;	/* GSS client name */
 	u_int seqlast;
-	uint8_t seqmask[SVC_GSS_SEQ_WIN / CHAR_BIT];
+	uint8_t seqmask[SVC_GSS_SEQ_WIN_INTERNAL / CHAR_BIT];
 	gss_name_t client_name;
 	gss_buffer_desc checksum;
 	struct {

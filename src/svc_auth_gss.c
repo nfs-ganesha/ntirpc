@@ -388,17 +388,17 @@ static bool
 svcauth_gss_is_seq_num_valid(struct svc_rpc_gss_data *gd, u_int32_t seq_num)
 {
 	int next_unseen_seq_num_bit;
-	int seq_num_bit_in_window = seq_num % SVC_GSS_SEQ_WIN;
+	int seq_num_bit_in_window = seq_num % SVC_GSS_SEQ_WIN_INTERNAL;
 
 	/* Handle sequence number lesser than the max seen sequence number */
 	if (seq_num < gd->seqlast) {
 
 		/* Return false if current sequence number is outside the window */
-		if ((gd->seqlast - seq_num) >= SVC_GSS_SEQ_WIN) {
+		if ((gd->seqlast - seq_num) >= SVC_GSS_SEQ_WIN_INTERNAL) {
 			__warnx(TIRPC_DEBUG_FLAG_AUTH,
 				"%s: sequence number: %u is outside the sequence window. Max seen "
 				"sequence number: %u Sequence window: %d", __func__, seq_num,
-				gd->seqlast, SVC_GSS_SEQ_WIN);
+				gd->seqlast, SVC_GSS_SEQ_WIN_INTERNAL);
 			return false;
 		}
 
@@ -419,7 +419,7 @@ svcauth_gss_is_seq_num_valid(struct svc_rpc_gss_data *gd, u_int32_t seq_num)
 	/* Unset the sequence mask if the current sequence number is greater than
 	 * the max seen sequence number by N (where N >= sequence-window)
 	 */
-	if ((seq_num - gd->seqlast) >= SVC_GSS_SEQ_WIN) {
+	if ((seq_num - gd->seqlast) >= SVC_GSS_SEQ_WIN_INTERNAL) {
 		memset(gd->seqmask, 0, sizeof(gd->seqmask));
 		gd->seqlast = seq_num;
 	} else {
@@ -428,7 +428,7 @@ svcauth_gss_is_seq_num_valid(struct svc_rpc_gss_data *gd, u_int32_t seq_num)
 		 */
 		while (gd->seqlast < seq_num) {
 			gd->seqlast++;
-			next_unseen_seq_num_bit = gd->seqlast % SVC_GSS_SEQ_WIN;
+			next_unseen_seq_num_bit = gd->seqlast % SVC_GSS_SEQ_WIN_INTERNAL;
 			clrbit(gd->seqmask, next_unseen_seq_num_bit);
 		}
 	}
