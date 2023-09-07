@@ -68,6 +68,13 @@ typedef gss_union_ctx_id_desc *gss_union_ctx_id_t;
 #define SVC_RPC_GSS_FLAG_NONE    0x0000
 #define SVC_RPC_GSS_FLAG_MSPAC   0x0001
 
+/* This defines the sequence window for SVC-GSS implementation.
+ * Due to the way we store the sequence window mask, this number MUST always
+ * be a multiple of CHAR_BIT.
+ */
+ */
+#define SVC_GSS_SEQ_WIN 512
+
 struct svc_rpc_gss_data {
 	struct opr_rbtree_node node_k;
 	TAILQ_ENTRY(svc_rpc_gss_data) lru_q;
@@ -82,10 +89,8 @@ struct svc_rpc_gss_data {
 	gss_ctx_id_t ctx;	/* context id */
 	struct rpc_gss_sec sec;	/* security triple */
 	gss_buffer_desc cname;	/* GSS client name */
-	u_int seq;
-	u_int win;
 	u_int seqlast;
-	uint32_t seqmask;
+	uint8_t seqmask[SVC_GSS_SEQ_WIN / CHAR_BIT];
 	gss_name_t client_name;
 	gss_buffer_desc checksum;
 	struct {

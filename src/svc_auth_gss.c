@@ -230,13 +230,12 @@ svcauth_gss_accept_sec_context(struct svc_req *req,
 	/* ANDROS: change for debugging linux kernel version...
 	   gr->gr_win = 0x00000005;
 	 */
-	gr->gr_win = sizeof(gd->seqmask) * 8;
+	gr->gr_win = SVC_GSS_SEQ_WIN;
 
 	/* Save client info. */
 	gd->sec.mech = mech;
 	gd->sec.qop = GSS_C_QOP_DEFAULT;
 	gd->sec.svc = gc->gc_svc;
-	gd->win = gr->gr_win;
 
 	if (time_rec == GSS_C_INDEFINITE) time_rec = INDEF_EXPIRE;
 	if (time_rec > 10) time_rec -= 5;
@@ -385,6 +384,61 @@ svcauth_gss_nextverf(struct svc_req *req, struct svc_rpc_gss_data *gd,
 	return (true);
 }
 
+static bool
+svcauth_gss_is_seq_num_valid(struct svc_rpc_gss_data *gd, u_int32_t seq_num)
+{
+	int next_unseen_seq_num_bit;
+	int seq_num_bit_in_window = seq_num % SVC_GSS_SEQ_WIN;
+
+	/* Handle sequence number lesser than the max seen sequence number */
+	if (seq_num < gd->seqlast) {
+
+		/* Return false if current sequence number is outside the window */
+		if ((gd->seqlast - seq_num) >= SVC_GSS_SEQ_WIN) {
+			__warnx(TIRPC_DEBUG_FLAG_AUTH,
+				"%s: sequence number: %u is outside the sequence window. Max seen "
+				"sequence number: %u Sequence window: %d", __func__, seq_num,
+				gd->seqlast, SVC_GSS_SEQ_WIN);
+			return false;
+		}
+
+		/* Return false if current sequence number is already seen */
+		if (isset(gd->seqmask, seq_num_bit_in_window)) {
+			__warnx(TIRPC_DEBUG_FLAG_AUTH,
+				"%s: sequence number: %u is already seen. ", __func__, seq_num);
+			return false;
+		}
+
+		/* Set the bit to mark the current sequence number as seen */
+		setbit(gd->seqmask, seq_num_bit_in_window);
+		return true;
+	}
+
+	/* Handle sequence number greater than the max seen sequence number */
+
+	/* Unset the sequence mask if the current sequence number is greater than
+	 * the max seen sequence number by N (where N >= sequence-window)
+	 */
+	if ((seq_num - gd->seqlast) >= SVC_GSS_SEQ_WIN) {
+		memset(gd->seqmask, 0, sizeof(gd->seqmask));
+		gd->seqlast = seq_num;
+	} else {
+		/* In this case, we clear the next unseen sequence number bits upto the
+		 * new max sequence number
+		 */
+		while (gd->seqlast < seq_num) {
+			gd->seqlast++;
+			next_unseen_seq_num_bit = gd->seqlast % SVC_GSS_SEQ_WIN;
+			clrbit(gd->seqmask, next_unseen_seq_num_bit);
+		}
+	}
+
+	/* Set the bit to mark the current sequence number as seen */
+	setbit(gd->seqmask, seq_num_bit_in_window);
+	return true;
+}
+
+
 enum auth_stat
 _svcauth_gss(struct svc_req *req, bool *no_dispatch)
 {
@@ -393,7 +447,7 @@ _svcauth_gss(struct svc_req *req, bool *no_dispatch)
 	struct svc_rpc_gss_data *gd = NULL;
 	struct rpc_gss_cred *gc = NULL;
 	struct rpc_gss_init_res gr;
-	int call_stat, offset;
+	int call_stat;
 	OM_uint32 min_stat;
 	enum auth_stat rc = AUTH_OK;
 
@@ -480,19 +534,10 @@ _svcauth_gss(struct svc_req *req, bool *no_dispatch)
 			 goto gd_free;
 		}
 
-		/* XXX implied serialization?  or just fudging?  advance if
-		 * greater? */
-		offset = gd->seqlast - gc->gc_seq;
-		if (offset < 0) {
-			gd->seqlast = gc->gc_seq;
-			offset = 0 - offset;
-			gd->seqmask <<= offset;
-			offset = 0;
-		} else if (offset >= gd->win || (gd->seqmask & (1 << offset))) {
-			*no_dispatch = true;
+		*no_dispatch = !svcauth_gss_is_seq_num_valid(gd, gc->gc_seq);
+		if (*no_dispatch) {
 			goto gd_free;
 		}
-		gd->seqmask |= (1 << offset);	/* XXX harmless */
 
 		req->rq_ap1 = (void *)(uintptr_t) gc->gc_seq; /* GCC casts */
 		req->rq_clntname = (char *) gd->client_name;
