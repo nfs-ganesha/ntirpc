@@ -130,7 +130,7 @@ struct work_pool svc_work_pool;
 bool
 svc_init(svc_init_params *params)
 {
-	struct work_pool_params work_pool_params;
+	struct work_pool_params work_pool_params = {0,};
 	uint32_t channels = params->channels ? params->channels : 8;
 
 	/* Initialize gtraces for libntirpc */
@@ -194,6 +194,7 @@ svc_init(svc_init_params *params)
 
 	work_pool_params.thrd_min = __svc_params->ioq.thrd_min;
 	work_pool_params.thrd_max = __svc_params->ioq.thrd_max;
+	work_pool_params.thr_stack_size = params->thr_stack_size;
 	/*
 	 * thrd_max should > channels.
 	 */
