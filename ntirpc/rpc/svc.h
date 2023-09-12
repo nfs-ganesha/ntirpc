@@ -139,11 +139,14 @@ typedef struct svc_init_params {
 	u_int gss_max_gc;
 	uint32_t channels;
 	int32_t idle_timeout;
+	uint32_t thr_stack_size;
 } svc_init_params;
 
 /* Svc param flags */
 #define SVC_FLAG_NONE             0x0000
 #define SVC_FLAG_NOREG_XPRTS      0x0001
+
+#define SVC_PARAM_HAS_THR_STACK_SIZE 1
 
 /*
  * SVCXPRT xp_flags

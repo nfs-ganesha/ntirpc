@@ -119,7 +119,10 @@ work_pool_init(struct work_pool *pool, const char *name,
 		return rc;
 	}
 
-	rc = pthread_attr_setstacksize(&pool->attr, WORK_POOL_STACK_SIZE);
+	rc = pthread_attr_setstacksize(&pool->attr,
+				       params->thr_stack_size > 0 ?
+				       params->thr_stack_size :
+				       WORK_POOL_STACK_SIZE);
 	if (rc) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s() can't set pthread's stack size: %s (%d)",

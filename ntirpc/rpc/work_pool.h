@@ -45,6 +45,7 @@
 struct work_pool_params {
 	int32_t thrd_max;
 	int32_t thrd_min;
+	uint32_t thr_stack_size;
 };
 
 struct work_pool_thread;
