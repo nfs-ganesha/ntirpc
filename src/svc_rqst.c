@@ -647,6 +647,11 @@ svc_rqst_rearm_events_locked(SVCXPRT *xprt, uint16_t ev_flags)
 	tracepoint(xprt, rearm, __func__, __LINE__, xprt, ev_flags);
 #endif /* USE_LTTNG_NTIRPC */
 
+	const bool is_xprt_destroyed = xprt->xp_flags & (ev_flags | SVC_XPRT_FLAG_DESTROYED);
+	/* MUST follow the destroyed check above */
+	const bool is_rec_shutdown = !is_xprt_destroyed && (
+		sr_rec->ev_flags & SVC_RQST_FLAG_SHUTDOWN);
+
 	__warnx(TIRPC_DEBUG_FLAG_SVC_RQST,
 		"%s: xprt %p fd %d ev_flags%s%s%s%s%s%s%s%s%s",
 		__func__, xprt, xprt->xp_fd,
@@ -658,14 +663,9 @@ svc_rqst_rearm_events_locked(SVCXPRT *xprt, uint16_t ev_flags)
 		ev_flags & SVC_XPRT_FLAG_DESTROYING  ? " DESTROYING" : "",
 		ev_flags & SVC_XPRT_FLAG_RELEASING   ? " RELEASING" : "",
 		ev_flags & SVC_XPRT_FLAG_UREG        ? " UREG" : "",
-		sr_rec->ev_flags & SVC_RQST_FLAG_SHUTDOWN
-					? "sr_rec->ev_flags SHUTDOWN" : "");
+		is_rec_shutdown                      ? "sr_rec->ev_flags SHUTDOWN" : "");
 
-	if (xprt->xp_flags & (ev_flags | SVC_XPRT_FLAG_DESTROYED))
-		return (0);
-
-	/* MUST follow the destroyed check above */
-	if (sr_rec->ev_flags & SVC_RQST_FLAG_SHUTDOWN)
+	if (is_xprt_destroyed || is_rec_shutdown)
 		return (0);
 
 	/* Don't take a ref on the xprt.  We take a ref in hook, and release it
