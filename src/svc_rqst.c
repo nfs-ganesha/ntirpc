@@ -646,7 +646,8 @@ svc_rqst_rearm_events_locked(SVCXPRT *xprt, uint16_t ev_flags)
 
 	const bool is_xprt_destroyed = xprt->xp_flags & (ev_flags | SVC_XPRT_FLAG_DESTROYED);
 	/* MUST follow the destroyed check above */
-	const bool is_rec_shutdown = !is_xprt_destroyed && (sr_rec->ev_flags & SVC_RQST_FLAG_SHUTDOWN);
+	const bool is_rec_shutdown = !is_xprt_destroyed && (
+		sr_rec->ev_flags & SVC_RQST_FLAG_SHUTDOWN);
 
 	__warnx(TIRPC_DEBUG_FLAG_SVC_RQST,
 		"%s: xprt %p fd %d ev_flags%s%s%s%s%s%s%s%s%s",
