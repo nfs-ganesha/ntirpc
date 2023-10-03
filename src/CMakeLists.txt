@@ -101,7 +101,12 @@ add_library(ntirpc SHARED
 
 # add required libraries--for Ganesha build, it's ok for them to
 # propagate (i.e., omit PRIVATE)
-target_link_libraries(ntirpc ${SYSTEM_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT})
+target_link_libraries(ntirpc
+  ${SYSTEM_LIBRARIES}
+  ${CMAKE_THREAD_LIBS_INIT}
+  elfstraces
+  generate_trace_info
+)
 
 # set library version and symbol namespace(s) from gen'd map file
 set_target_properties(ntirpc PROPERTIES LINK_FLAGS
@@ -113,5 +118,13 @@ set_target_properties(ntirpc PROPERTIES LINK_FLAGS
 install(TARGETS ntirpc DESTINATION ${LIB_INSTALL_DIR})
 
 ########### install files ###############
+
+install(
+  FILES
+    ${PROJECT_SOURCE_DIR}/../elfs/bazel-bin/infra/traces/libelfstraces.so
+    ${PROJECT_SOURCE_DIR}/../elfs/bazel-bin/infra/traces/libgenerate_trace_info.so
+  DESTINATION ${LIB_INSTALL_DIR}
+  PERMISSIONS OWNER_WRITE OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+)
 
 # We are still missing the install of docs and stuff
