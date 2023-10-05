@@ -254,6 +254,21 @@ clnt_vc_ncreatef(const int fd,	/* open file descriptor */
 }
 
 /*
+ * Get the transport handle for a given rpc_client.
+ */
+SVCXPRT *
+clnt_vc_get_client_xprt(const CLIENT *clnt)
+{
+	if (clnt == NULL)
+		return NULL;
+
+	struct cx_data *cx = CX_DATA(clnt);
+	if (cx->cx_rec)
+		return &(cx->cx_rec->xprt);
+	return NULL;
+}
+
+/*
  * Create an RPC client handle from an active service transport
  * handle, i.e., to issue calls on the channel.
  */
