@@ -24,6 +24,7 @@ SET(ntirpc_common_SRCS
   clnt_raw.c
   clnt_simple.c
   clnt_vc.c
+  gtraces_libntirpc.c
   getnetconfig.c
   getnetpath.c
   getpeereid.c
