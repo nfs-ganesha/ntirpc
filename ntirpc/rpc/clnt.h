@@ -544,6 +544,14 @@ clnt_dg_ncreate(const int fd, const struct netbuf *raddr,
 extern CLIENT *clnt_raw_ncreate(rpcprog_t, rpcvers_t);
 
 /*
+ * Get the transport handle for a given rpc_client.
+ */
+extern SVCXPRT *clnt_vc_get_client_xprt(const CLIENT *clnt);
+/*
+ *      const struct rpc_client *clnt;         -- rpc client
+ */
+
+/*
  * Client request processing
  */
 static inline void clnt_req_fill(struct clnt_req *cc, struct rpc_client *clnt,

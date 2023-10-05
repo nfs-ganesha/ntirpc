@@ -67,6 +67,7 @@ NTIRPC_${NTIRPC_VERSION_BASE} {
     clnt_sperrno;
     clnt_tli_create;
     clnt_tp_ncreate_timed;
+    clnt_vc_get_client_xprt;
     clnt_vc_ncreatef;
     clnt_vc_ncreate_svc;
 
