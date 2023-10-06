@@ -53,6 +53,13 @@ include(GetGitRevisionDescription)
 get_git_head_revision(GIT_REFSPEC _GIT_HEAD_COMMIT)
 git_describe(_GIT_DESCRIBE)
 
+# setup paths of gmonitoring dependency of libntirpc
+LIST(APPEND CMAKE_LIBRARY_PATH "${PROJECT_SOURCE_DIR}/../infra/gmonitoring/")
+LINK_DIRECTORIES("${PROJECT_SOURCE_DIR}/../infra/gmonitoring/")
+include_directories(
+  ${PROJECT_SOURCE_DIR}/../infra/gmonitoring/include/
+)
+
 # setup paths of elfs dependencies (traces) of libntirpc
 LIST(APPEND CMAKE_LIBRARY_PATH "${PROJECT_SOURCE_DIR}/../elfs/bazel-bin/infra/traces")
 LINK_DIRECTORIES("${PROJECT_SOURCE_DIR}/../elfs/bazel-bin/infra/traces")

@@ -105,6 +105,7 @@ add_library(ntirpc SHARED
 target_link_libraries(ntirpc
   ${SYSTEM_LIBRARIES}
   ${CMAKE_THREAD_LIBS_INIT}
+  gmonitoring
   elfstraces
   generate_trace_info
 )
