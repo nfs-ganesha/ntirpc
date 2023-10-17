@@ -107,6 +107,8 @@ enum xprt_stat {
 #define SVCSET_XP_FLAGS         8
 #define SVCGET_XP_FREE_USER_DATA        15
 #define SVCSET_XP_FREE_USER_DATA        16
+#define SVCGET_XP_UNREF_USER_DATA        17
+#define SVCSET_XP_UNREF_USER_DATA        18
 
 /*
  * Operations for rpc_control().
@@ -119,6 +121,7 @@ enum xprt_stat {
 #define RPC_SVC_FDSET_SET       5
 
 typedef enum xprt_stat (*svc_xprt_fun_t) (SVCXPRT *);
+typedef void (*svc_xprt_void_fun_t) (SVCXPRT *);
 typedef struct svc_req *(*svc_xprt_alloc_fun_t) (SVCXPRT *, XDR *);
 typedef void (*svc_xprt_free_fun_t) (struct svc_req *, enum xprt_stat);
 
@@ -230,11 +233,17 @@ struct svc_xprt {
 
 		/** Unlink xprt from it's lookup table. */
 		void (*xp_unlink) (SVCXPRT *, u_int, const char *, const int);
+
 		/** actually destroy after xp_destroy_it and xp_release_it */
 		void (*xp_destroy) (SVCXPRT *, u_int, const char *, const int);
 
 		/** catch-all function */
 		bool (*xp_control) (SVCXPRT *, const u_int, void *);
+
+		/** Remove references: of xprt from user-data, and of user-data
+		 * from xprt.
+		 */
+		svc_xprt_void_fun_t xp_unref_user_data;
 
 		/** free client user data */
 		svc_xprt_fun_t xp_free_user_data;
@@ -485,6 +494,11 @@ static inline void svc_destroy_it(SVCXPRT *xprt,
 
 	/* unlink before dropping last ref */
 	(*(xprt)->xp_ops->xp_unlink)(xprt, flags, tag, line);
+
+	/* Remove references: of xprt from user-data; of user-data from xprt */
+	if ((xprt)->xp_ops->xp_unref_user_data) {
+		(*(xprt)->xp_ops->xp_unref_user_data)(xprt);
+	}
 
 	svc_release_it(xprt, SVC_RELEASE_FLAG_NONE, tag, line);
 }
