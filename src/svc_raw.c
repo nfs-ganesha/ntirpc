@@ -218,6 +218,7 @@ svc_raw_ops(SVCXPRT *xprt)
 		ops.xp_reply = svc_raw_reply;
 		ops.xp_checksum = NULL;		/* optional */
 		ops.xp_unlink = svc_raw_unlink;
+		ops.xp_unref_user_data = NULL;	/* no default */
 		ops.xp_destroy = svc_raw_destroy;
 		ops.xp_control = svc_raw_control;
 		ops.xp_free_user_data = NULL;	/* no default */

@@ -254,6 +254,16 @@ svc_rdma_control(SVCXPRT *xprt, const u_int rq, void *in)
 	case SVCSET_XP_FLAGS:
 	    xprt->xp_flags = *(u_int *)in;
 	    break;
+	case SVCGET_XP_UNREF_USER_DATA:
+	    mutex_lock(&ops_lock);
+	    *(svc_xprt_void_fun_t *) in = xprt->xp_ops->xp_unref_user_data;
+	    mutex_unlock(&ops_lock);
+	    break;
+	case SVCSET_XP_UNREF_USER_DATA:
+	    mutex_lock(&ops_lock);
+	    xprt->xp_ops->xp_unref_user_data = *(svc_xprt_void_fun_t) in;
+	    mutex_unlock(&ops_lock);
+	    break;
 	case SVCGET_XP_FREE_USER_DATA:
 	    mutex_lock(&ops_lock);
 	    *(svc_xprt_fun_t *)in = xprt->xp_ops->xp_free_user_data;
@@ -288,6 +298,7 @@ svc_rdma_ops(SVCXPRT *xprt)
 		ops.xp_decode = svc_rdma_decode;
 		ops.xp_reply = svc_rdma_reply;
 		ops.xp_checksum = NULL;		/* not used */
+		ops.xp_unref_user_data = NULL;	/* no default */
 		ops.xp_destroy = svc_rdma_destroy,
 		ops.xp_control = svc_rdma_control;
 		ops.xp_free_user_data = NULL;	/* no default */

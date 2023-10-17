@@ -2229,6 +2229,16 @@ static bool
 rpc_rdma_control(SVCXPRT *xprt, const u_int rq, void *in)
 {
 	switch (rq) {
+	case SVCGET_XP_UNREF_USER_DATA:
+	    mutex_lock(&ops_lock);
+	    *(svc_xprt_void_fun_t *) in = xprt->xp_ops->xp_unref_user_data;
+	    mutex_unlock(&ops_lock);
+	    break;
+	case SVCSET_XP_UNREF_USER_DATA:
+	    mutex_lock(&ops_lock);
+	    xprt->xp_ops->xp_unref_user_data = *(svc_xprt_void_fun_t) in;
+	    mutex_unlock(&ops_lock);
+	    break;
 	case SVCGET_XP_FREE_USER_DATA:
 	    mutex_lock(&ops_lock);
 	    *(svc_xprt_fun_t *)in = xprt->xp_ops->xp_free_user_data;
@@ -2252,6 +2262,7 @@ static struct xp_ops rpc_rdma_ops = {
 	.xp_reply = (svc_req_fun_t)abort,
 	.xp_checksum = NULL,		/* not used */
 	.xp_unlink = rpc_rdma_unlink_it,
+	.xp_unref_user_data = NULL,	/* no default */
 	.xp_destroy = rpc_rdma_destroy_it,
 	.xp_control = rpc_rdma_control,
 	.xp_free_user_data = NULL,	/* no default */

@@ -153,6 +153,9 @@ static inline void
 svc_override_ops(struct xp_ops *ops, SVCXPRT *rendezvous)
 {
 	if (rendezvous) {
+		if (!ops->xp_unref_user_data)
+			ops->xp_unref_user_data = rendezvous->xp_ops->xp_unref_user_data;
+
 		if (!ops->xp_free_user_data)
 			ops->xp_free_user_data =
 				rendezvous->xp_ops->xp_free_user_data;
