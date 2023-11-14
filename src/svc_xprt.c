@@ -40,6 +40,8 @@
 #include "rpc_com.h"
 #include "svc_internal.h"
 #include "svc_xprt.h"
+#include "gmonitoring.h"
+#include "metrics_libntirpc.h"
 
 /**
  * @file svc_xprt.c
@@ -190,6 +192,7 @@ svc_xprt_lookup(int fd, svc_xprt_setup_t setup)
 				atomic_dec_uint32_t(&svc_xprt_fd.connections);
 			}
 			rwlock_unlock(&t->lock);
+			metrics_libntirpc_update_tcp_connection_count(atomic_fetch_uint32_t(&svc_xprt_fd.connections));
 			return (xprt);
 		}
 		/* raced, fallthru */
@@ -247,6 +250,7 @@ svc_xprt_clear(SVCXPRT *xprt)
 		rwlock_wrlock(&t->lock);
 		opr_rbtree_remove(&t->t, &REC_XPRT(xprt)->fd_node);
 		rwlock_unlock(&t->lock);
+		metrics_libntirpc_update_tcp_connection_count(atomic_fetch_uint32_t(&svc_xprt_fd.connections));
 	}
 }
 

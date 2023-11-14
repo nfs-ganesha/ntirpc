@@ -30,6 +30,7 @@ SET(ntirpc_common_SRCS
   getpeereid.c
   getrpcent.c
   mt_misc.c
+  metrics_libntirpc.c
   pmap_prot.c
   pmap_prot2.c
   pmap_rmt.c
