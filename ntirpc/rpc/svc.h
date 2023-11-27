@@ -175,6 +175,11 @@ typedef struct svc_init_params {
 #define SVC_XPRT_FLAG_LOCKED		0x00010000
 #define SVC_XPRT_FLAG_UNLOCK		0x00020000
 
+/* This flag serves as an instruction during svcxprt lookup, to not
+ * implicitly create a new svcxprt, if the lookup does not find one.
+ */
+#define SVC_XPRT_FLAG_LOOKUP_ONLY	0x00040000
+
 /*
  * SVC_REF flags
  */

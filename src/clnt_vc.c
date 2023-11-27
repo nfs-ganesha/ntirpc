@@ -198,8 +198,13 @@ clnt_vc_ncreatef(const int fd,	/* open file descriptor */
 		}
 	}
 
+	uint32_t updated_flags = flags;
+	if (flags & CLNT_CREATE_FLAG_SVCXPRT)
+		/* Set flag to not create new svcxprt */
+		updated_flags |= SVC_XPRT_FLAG_LOOKUP_ONLY;
+
 	/* find or create shared fd state; ref+1 */
-	xprt = svc_fd_ncreatef(fd, sendsz, recvsz, flags);
+	xprt = svc_fd_ncreatef(fd, sendsz, recvsz, updated_flags);
 	if (!xprt) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s: fd %d svc_fd_ncreatef failed",

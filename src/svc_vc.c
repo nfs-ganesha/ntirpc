@@ -278,13 +278,24 @@ makefd_xprt(const int fd, const u_int sendsz, const u_int recvsz,
 	assert(fd != -1);
 
 	/* atomically find or create shared fd state; ref+1; locked */
-	xprt = svc_xprt_lookup(fd, svc_vc_xprt_setup);
+	if (flags & SVC_XPRT_FLAG_LOOKUP_ONLY) {
+		xprt = svc_xprt_lookup(fd, NULL);
+		/* Do not associate SVC_XPRT_FLAG_LOOKUP_ONLY with xprt, as
+		 * this flag does not represent the xprt state. It is only a
+		 * flag required for the xprt creation.
+		 */
+		flags = flags & (~SVC_XPRT_FLAG_LOOKUP_ONLY);
+	} else {
+		xprt = svc_xprt_lookup(fd, svc_vc_xprt_setup);
+	}
+
 	if (!xprt) {
 		__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
 			"%s: fd %d svc_xprt_lookup failed",
 			__func__, fd);
 		return (NULL);
 	}
+
 	rec = REC_XPRT(xprt);
 
 	xp_flags = atomic_postset_uint16_t_bits(&xprt->xp_flags, flags
@@ -357,7 +368,9 @@ svc_fd_ncreatef(const int fd, const u_int sendsize, const u_int recvsize,
 	assert(fd != -1);
 
 	xprt = makefd_xprt(fd, sendsize, recvsize, &si,
-			   flags & SVC_XPRT_FLAG_CLOSE);
+			   (flags & SVC_XPRT_FLAG_CLOSE) |
+			   (flags & SVC_XPRT_FLAG_LOOKUP_ONLY));
+
 	if ((!xprt) || (!(xprt->xp_flags & SVC_XPRT_FLAG_INITIAL)))
 		return (xprt);
 
