@@ -28,10 +28,16 @@ void gtraces_print_trace_info(void) {
 	generate_trace_info__generate_py_range(__start_trace_info, __stop_trace_info);
 }
 
-gtraces_libntirpc_line_header gtraces_libntirpc_get_trace_line_header(void) {
-    return (gtraces_libntirpc_line_header){
-		.t = pthread_self()
-	};
+CurrentThread__ID_T_Expanded gtraces_libntirpc_get_trace_line_header(void) {
+	return current_thread__id_expanded_init(
+		0 /* node_id unavailable */,
+		TID__GANESHA_CORE,
+		0 /* is_verbose unavailable */,
+		0 /* op_id unavailable */,
+		pthread_self(),
+		TID__GANESHA_CORE,
+		QOS_WORKLOAD_TYPE__USER_IO
+	);
 }
 
 void gtraces_libntirpc_set_dir(const char* dir_path) {
