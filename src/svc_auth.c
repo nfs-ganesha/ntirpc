@@ -41,6 +41,7 @@
 #include <rpc/rpc.h>
 #include <rpc/svc_auth.h>
 #include <stdlib.h>
+#include "metrics_libntirpc.h"
 
 /*
  * svcauthsw is the bdevsw of server side authentication.
@@ -88,6 +89,9 @@ svc_auth_authenticate(struct svc_req *req, bool *no_dispatch)
 	enum auth_stat rslt;
 	int cred_flavor;
 	extern mutex_t authsvc_lock;
+	struct timespec start, end, latency;
+
+	clock_gettime(CLOCK_MONOTONIC, &start);
 
 	/* VARIABLES PROTECTED BY authsvc_lock: asp, Auths */
 	req->rq_msg.RPCM_ack.ar_verf = _null_auth;
@@ -97,15 +101,14 @@ svc_auth_authenticate(struct svc_req *req, bool *no_dispatch)
 #ifdef _HAVE_GSSAPI
 	case RPCSEC_GSS:
 		rslt = _svcauth_gss(req, no_dispatch);
-		return (rslt);
+		goto out;
 #endif /* _HAVE_GSSAPI */
 	case AUTH_NONE:
 		rslt = _svcauth_none(req);
-		return (rslt);
-		break;
+		goto out;
 	case AUTH_SYS:
 		rslt = _svcauth_unix(req);
-		return (rslt);
+		goto out;
 	case AUTH_SHORT:
 		rslt = _svcauth_short(req);
 		return (rslt);
@@ -131,6 +134,14 @@ svc_auth_authenticate(struct svc_req *req, bool *no_dispatch)
 	mutex_unlock(&authsvc_lock);
 
 	return (AUTH_REJECTEDCRED);
+
+out:
+	clock_gettime(CLOCK_MONOTONIC, &end);
+	timespecsub(&end, &start, &latency);
+	metrics_libntirpc_observe_svc_auth_request_latency(cred_flavor,
+		rslt, &latency);
+
+	return (rslt);
 }
 
 /*
