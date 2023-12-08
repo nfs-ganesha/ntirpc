@@ -52,6 +52,10 @@ static const uint8_t gss_svcs_idx[] = {
 static histogram_metric_handle_t
 	gss_svc_auth_steps_latency[ARRAY_SIZE(gss_svcs_idx)][GSS_SVC_AUTH_STEPS_COUNT][GENERIC_OP_STATUS_COUNT];
 
+/* Latency of gss svc-auth ops */
+static histogram_metric_handle_t
+	gss_svc_auth_ops_latency[ARRAY_SIZE(gss_svcs_idx)][SVC_AUTH_OPS_COUNT];
+
 
 static int get_sec_flavor_idx_in_metrics_array(int sec_flavor)
 {
@@ -165,6 +169,26 @@ static const char *get_gss_svc_string(rpc_gss_svc_t svc)
 	}
 }
 
+/* Get string corresponding to svc-auth op */
+static const char *get_svc_auth_op_string(svc_auth_op_t op)
+{
+	switch (op) {
+	case SVC_AUTH_OP_WRAP:
+		return "WRAP";
+	case SVC_AUTH_OP_UNWRAP:
+		return "UNWRAP";
+	case SVC_AUTH_OP_CHECKSUM:
+		return "CHECKSUM";
+	case SVC_AUTH_OP_DESTROY:
+		return "DESTROY";
+	default:
+		__warnx(TIRPC_DEBUG_FLAG_ERROR,
+			"%s: Unsupported svc-auth op value: %d",
+			__func__, op);
+		abort();
+	}
+}
+
 static void register_svc_auth_request_latency_metric(void) {
 	int sf, as;
 
@@ -237,6 +261,35 @@ static void register_gss_svc_auth_steps_latency_metric(void) {
 	}
 }
 
+static void register_gss_svc_auth_ops_latency_metric(void) {
+	int svc, i;
+
+	for (svc = 0; svc < ARRAY_SIZE(gss_svcs_idx); svc++) {
+		const int svc_idx = get_gss_svc_idx_in_metrics_array(svc);
+
+		/* Do not register un-mentioned values in gss-svcs array */
+		if (svc_idx < 0)
+			continue;
+		const char *const svc_str = get_gss_svc_string(svc);
+
+		for (i = 0; i < SVC_AUTH_OPS_COUNT; i++) {
+			const metric_label_t labels[] = {
+				GMONITORING_INIT_LABEL("svc", svc_str),
+				GMONITORING_INIT_LABEL("op", get_svc_auth_op_string(i))
+			};
+			gss_svc_auth_ops_latency[svc_idx][i] =
+				gmonitoring_register_histogram_metric(
+					"libntirpc__gss_svc_auth_ops_latency",
+					GMONITORING_INIT_METADATA(
+						"Distribution of time taken by gss service-auth ops to complete",
+						GMONITORING_UNIT_MICROSECOND),
+					labels,
+					ARRAY_SIZE(labels),
+					gmonitoring_get_exp2_histogram_buckets_compact());
+		}
+	}
+}
+
 void metrics_libntirpc_observe_svc_auth_request_latency(int sec_flavor,
 	enum auth_stat auth_status, const struct timespec *latency)
 {
@@ -261,6 +314,15 @@ void metrics_libntirpc_observe_gss_svc_auth_step_latency(
 		timespec_us(latency));
 }
 
+void metrics_libntirpc_observe_gss_svc_auth_op_latency(svc_auth_op_t op,
+	rpc_gss_svc_t svc, const struct timespec *latency)
+{
+	const int svc_idx = get_gss_svc_idx_in_metrics_array(svc);
+	assert(svc_idx >= 0);
+	gmonitoring_observe_histogram_metric_value(
+		gss_svc_auth_ops_latency[svc_idx][op], timespec_us(latency));
+}
+
 void metrics_libntirpc_update_tcp_connection_count(int connection_count)
 {
 	gmonitoring_set_gauge_metric_value(concurrent_tcp_metric, connection_count);
@@ -276,6 +338,7 @@ void metrics_libntirpc_init(void){
 
 	register_svc_auth_request_latency_metric();
 	register_gss_svc_auth_steps_latency_metric();
+	register_gss_svc_auth_ops_latency_metric();
 
 	initialized = true;
 }

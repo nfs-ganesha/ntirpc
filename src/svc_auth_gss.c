@@ -331,6 +331,18 @@ svcauth_gss_release_cred(void)
 }
 
 static void
+observe_gss_auth_op_latency(svc_auth_op_t op, rpc_gss_svc_t gss_svc,
+	const struct timespec *op_start)
+{
+	struct timespec op_end, latency;
+
+	clock_gettime(CLOCK_MONOTONIC, &op_end);
+	timespecsub(&op_end, op_start, &latency);
+	metrics_libntirpc_observe_gss_svc_auth_op_latency(op, gss_svc,
+		&latency);
+}
+
+static void
 observe_gss_auth_step_latency(gss_svc_auth_step_t step, rpc_gss_svc_t gss_svc,
 	bool step_succeeded, const struct timespec *step_start)
 {
@@ -950,8 +962,12 @@ svcauth_gss_destroy(SVCAUTH *auth)
 {
 	struct svc_rpc_gss_data *gd;
 	OM_uint32 min_stat;
+	struct timespec start_time;
+	rpc_gss_svc_t gss_svc;
 
+	clock_gettime(CLOCK_MONOTONIC, &start_time);
 	gd = SVCAUTH_PRIVATE(auth);
+	gss_svc = gd->sec.svc;
 
 	gss_delete_sec_context(&min_stat, &gd->ctx, GSS_C_NO_BUFFER);
 	gss_release_buffer(&min_stat, &gd->cname);
@@ -970,6 +986,7 @@ svcauth_gss_destroy(SVCAUTH *auth)
 	mem_free(gd, sizeof(*gd));
 	mem_free(auth, sizeof(*auth));
 
+	observe_gss_auth_op_latency(SVC_AUTH_OP_DESTROY, gss_svc, &start_time);
 	return (true);
 }
 
@@ -981,7 +998,9 @@ svcauth_gss_wrap(struct svc_req *req, XDR *xdrs)
 	struct rpc_gss_cred *gc = (struct rpc_gss_cred *)
 					req->rq_msg.rq_cred_body;
 	bool result;
+	struct timespec start_time;
 
+	clock_gettime(CLOCK_MONOTONIC, &start_time);
 
 	__warnx(TIRPC_DEBUG_FLAG_RPCSEC_GSS, "%s() %d %s", __func__,
 		!gd->established ? 0 : gc->gc_svc,
@@ -991,14 +1010,18 @@ svcauth_gss_wrap(struct svc_req *req, XDR *xdrs)
 		: gc->gc_svc == RPCSEC_GSS_SVC_PRIVACY ? "krb5p"
 		: "unknown");
 
-	if (!gd->established || gc->gc_svc == RPCSEC_GSS_SVC_NONE)
-		return (svc_auth_none.svc_ah_ops->svc_ah_wrap(req, xdrs));
-
+	if (!gd->established || gc->gc_svc == RPCSEC_GSS_SVC_NONE) {
+		result = (svc_auth_none.svc_ah_ops->svc_ah_wrap(req, xdrs));
+		goto out;
+	}
 	mutex_lock(&gd->lock);
 	result = xdr_rpc_gss_wrap(xdrs, req->rq_msg.RPCM_ack.ar_results.proc,
 				  req->rq_msg.RPCM_ack.ar_results.where,
 				  gd->ctx, gd->sec.qop, gc->gc_svc, gc_seq);
 	mutex_unlock(&gd->lock);
+
+out:
+	observe_gss_auth_op_latency(SVC_AUTH_OP_WRAP, gc->gc_svc, &start_time);
 	return (result);
 }
 
@@ -1007,23 +1030,32 @@ svcauth_gss_unwrap(struct svc_req *req)
 {
 	struct svc_rpc_gss_data *gd = SVCAUTH_PRIVATE(req->rq_auth);
 	u_int gc_seq = (u_int) (uintptr_t) req->rq_ap1;
+	const struct rpc_gss_cred *const gc = (struct rpc_gss_cred *)
+		req->rq_msg.rq_cred_body;
 	bool result;
+	struct timespec start_time;
 
-	if (!gd->established || gd->sec.svc == RPCSEC_GSS_SVC_NONE)
-		return (svc_auth_none.svc_ah_ops->svc_ah_unwrap(req));
+	clock_gettime(CLOCK_MONOTONIC, &start_time);
 
+	if (!gd->established || gd->sec.svc == RPCSEC_GSS_SVC_NONE) {
+		result = (svc_auth_none.svc_ah_ops->svc_ah_unwrap(req));
+		goto out;
+	}
 	mutex_lock(&gd->lock);
 	result = xdr_rpc_gss_unwrap(req->rq_xdrs, req->rq_msg.rm_xdr.proc,
 				    req->rq_msg.rm_xdr.where, gd->ctx,
 				    gd->sec.qop, gd->sec.svc, gc_seq,
 				    NULL, NULL);
 	mutex_unlock(&gd->lock);
+
+out:
+	observe_gss_auth_op_latency(SVC_AUTH_OP_UNWRAP, gc->gc_svc, &start_time);
 	return (result);
 }
 
 void svcauth_gss_svc_checksum(void *priv, void *databuf, size_t length)
 {
-	struct svc_req *req = priv;	
+	struct svc_req *req = priv;
 
 	SVC_CHECKSUM(req, databuf, length);
 }
@@ -1033,18 +1065,26 @@ svcauth_gss_checksum(struct svc_req *req)
 {
 	struct svc_rpc_gss_data *gd = SVCAUTH_PRIVATE(req->rq_auth);
 	u_int gc_seq = (u_int) (uintptr_t) req->rq_ap1;
+	const struct rpc_gss_cred *const gc = (struct rpc_gss_cred *)
+		req->rq_msg.rq_cred_body;
 	bool result;
+	struct timespec start_time;
+
+	clock_gettime(CLOCK_MONOTONIC, &start_time);
 
 	if (!gd->established || gd->sec.svc == RPCSEC_GSS_SVC_NONE) {
-		return (svc_auth_none.svc_ah_ops->svc_ah_checksum(req));
+		result = (svc_auth_none.svc_ah_ops->svc_ah_checksum(req));
+		goto out;
 	}
-
 	mutex_lock(&gd->lock);
 	result = xdr_rpc_gss_unwrap(req->rq_xdrs, req->rq_msg.rm_xdr.proc,
 				    req->rq_msg.rm_xdr.where, gd->ctx,
 				    gd->sec.qop, gd->sec.svc, gc_seq,
 				    svcauth_gss_svc_checksum, req);
 	mutex_unlock(&gd->lock);
+
+out:
+	observe_gss_auth_op_latency(SVC_AUTH_OP_CHECKSUM, gc->gc_svc, &start_time);
 	return (result);
 }
 
