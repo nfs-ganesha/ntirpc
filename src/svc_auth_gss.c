@@ -42,6 +42,7 @@
 #include <rpc/svc_auth.h>
 #include <rpc/gss_internal.h>
 #include <misc/portable.h>
+#include "metrics_libntirpc.h"
 
 static struct svc_auth_ops svc_auth_gss_ops;
 
@@ -329,6 +330,30 @@ svcauth_gss_release_cred(void)
 	return (true);
 }
 
+static void
+observe_gss_auth_op_latency(svc_auth_op_t op, rpc_gss_svc_t gss_svc,
+	const struct timespec *op_start)
+{
+	struct timespec op_end, latency;
+
+	clock_gettime(CLOCK_MONOTONIC, &op_end);
+	timespecsub(&op_end, op_start, &latency);
+	metrics_libntirpc_observe_gss_svc_auth_op_latency(op, gss_svc,
+		&latency);
+}
+
+static void
+observe_gss_auth_step_latency(gss_svc_auth_step_t step, rpc_gss_svc_t gss_svc,
+	bool step_succeeded, const struct timespec *step_start)
+{
+	struct timespec step_end, latency;
+
+	clock_gettime(CLOCK_MONOTONIC, &step_end);
+	timespecsub(&step_end, step_start, &latency);
+	metrics_libntirpc_observe_gss_svc_auth_step_latency(step, gss_svc,
+		step_succeeded, &latency);
+}
+
 static bool
 svcauth_gss_accept_sec_context(struct svc_req *req,
 			       struct svc_rpc_gss_data *gd,
@@ -473,13 +498,17 @@ svcauth_gss_validate(struct svc_req *req,
 	gss_buffer_desc rpcbuf, checksum;
 	OM_uint32 maj_stat, min_stat, qop_state;
 	u_char rpchdr[RPCHDR_LEN];
+	struct timespec start_time;
 
+	clock_gettime(CLOCK_MONOTONIC, &start_time);
 	memset(rpchdr, 0, RPCHDR_LEN);
 
 	/* XXX - Reconstruct RPC header for signing (from xdr_callmsg). */
 	oa = &req->rq_msg.cb_cred;
-	if (oa->oa_length > MAX_AUTH_BYTES)
-		return GSS_S_CALL_BAD_STRUCTURE;
+	if (oa->oa_length > MAX_AUTH_BYTES) {
+		maj_stat = GSS_S_CALL_BAD_STRUCTURE;
+		goto out;
+	}
 	/* XXX since MAX_AUTH_BYTES is 400, the following code trivially
 	 * overruns (up to 431 per Coverity, but compare RPCHDR_LEN with
 	 * what is marshalled below). */
@@ -510,6 +539,10 @@ svcauth_gss_validate(struct svc_req *req,
 		__warnx(TIRPC_DEBUG_FLAG_AUTH, "%s: %d %d", __func__, maj_stat,
 			min_stat);
 	}
+
+out:
+	observe_gss_auth_step_latency(VALIDATE_AUTH_DATA, gd->sec.svc,
+		(maj_stat == GSS_S_COMPLETE), &start_time);
 	return (maj_stat);
 }
 
@@ -519,21 +552,26 @@ svcauth_gss_nextverf(struct svc_req *req, struct svc_rpc_gss_data *gd,
 {
 	gss_buffer_desc signbuf, checksum;
 	OM_uint32 maj_stat, min_stat;
+	struct timespec start_time;
+	bool ret = true;
 
 	signbuf.value = &num;
 	signbuf.length = sizeof(num);
 
+	clock_gettime(CLOCK_MONOTONIC, &start_time);
 	maj_stat =
 	    gss_get_mic(&min_stat, gd->ctx, gd->sec.qop, &signbuf, &checksum);
 
 	if (maj_stat != GSS_S_COMPLETE) {
 		gss_log_status("gss_get_mic", maj_stat, min_stat);
-		return (false);
+		ret = false;
+		goto out;
 	}
 	if (checksum.length > MAX_AUTH_BYTES) {
 		gss_log_status("checksum.length", maj_stat, min_stat);
 		gss_release_buffer(&min_stat, &checksum);
-		return (false);
+		ret = false;
+		goto out;
 	}
 	req->rq_msg.RPCM_ack.ar_verf.oa_flavor = RPCSEC_GSS;
 	req->rq_msg.RPCM_ack.ar_verf.oa_length = checksum.length;
@@ -541,7 +579,10 @@ svcauth_gss_nextverf(struct svc_req *req, struct svc_rpc_gss_data *gd,
 	       checksum.length);
 	gss_release_buffer(&min_stat, &checksum);
 
-	return (true);
+out:
+	observe_gss_auth_step_latency(GET_NEXT_VERIFIER, gd->sec.svc, ret,
+		&start_time);
+	return (ret);
 }
 
 static bool
@@ -598,6 +639,27 @@ svcauth_gss_is_seq_num_valid(struct svc_rpc_gss_data *gd, u_int32_t seq_num)
 	return true;
 }
 
+static bool
+send_reply_to_client(struct svc_req *req)
+{
+	int call_stat;
+	struct rpc_gss_cred *gc;
+	struct timespec start_time;
+	int res = true;
+
+	clock_gettime(CLOCK_MONOTONIC, &start_time);
+	call_stat = svc_sendreply(req);
+	if (call_stat >= XPRT_DIED) {
+		__warnx(TIRPC_DEBUG_FLAG_ERROR,
+			"%s() svc_sendreply failed", __func__);
+		res = false;
+	}
+
+	gc = (struct rpc_gss_cred *)req->rq_msg.rq_cred_body;
+	observe_gss_auth_step_latency(SEND_CLIENT_REPLY, gc->gc_svc, res,
+		&start_time);
+	return res;
+}
 
 enum auth_stat
 _svcauth_gss(struct svc_req *req, bool *no_dispatch)
@@ -609,6 +671,9 @@ _svcauth_gss(struct svc_req *req, bool *no_dispatch)
 	struct rpc_gss_init_res gr;
 	int call_stat;
 	OM_uint32 min_stat;
+	struct timespec start_time;
+	bool res;
+
 	enum auth_stat rc = AUTH_OK;
 
 	/* Unserialize client credentials. */
@@ -729,7 +794,12 @@ _svcauth_gss(struct svc_req *req, bool *no_dispatch)
 			goto gd_free;
 		}
 
-		if (!svcauth_gss_accept_sec_context(req, gd, &gr)) {
+		clock_gettime(CLOCK_MONOTONIC, &start_time);
+		res = svcauth_gss_accept_sec_context(req, gd, &gr);
+		observe_gss_auth_step_latency(ACCEPT_SECURITY_CONTEXT, gc->gc_svc,
+			res, &start_time);
+
+		if (!res) {
 			rc = AUTH_REJECTEDCRED;
 			goto gd_free;
 		}
@@ -751,14 +821,14 @@ _svcauth_gss(struct svc_req *req, bool *no_dispatch)
 		req->rq_msg.RPCM_ack.ar_results.where = &gr;
 		req->rq_msg.RPCM_ack.ar_results.proc =
 					(xdrproc_t) xdr_rpc_gss_init_res;
-		call_stat = svc_sendreply(req);
+		res = send_reply_to_client(req);
 
 		/* XXX */
 		gss_release_buffer(&min_stat, &gr.gr_token);
 		gss_release_buffer(&min_stat, &gd->checksum);
 		mem_free(gr.gr_ctx.value, 0);
 
-		if (call_stat >= XPRT_DIED) {
+		if (!res) {
 			rc = AUTH_FAILED;
 			(void)authgss_ctx_hash_del(gd);
 			goto gd_free;
@@ -843,11 +913,8 @@ _svcauth_gss(struct svc_req *req, bool *no_dispatch)
 
 		req->rq_msg.RPCM_ack.ar_results.where = NULL;
 		req->rq_msg.RPCM_ack.ar_results.proc = (xdrproc_t) xdr_void;
-		if (svc_sendreply(req) >= XPRT_DIED) {
-			__warnx(TIRPC_DEBUG_FLAG_ERROR,
-				"%s() svc_sendreply failed",
-				__func__);
-		}
+
+		(void) send_reply_to_client(req);
 
 		/* We acquired a reference on gd with authgss_ctx_hash_get
 		 * call.  Time to release the reference as we don't need
@@ -895,8 +962,12 @@ svcauth_gss_destroy(SVCAUTH *auth)
 {
 	struct svc_rpc_gss_data *gd;
 	OM_uint32 min_stat;
+	struct timespec start_time;
+	rpc_gss_svc_t gss_svc;
 
+	clock_gettime(CLOCK_MONOTONIC, &start_time);
 	gd = SVCAUTH_PRIVATE(auth);
+	gss_svc = gd->sec.svc;
 
 	gss_delete_sec_context(&min_stat, &gd->ctx, GSS_C_NO_BUFFER);
 	gss_release_buffer(&min_stat, &gd->cname);
@@ -915,6 +986,7 @@ svcauth_gss_destroy(SVCAUTH *auth)
 	mem_free(gd, sizeof(*gd));
 	mem_free(auth, sizeof(*auth));
 
+	observe_gss_auth_op_latency(SVC_AUTH_OP_DESTROY, gss_svc, &start_time);
 	return (true);
 }
 
@@ -926,7 +998,9 @@ svcauth_gss_wrap(struct svc_req *req, XDR *xdrs)
 	struct rpc_gss_cred *gc = (struct rpc_gss_cred *)
 					req->rq_msg.rq_cred_body;
 	bool result;
+	struct timespec start_time;
 
+	clock_gettime(CLOCK_MONOTONIC, &start_time);
 
 	__warnx(TIRPC_DEBUG_FLAG_RPCSEC_GSS, "%s() %d %s", __func__,
 		!gd->established ? 0 : gc->gc_svc,
@@ -936,14 +1010,18 @@ svcauth_gss_wrap(struct svc_req *req, XDR *xdrs)
 		: gc->gc_svc == RPCSEC_GSS_SVC_PRIVACY ? "krb5p"
 		: "unknown");
 
-	if (!gd->established || gc->gc_svc == RPCSEC_GSS_SVC_NONE)
-		return (svc_auth_none.svc_ah_ops->svc_ah_wrap(req, xdrs));
-
+	if (!gd->established || gc->gc_svc == RPCSEC_GSS_SVC_NONE) {
+		result = (svc_auth_none.svc_ah_ops->svc_ah_wrap(req, xdrs));
+		goto out;
+	}
 	mutex_lock(&gd->lock);
 	result = xdr_rpc_gss_wrap(xdrs, req->rq_msg.RPCM_ack.ar_results.proc,
 				  req->rq_msg.RPCM_ack.ar_results.where,
 				  gd->ctx, gd->sec.qop, gc->gc_svc, gc_seq);
 	mutex_unlock(&gd->lock);
+
+out:
+	observe_gss_auth_op_latency(SVC_AUTH_OP_WRAP, gc->gc_svc, &start_time);
 	return (result);
 }
 
@@ -952,23 +1030,32 @@ svcauth_gss_unwrap(struct svc_req *req)
 {
 	struct svc_rpc_gss_data *gd = SVCAUTH_PRIVATE(req->rq_auth);
 	u_int gc_seq = (u_int) (uintptr_t) req->rq_ap1;
+	const struct rpc_gss_cred *const gc = (struct rpc_gss_cred *)
+		req->rq_msg.rq_cred_body;
 	bool result;
+	struct timespec start_time;
 
-	if (!gd->established || gd->sec.svc == RPCSEC_GSS_SVC_NONE)
-		return (svc_auth_none.svc_ah_ops->svc_ah_unwrap(req));
+	clock_gettime(CLOCK_MONOTONIC, &start_time);
 
+	if (!gd->established || gd->sec.svc == RPCSEC_GSS_SVC_NONE) {
+		result = (svc_auth_none.svc_ah_ops->svc_ah_unwrap(req));
+		goto out;
+	}
 	mutex_lock(&gd->lock);
 	result = xdr_rpc_gss_unwrap(req->rq_xdrs, req->rq_msg.rm_xdr.proc,
 				    req->rq_msg.rm_xdr.where, gd->ctx,
 				    gd->sec.qop, gd->sec.svc, gc_seq,
 				    NULL, NULL);
 	mutex_unlock(&gd->lock);
+
+out:
+	observe_gss_auth_op_latency(SVC_AUTH_OP_UNWRAP, gc->gc_svc, &start_time);
 	return (result);
 }
 
 void svcauth_gss_svc_checksum(void *priv, void *databuf, size_t length)
 {
-	struct svc_req *req = priv;	
+	struct svc_req *req = priv;
 
 	SVC_CHECKSUM(req, databuf, length);
 }
@@ -978,18 +1065,26 @@ svcauth_gss_checksum(struct svc_req *req)
 {
 	struct svc_rpc_gss_data *gd = SVCAUTH_PRIVATE(req->rq_auth);
 	u_int gc_seq = (u_int) (uintptr_t) req->rq_ap1;
+	const struct rpc_gss_cred *const gc = (struct rpc_gss_cred *)
+		req->rq_msg.rq_cred_body;
 	bool result;
+	struct timespec start_time;
+
+	clock_gettime(CLOCK_MONOTONIC, &start_time);
 
 	if (!gd->established || gd->sec.svc == RPCSEC_GSS_SVC_NONE) {
-		return (svc_auth_none.svc_ah_ops->svc_ah_checksum(req));
+		result = (svc_auth_none.svc_ah_ops->svc_ah_checksum(req));
+		goto out;
 	}
-
 	mutex_lock(&gd->lock);
 	result = xdr_rpc_gss_unwrap(req->rq_xdrs, req->rq_msg.rm_xdr.proc,
 				    req->rq_msg.rm_xdr.where, gd->ctx,
 				    gd->sec.qop, gd->sec.svc, gc_seq,
 				    svcauth_gss_svc_checksum, req);
 	mutex_unlock(&gd->lock);
+
+out:
+	observe_gss_auth_op_latency(SVC_AUTH_OP_CHECKSUM, gc->gc_svc, &start_time);
 	return (result);
 }
 
