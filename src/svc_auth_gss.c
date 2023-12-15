@@ -964,10 +964,16 @@ svcauth_gss_destroy(SVCAUTH *auth)
 	OM_uint32 min_stat;
 	struct timespec start_time;
 	rpc_gss_svc_t gss_svc;
+	bool gd_established;
 
-	clock_gettime(CLOCK_MONOTONIC, &start_time);
 	gd = SVCAUTH_PRIVATE(auth);
-	gss_svc = gd->sec.svc;
+	gd_established = gd->established;
+
+	if (gd_established) {
+		/* gd->sec.svc will only be valid if gd->established is true */
+		clock_gettime(CLOCK_MONOTONIC, &start_time);
+		gss_svc = gd->sec.svc;
+	}
 
 	gss_delete_sec_context(&min_stat, &gd->ctx, GSS_C_NO_BUFFER);
 	gss_release_buffer(&min_stat, &gd->cname);
@@ -986,7 +992,9 @@ svcauth_gss_destroy(SVCAUTH *auth)
 	mem_free(gd, sizeof(*gd));
 	mem_free(auth, sizeof(*auth));
 
-	observe_gss_auth_op_latency(SVC_AUTH_OP_DESTROY, gss_svc, &start_time);
+	if (gd_established) {
+		observe_gss_auth_op_latency(SVC_AUTH_OP_DESTROY, gss_svc, &start_time);
+	}
 	return (true);
 }
 
