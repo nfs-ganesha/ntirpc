@@ -54,6 +54,7 @@
 #ifdef USE_LTTNG_NTIRPC
 #include "lttng/xprt.h"
 #endif
+#include <unistd.h>
 
 typedef struct svc_xprt SVCXPRT;
 
@@ -435,6 +436,12 @@ static inline void svc_ref_it(SVCXPRT *xprt, u_int flags,
 #define SVC_REF(xprt, flags)						\
 	svc_ref_it(xprt, flags, __func__, __LINE__)
 
+/*
+ * Socket to use on svcxxx_ncreate call to get default socket
+ */
+#define RPC_ANYSOCK -1
+#define RPC_ANYFD RPC_ANYSOCK
+
 /* SVC_RELEASE() the SVC_REF().
  * Idempotent SVC_XPRT_FLAG_DESTROYED (bit SVC_XPRT_FLAG_RELEASING)
  * indicates that more references should not be taken.
@@ -503,6 +510,26 @@ static inline void svc_destroy_it(SVCXPRT *xprt,
 	/* Remove references: of xprt from user-data; of user-data from xprt */
 	if ((xprt)->xp_ops->xp_unref_user_data) {
 		(*(xprt)->xp_ops->xp_unref_user_data)(xprt);
+	}
+
+	/* Check if the connection was already set as dead or closed,
+	 * If set, let's cleanup and close the FDs, so that FIN-ACK
+	 * could be sent to the client immediately */
+	flags = atomic_postclear_uint16_t_bits(&xprt->xp_flags,
+					       SVC_XPRT_FLAG_CLOSE);
+
+	if ((flags & SVC_XPRT_FLAG_CLOSE)
+	    && xprt->xp_fd != RPC_ANYFD) {
+		XPRT_TRACE(xprt, "WARNING! Connection already closed!",
+				  tag, line);
+		(void)close(xprt->xp_fd);
+		__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
+			"%s: Connection already closed, hence fd %d closed",
+			 __func__, xprt->xp_fd);
+		xprt->xp_fd = RPC_ANYFD;
+		if (xprt->xp_fd_send != RPC_ANYFD)
+			(void)close(xprt->xp_fd_send);
+		xprt->xp_fd_send = RPC_ANYFD;
 	}
 
 	svc_release_it(xprt, SVC_RELEASE_FLAG_NONE, tag, line);
@@ -614,11 +641,7 @@ __END_DECLS
 __BEGIN_DECLS
 extern void rpctest_service(void);
 __END_DECLS
-/*
- * Socket to use on svcxxx_ncreate call to get default socket
- */
-#define RPC_ANYSOCK -1
-#define RPC_ANYFD RPC_ANYSOCK
+
 /*
  * Usual sizes for svcxxx_ncreate
  */
