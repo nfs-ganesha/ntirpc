@@ -77,3 +77,22 @@ int rbtx_init(struct rbtree_x *xt, opr_rbtree_cmpf_t cmpf, uint32_t npart,
 
 	return (code);
 }
+
+void rbtx_cleanup(struct rbtree_x *xt)
+{
+    int ix;
+    struct rbtree_x_part *t;
+    uint32_t npart = xt->npart;
+    uint32_t flags = xt->flags;
+
+    if (xt->tree) {
+        for (ix = 0; ix < xt->npart; ++ix) {
+            t = &(xt->tree[ix]);
+            mutex_destroy(&t->mtx);
+            pthread_rwlock_destroy(&t->lock);
+            pthread_spin_destroy(&t->sp);
+        }
+        if (flags & RBT_X_FLAG_ALLOC)
+            mem_free(xt->tree, npart * sizeof(struct rbtree_x_part));
+    }
+}

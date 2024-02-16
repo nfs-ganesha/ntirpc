@@ -105,6 +105,7 @@ NTIRPC_${NTIRPC_VERSION_BASE} {
 
     # r*
     rbtx_init;
+    rbtx_cleanup;
     rpc_broadcast;
     rpc_broadcast_exp;
     rpc_call;
