@@ -472,14 +472,20 @@ svc_dg_destroy_task(struct work_pool_entry *wpe)
 	SVCXPRT *xprt = &rec->xprt;
 	uint16_t xp_flags;
 
+	const int32_t xp_refcnt = atomic_fetch_int32_t(&rec->xprt.xp_refcnt);
 	__warnx(TIRPC_DEBUG_FLAG_REFCNT,
 		"%s() %p fd %d xp_refcnt %" PRId32,
-		__func__, xprt, xprt->xp_fd, xprt->xp_refcnt);
+		__func__, xprt, xprt->xp_fd, xp_refcnt);
 
-	if (rec->xprt.xp_refcnt) {
+	if (xp_refcnt > 0) {
 		/* instead of nanosleep */
 		work_pool_submit(&svc_work_pool, &(rec->ioq.ioq_wpe));
 		return;
+	} else if (unlikely(xp_refcnt < 0)) {
+		__warnx(TIRPC_DEBUG_FLAG_ERROR,
+			"%s() negative refcnt: %p fd %d xp_refcnt %" PRId32,
+			__func__, rec, rec->xprt.xp_fd, xp_refcnt);
+		abort();
 	}
 
 	xp_flags = atomic_postclear_uint16_t_bits(&rec->xprt.xp_flags,
