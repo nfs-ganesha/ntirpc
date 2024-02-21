@@ -517,6 +517,7 @@ static inline void svc_release_it(SVCXPRT *xprt, u_int flags,
 #define SVC_RELEASE(xprt, flags)					\
 	svc_release_it(xprt, flags, __func__, __LINE__)
 
+#define SVC_DESTROY_RETRY 10
 /* SVC_DESTROY() is SVC_RELEASE() with once-only semantics.
  * Idempotent SVC_XPRT_FLAG_DESTROYED (bit SVC_XPRT_FLAG_DESTROYING)
  * indicates that more references should not be taken.
@@ -524,6 +525,7 @@ static inline void svc_release_it(SVCXPRT *xprt, u_int flags,
 static inline void svc_destroy_it(SVCXPRT *xprt,
 				  const char *tag, const int line)
 {
+	int retry;
 	uint16_t flags = atomic_postset_uint16_t_bits(&xprt->xp_flags,
 						      SVC_XPRT_FLAG_DESTROYING);
 
@@ -535,6 +537,20 @@ static inline void svc_destroy_it(SVCXPRT *xprt,
 		/* previously set, do nothing */
 		return;
 	}
+
+	/* A newly created xprt will be 1. inserted into the tree
+	 * of svc_xprt_fd, then 2. get xp_ops initialized. But if
+	 * shutdown happens in between, xprt without xp_ops initialization
+	 * will be in the tree of svc_xprt_fd for destroying.
+	 * Since the initialization of xp_ops will not acuqire the
+	 * current held lock, try RETRY here to wait for the
+	 * initialization to be done
+	 */
+	retry = 0;
+	while (xprt->xp_ops == NULL && retry < SVC_DESTROY_RETRY) {
+		pthread_yield();
+		retry += 1;
+	};
 
 	/* unlink before dropping last ref */
 	if ((xprt)->xp_ops->xp_unlink)
