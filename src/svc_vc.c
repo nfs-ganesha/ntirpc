@@ -533,10 +533,10 @@ svc_vc_rendezvous(SVCXPRT *xprt)
 	newxprt->xp_parent = xprt;
 	if (xprt->xp_dispatch.rendezvous_cb(newxprt)
 	 || svc_rqst_xprt_register(newxprt, xprt)) {
+		// Note xp_parent is released in svc_vc_destroy_task
 		SVC_DESTROY(newxprt);
 		/* Was never added to epoll */
 		SVC_RELEASE(newxprt, SVC_RELEASE_FLAG_NONE);
-		SVC_RELEASE(xprt, SVC_RELEASE_FLAG_NONE);
 		return (XPRT_DESTROYED);
 	}
 
