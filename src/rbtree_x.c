@@ -59,7 +59,7 @@ int rbtx_init(struct rbtree_x *xt, opr_rbtree_cmpf_t cmpf, uint32_t npart,
 	/* prior versions of Linux tirpc are subject to default prefer-reader
 	 * behavior (so have potential for writer starvation) */
 	rwlockattr_init(&rwlock_attr);
-#ifdef GLIBC
+#if __GLIBC__
 	pthread_rwlockattr_setkind_np(
 		&rwlock_attr,
 		PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP);
