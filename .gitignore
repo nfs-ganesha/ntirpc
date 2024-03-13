@@ -59,3 +59,4 @@ src/libntirpc.so
 src/libntirpc.so.*
 tests/rpcping
 
+.cache
