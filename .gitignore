@@ -49,3 +49,4 @@ cscope.*
 .gdb_history
 .gdbinit
 core
+.cache
