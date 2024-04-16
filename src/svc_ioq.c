@@ -252,11 +252,19 @@ again:
 
 		if (result < frag_hdr_size) {
 			/* We had a fragment headerr and didn't manage to send
-			 * the entire thing...
+			 * the entire thing. For example, we want to send 5 bytes data,
+			 * i.e. ABCDE. The header size, i.e. frag_hdr_size, is 4.
+			 * The first, we send 1 byte header, then frag_hdr_size
+			 * substract result, and become 3. The second, we send the left 3
+			 * bytes header and 2 bytes data, i.e. AB. So result is 5, then
+			 * result substract frag_hdr_size, and become 2. And remaning
+			 * substract result, and become 3. So next time, we send the
+			 * remaining 3 bytes, i.e. CDE.
 			 */
 			xioq->frag_hdr_bytes_sent += result;
 			iov[0].iov_base += result;
 			iov[0].iov_len -= result;
+			frag_hdr_size -= result;
 			__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
 				"%s: %p fd %d iov[0].vio_head %p vio_length %z",
 				__func__, xprt, xprt->xp_fd,
