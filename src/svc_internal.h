@@ -82,6 +82,13 @@ struct svc_params {
 	u_long flags;
 	u_int max_connections;
 	int32_t idle_timeout;
+
+#if defined(_USE_NFS_RDMA) || defined(USE_RPC_RDMA)
+	uint16_t nfs_rdma_port;
+	u_int max_rdma_connections;
+	bool enable_rdma_dump;
+#endif
+
 };
 
 enum xprt_stat svc_request(SVCXPRT *xprt, XDR *xdrs);
@@ -181,6 +188,11 @@ static inline int svc_rqst_rearm_events(SVCXPRT *xprt, uint16_t ev_flags)
 
 int svc_rqst_xprt_register(SVCXPRT *, SVCXPRT *);
 void svc_rqst_xprt_unregister(SVCXPRT *, uint32_t);
+
+#if defined(USE_RPC_RDMA)
+void svc_rqst_xprt_unregister_rdma(SVCXPRT *, uint32_t);
+#endif
+
 int svc_rqst_evchan_write(SVCXPRT *, struct xdr_ioq *, bool);
 void svc_rqst_xprt_send_complete(SVCXPRT *);
 void svc_rqst_unhook(SVCXPRT *);

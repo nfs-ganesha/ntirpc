@@ -159,25 +159,25 @@ clnt_rdma_call(struct clnt_req *cc)
 	struct rpc_dplx_rec *rec = cx->cx_rec;
 	RDMAXPRT *xd = RDMA_DR(rec);
 	struct poolq_entry *have =
-		xdr_ioq_uv_fetch(&xd->sm_dr.ioq, &xd->cbqh,
+		xdr_rdma_ioq_uv_fetch(&xd->sm_dr.ioq, &xd->cbqh,
 				 "call context", 1, IOQ_FLAG_NONE);
 	struct rpc_rdma_cbc *cbc = (struct rpc_rdma_cbc *)(_IOQ(have));
 	XDR *xdrs;
 	u_int32_t *uint32p;
 
 	/* free old buffers (should do nothing) */
-	xdr_ioq_release(&cbc->workq.ioq_uv.uvqh);
-	xdr_ioq_release(&cbc->holdq.ioq_uv.uvqh);
+	xdr_ioq_release(&cbc->recvq.ioq_uv.uvqh);
+	xdr_ioq_release(&cbc->sendq.ioq_uv.uvqh);
 	xdr_rdma_callq(xd);
 
-	cbc->workq.xdrs[0].x_lib[1] =
-	cbc->holdq.xdrs[0].x_lib[1] = xd;
+	cbc->recvq.xdrs[0].x_lib[1] =
+	cbc->sendq.xdrs[0].x_lib[1] = xd;
 
-	(void) xdr_ioq_uv_fetch(&cbc->holdq, &xd->outbufs.uvqh,
+	(void) xdr_rdma_ioq_uv_fetch(&cbc->sendq, &xd->outbufs_data.uvqh,
 				"call buffer", 1, IOQ_FLAG_NONE);
-	xdr_ioq_reset(&cbc->holdq, 0);
+	xdr_ioq_reset(&cbc->sendq, 0);
 
-	xdrs = cbc->holdq.xdrs;
+	xdrs = cbc->sendq.xdrs;
 	cc->cc_error.re_status = RPC_SUCCESS;
 
 	mutex_lock(&cl->cl_lock);
@@ -194,7 +194,7 @@ clnt_rdma_call(struct clnt_req *cc)
 		__warnx(TIRPC_DEBUG_FLAG_CLNT_RDMA,
 			"%s: %p@%p failed",
 			__func__, cl, cx->cx_rec);
-		xdr_ioq_release(&cbc->holdq.ioq_uv.uvqh);
+		xdr_ioq_release(&cbc->sendq.ioq_uv.uvqh);
 		return (RPC_CANTENCODEARGS);
 	}
 	mutex_unlock(&cl->cl_lock);

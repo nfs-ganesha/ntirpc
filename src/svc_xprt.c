@@ -66,6 +66,11 @@ struct svc_xprt_fd {
 	mutex_t lock;
 	struct rbtree_x xt;
 	uint32_t connections;
+
+#ifdef USE_RPC_RDMA
+	uint32_t rdma_connections;
+#endif
+
 };
 
 static struct svc_xprt_fd svc_xprt_fd = {
@@ -242,7 +247,14 @@ svc_xprt_clear(SVCXPRT *xprt)
 		/* if another thread passes test during svc_xprt_shutdown(),
 		 * this lock (and generation test) prevents repeats.
 		 */
-		atomic_dec_uint32_t(&svc_xprt_fd.connections);
+#ifdef USE_RPC_RDMA
+			if (xprt->xp_rdma)
+				atomic_dec_uint32_t(&svc_xprt_fd.rdma_connections);
+			else
+				atomic_dec_uint32_t(&svc_xprt_fd.connections);
+#else
+			atomic_dec_uint32_t(&svc_xprt_fd.connections);
+#endif
 
 		uint16_t xp_flags = atomic_postclear_uint16_t_bits(
 			&xprt->xp_flags, SVC_XPRT_TREE_LOCKED);
@@ -413,6 +425,65 @@ svc_xprt_shutdown(void)
 	mem_free(svc_xprt_fd.xt.tree,
 		 SVC_XPRT_PARTITIONS * sizeof(struct rbtree_x_part));
 }
+
+#ifdef USE_RPC_RDMA
+int
+svc_rdma_add_xprt_fd(SVCXPRT *xprt) {
+	struct rpc_dplx_rec sk;
+	struct rpc_dplx_rec *rec;
+	struct rbtree_x_part *t;
+	struct opr_rbtree_node *nv;
+
+	RDMAXPRT *xd = RDMA_DR(REC_XPRT(xprt));
+
+	sk.xprt.xp_fd = xd->sm_dr.xprt.xp_fd;
+	sk.xprt.xp_rdma = xd->sm_dr.xprt.xp_rdma;
+	t = rbtx_partition_of_scalar(&svc_xprt_fd.xt, sk.xprt.xp_fd);
+
+	rwlock_wrlock(&t->lock);
+	nv = opr_rbtree_lookup(&t->t, &sk.fd_node);
+	if (!nv) {
+		if (atomic_fetch_uint32_t(&svc_xprt_fd.rdma_connections)
+			>= __svc_params->max_rdma_connections) {
+			rwlock_unlock(&t->lock);
+			__warnx(TIRPC_DEBUG_FLAG_ERROR,
+			    "%s: fd %d max_rdma_connections %u exceeded\n",
+			    __func__, sk.xprt.xp_fd,
+			    __svc_params->max_rdma_connections);
+			SVC_DESTROY(&xd->sm_dr.xprt);
+			return -1;
+		}
+
+		/* Get ref */
+		SVC_REF(&xd->sm_dr.xprt, SVC_REF_FLAG_NONE);
+
+		rec = REC_XPRT(&xd->sm_dr.xprt);
+
+		rpc_dplx_rli(rec);
+
+		if (opr_rbtree_insert(&t->t, &rec->fd_node)) {
+			/* cant happen */
+			__warnx(TIRPC_DEBUG_FLAG_LOCK,
+				"%s: collision inserting in locked rbtree partition",
+				__func__);
+
+			rpc_dplx_rui(rec);
+			rwlock_unlock(&t->lock);
+			SVC_DESTROY(&xd->sm_dr.xprt);
+			SVC_RELEASE(&xd->sm_dr.xprt, SVC_RELEASE_FLAG_NONE);
+			return -1;
+		}
+
+		rpc_dplx_rui(rec);
+
+		atomic_inc_uint32_t(&svc_xprt_fd.rdma_connections);
+
+		SVC_RELEASE(&xd->sm_dr.xprt, SVC_RELEASE_FLAG_NONE);
+	}
+	rwlock_unlock(&t->lock);
+	return 0;
+}
+#endif
 
 void
 svc_xprt_trace(SVCXPRT *xprt, const char *func, const char *tag, const int line)

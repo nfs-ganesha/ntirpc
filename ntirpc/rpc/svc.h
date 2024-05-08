@@ -42,6 +42,9 @@
 #ifndef _TIRPC_SVC_H
 #define _TIRPC_SVC_H
 
+#ifdef USE_RPC_RDMA
+#include <assert.h>
+#endif
 #include <sys/cdefs.h>
 #include <rpc/rpc_msg.h>
 #include <rpc/types.h>
@@ -142,6 +145,13 @@ typedef struct svc_init_params {
 	u_int gss_max_idle_gen;
 	u_int gss_max_gc;
 	uint32_t channels;
+
+#if defined(_USE_NFS_RDMA) || defined(USE_RPC_RDMA)
+	uint16_t nfs_rdma_port; /* Shared with Ganesha */
+	uint32_t max_rdma_connections;
+	bool enable_rdma_dump;
+#endif
+
 	int32_t idle_timeout;
 	uint32_t thr_stack_size;
 } svc_init_params;
@@ -271,6 +281,11 @@ struct svc_xprt {
 	void *xp_u1;		/* client user data */
 	void *xp_u2;		/* client user data */
 
+#if defined(_USE_NFS_RDMA) || defined(USE_RPC_RDMA)
+	bool xp_rdma;		/* True if this xprt is RDMA enabled.
+				 * Shared with Ganesha */
+#endif
+
 	struct rpc_address xp_local;	/* local address, length, port */
 	struct rpc_address xp_remote;	/* remote address, length, port */
 	struct rpc_address xp_proxy;	/* proxy address, length, port */
@@ -338,6 +353,12 @@ struct svc_req {
 	void *rq_u1;		/* user data */
 	void *rq_u2;		/* user data */
 	uint64_t rq_cksum;
+
+#if defined(_USE_NFS_RDMA) || defined(USE_RPC_RDMA)
+	/* Data buffer used to server read/readdir from fs */
+	int data_chunk_length;	/* Shared with Ganesha */
+	uint8_t *data_chunk;	/* Shared with Ganesha */
+#endif
 
 	/* Moved in N TI-RPC */
 	struct SVCAUTH *rq_auth;	/* auth handle */

@@ -34,9 +34,23 @@
 #include <rpc/work_pool.h>
 #include <rpc/xdr.h>
 
+#ifdef USE_RPC_RDMA
+typedef enum xdr_ioq_uv_type {
+	UV_DATA = 1,	/* Data buffers of big size */
+	UV_HDR		/* Header buffers of smaller size */
+} xdr_ioq_uv_type_t;
+#endif
+
 struct xdr_ioq_uv
 {
 	struct poolq_entry uvq;
+
+#ifdef USE_RPC_RDMA
+	bool rdma_uv; /* Flag to identify uv used for RDMA */
+	struct xdr_vio rdma_v; /* Used to reset v after UIO_REFER */
+	struct xdr_uio rdma_u; /* Used to reset u after UIO_REFER */
+	xdr_ioq_uv_type_t uv_type;
+#endif
 
 	/* spliced buffers, if any */
 	struct xdr_uio u;
@@ -84,7 +98,6 @@ struct xdr_ioq {
 	struct work_pool_entry ioq_wpe;
 	struct poolq_entry ioq_s;	/* segment of stream */
 	pthread_cond_t ioq_cond;
-
 	struct poolq_head *ioq_pool;
 	struct xdr_ioq_uv_head ioq_uv;	/* header/vectors */
 
@@ -92,6 +105,11 @@ struct xdr_ioq {
 	uint32_t write_start; /* Position to start write at */
 	int frag_hdr_bytes_sent; /* Indicates a fragment header has been sent */
 	bool has_blocked;
+
+#ifdef USE_RPC_RDMA
+	bool rdma_ioq;
+#endif
+
 	struct rpc_dplx_rec *rec;
 };
 
@@ -132,4 +150,22 @@ extern void xdr_ioq_destroy_pool(struct poolq_head *ioqh);
 
 extern const struct xdr_ops xdr_ioq_ops;
 
+#ifdef USE_RPC_RDMA
+extern const struct xdr_ops xdr_ioq_ops_rdma;
+extern void xdr_rdma_ioq_uv_release(struct xdr_ioq_uv *uv);
+extern void xdr_rdma_ioq_release(struct poolq_head *ioqh, bool xioq_recycle,
+    struct xdr_ioq *xioq);
+extern void xdr_rdma_buf_pool_destroy(struct poolq_head *ioqh);
+
+extern struct poolq_entry *xdr_rdma_ioq_uv_fetch(struct xdr_ioq *xioq,
+					     struct poolq_head *ioqh,
+					     char *comment,
+					     u_int count,
+					     u_int ioq_flags);
+extern struct poolq_entry *xdr_rdma_ioq_uv_fetch_nothing(struct xdr_ioq *xioq,
+						     struct poolq_head *ioqh,
+						     char *comment,
+						     u_int count,
+						     u_int ioq_flags);
+#endif
 #endif				/* XDR_IOQ_H */

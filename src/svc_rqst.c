@@ -51,6 +51,10 @@
 #include <rpc/svc_auth.h>
 #include "svc_ioq.h"
 
+#ifdef USE_RPC_RDMA
+#include "rpc_rdma.h"
+#endif
+
 /**
  * @file svc_rqst.c
  * @contributeur William Allen Simpson <bill@cohortfs.com>
@@ -1155,6 +1159,37 @@ svc_rqst_xprt_unregister(SVCXPRT *xprt, uint32_t flags)
 	}
 	svc_rqst_unreg(rec, sr_rec);
 }
+
+#if defined(USE_RPC_RDMA)
+
+/*
+ * flags indicate locking state
+ *
+ * @note Locking
+ *	Called via svc_release_it() with once-only semantic.
+ */
+void
+svc_rqst_xprt_unregister_rdma(SVCXPRT *xprt, uint32_t flags)
+{
+	struct rpc_dplx_rec *rec = REC_XPRT(xprt);
+	struct svc_rqst_rec *sr_rec = (struct svc_rqst_rec *)rec->ev_p;
+
+	assert(!sr_rec);
+
+	/* Remove from the transport list here (and only here)
+	 * before clearing the registration to ensure other
+	 * lookups cannot re-use this transport.
+	 */
+	if (!(flags & RPC_DPLX_LOCKED))
+		rpc_dplx_rli(rec);
+
+	svc_xprt_clear(xprt);
+
+	if (!(flags & RPC_DPLX_LOCKED))
+		rpc_dplx_rui(rec);
+}
+
+#endif
 
 /*static*/ void
 svc_rqst_xprt_task_recv(struct work_pool_entry *wpe)

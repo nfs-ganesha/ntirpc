@@ -39,9 +39,11 @@
 #ifndef _TIRPC_RPC_RDMA_H
 #define _TIRPC_RPC_RDMA_H
 
+#include <semaphore.h>
 #include <rdma/rdma_cma.h>
 #include <rpc/svc.h>
 #include <rpc/xdr_ioq.h>
+#include <rpc/work_pool.h>
 
 #include "rpc_dplx_internal.h"
 
@@ -64,18 +66,41 @@ struct msk_stats {
 	uint64_t nsec_compevent;
 };
 
+typedef enum rpc_extra_io_buf_type {
+	IO_INBUF = 1,	/* Buffers used for recv */
+	IO_OUTBUF	/* Buffers used for send */
+} rpc_extra_io_buf_type_t;
+
+/* Track buffers allocated on demand */
+struct rpc_extra_io_bufs {
+        struct ibv_mr *mr;
+        uint32_t buffer_total;
+        uint8_t *buffer_aligned;
+        struct poolq_entry q;
+	rpc_extra_io_buf_type_t type;
+};
+
 typedef struct rpc_rdma_xprt RDMAXPRT;
 
 struct rpc_rdma_cbc;
 typedef int (*rpc_rdma_callback_t)(struct rpc_rdma_cbc *cbc, RDMAXPRT *xprt);
+
+#define CBC_FLAG_NONE		0x0000
+#define CBC_FLAG_RELEASE	0x0001
+#define CBC_FLAG_RELEASING	0x0002
+
+#define RDMA_CB_TIMEOUT_SEC 10
 
 /**
  * \struct rpc_rdma_cbc
  * Context data we can use during recv/send callbacks
  */
 struct rpc_rdma_cbc {
-	struct xdr_ioq workq;
-	struct xdr_ioq holdq;
+	/* recvq should always be first, since we use xdrs to get cbc */
+	struct xdr_ioq recvq; /* queue to hold requests and rdma_read bufs */
+	struct xdr_ioq sendq; /* queue to hold responses and rdma_write bufs */
+	struct xdr_ioq dataq; /* queue to hold data_bufs from protocol */
+	struct xdr_ioq freeq; /* queue to hold used bufs */
 
 	struct xdr_ioq_uv *call_uv;
 	void *call_head;
@@ -83,6 +108,16 @@ struct rpc_rdma_cbc {
 	void *write_chunk;	/* current in list of arrays */
 	void *reply_chunk;	/* current in array */
 	void *call_data;
+	bool_t call_inline;
+	int32_t refcnt;
+	uint16_t cbc_flags;
+	struct poolq_entry *have;
+	struct xdr_ioq_uv *data_chunk_uv;
+	struct poolq_entry cbc_list;
+	uint8_t *non_registered_buf;
+	int non_registered_buf_len;
+	pthread_cond_t cb_done;
+	pthread_mutex_t cb_done_mutex;
 
 	struct work_pool_entry wpe;
 	rpc_rdma_callback_t positive_cb;
@@ -115,6 +150,14 @@ struct rpc_rdma_pd {
 #define RDMAX_CLIENT 0
 #define RDMAX_SERVER_CHILD -1
 
+#define RDMA_HDR_CHUNK_SZ 8192
+#define MAX_CBC_OUTSTANDING 1024
+#define MAX_CBC_ALLOCATION (MAX_CBC_OUTSTANDING * 2)
+#define MAX_RECV_OUTSTANDING MAX_CBC_OUTSTANDING
+#define RDMA_DATA_CHUNKS 32
+#define RDMA_DATA_CHUNK_SZ 1048576
+#define RDMA_HDR_CHUNKS MAX_CBC_OUTSTANDING
+
 /**
  * \struct rpc_rdma_xprt
  * RDMA transport instance
@@ -140,10 +183,20 @@ struct rpc_rdma_xprt {
 	u_int8_t *buffer_aligned;
 	size_t buffer_total;
 
-	struct xdr_ioq_uv_head inbufs;	/* recvsize */
-	struct xdr_ioq_uv_head outbufs;	/* sendsz */
+	struct xdr_ioq_uv_head inbufs_hdr;	/* Buffers to hold request headers */
+	struct xdr_ioq_uv_head inbufs_data;	/* Buffers to hold request data */
+	struct xdr_ioq_uv_head outbufs_hdr;	/* Buffers to hold response headers */
+	struct xdr_ioq_uv_head outbufs_data;	/* Buffers to hold response data */
 
 	struct poolq_head cbqh;		/**< combined callback contexts */
+
+	struct poolq_head extra_bufs;
+
+	u_int extra_bufs_count;
+
+	uint32_t active_requests;
+
+	struct poolq_head cbclist;
 
 	mutex_t cm_lock;		/**< lock for connection events */
 	cond_t cm_cond;			/**< cond for connection events */
@@ -166,9 +219,7 @@ struct rpc_rdma_xprt {
 		RDMAXS_ROUTE_RESOLVED,
 		RDMAXS_CONNECT_REQUEST,
 		RDMAXS_CONNECTED,
-		RDMAXS_CLOSING,
-		RDMAXS_CLOSED,
-		RDMAXS_ERROR, 		/* always last */
+		RDMAXS_ERROR
 	} state;			/**< transport state machine */
 
 	/* FIXME why configurable??? */
@@ -216,6 +267,32 @@ typedef struct rec_rdma_strm {
 	int credits;
 } RECRDMA;
 
+struct connection_requests {
+	struct rdma_cm_id **id_queue;
+	sem_t	q_sem;
+	sem_t	u_sem;
+	uint32_t q_head;
+	uint32_t q_tail;
+	u_int	q_size;
+};
+
+struct rpc_rdma_state {
+	LIST_HEAD(pdh_s, rpc_rdma_pd) pdh;	/**< Protection Domain list */
+	mutex_t lock;
+
+	struct connection_requests c_r;		/* never freed??? */
+
+	pthread_t cm_thread;		/**< Thread id for connection manager */
+	pthread_t cq_thread;		/**< Thread id for completion queue */
+	pthread_t stats_thread;
+
+	int cm_epollfd;
+	int cq_epollfd;
+	int stats_epollfd;
+
+	int32_t run_count;
+};
+
 static inline void *xdr_encode_hyper(uint32_t *iptr, uint64_t val)
 {
 	*iptr++ = htonl((uint32_t)((val >> 32) & 0xffffffff));
@@ -228,6 +305,88 @@ static inline uint64_t xdr_decode_hyper(uint64_t *iptr)
 	return ((uint64_t) ntohl(((uint32_t*)iptr)[0]) << 32)
 		| (ntohl(((uint32_t*)iptr)[1]));
 }
+
+/* Take ref on cbc before we do ibv_post */
+static inline void cbc_ref_it(struct rpc_rdma_cbc *cbc)
+{
+	int32_t refs =
+		atomic_inc_int32_t(&cbc->refcnt);
+	__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA, "%s: take_ref cbc %p ref %d "
+		"refs %d",
+		__func__, cbc, cbc->refcnt, refs);
+}
+
+#define x_xprt(xdrs) ((RDMAXPRT *)((xdrs)->x_lib[1]))
+
+/* Release ref on cbc on callback from ibv_post */
+static inline void cbc_release_it(struct rpc_rdma_cbc *cbc)
+{
+	int32_t refs =
+		atomic_dec_int32_t(&cbc->refcnt);
+	RDMAXPRT *xd = x_xprt(cbc->recvq.xdrs);
+
+	__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA, "%s: release_ref cbc %p ref %d "
+		"refs %d",
+		__func__, cbc, cbc->refcnt, refs);
+
+	if ((refs == 0) && (cbc->cbc_flags & CBC_FLAG_RELEASE)) {
+		__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA, "%s: destroy_cbc "
+			"cbc %p ref %d flags %x",
+			__func__, cbc, cbc->refcnt, cbc->cbc_flags);
+
+		uint16_t flags = atomic_postset_uint16_t_bits(&cbc->cbc_flags,
+		    CBC_FLAG_RELEASING);
+
+		if (flags & CBC_FLAG_RELEASING) {
+			__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA, "%s: destroy_cbc "
+				" already destroying cbc %p ref %d flags %x",
+				__func__, cbc, cbc->refcnt, cbc->cbc_flags);
+			return;
+		}
+
+		__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA, "%s: destroy_cbc "
+			" destroying cbc %p ref %d flags %x",
+			__func__, cbc, cbc->refcnt, cbc->cbc_flags);
+
+		pthread_mutex_lock(&xd->cbclist.qmutex);
+		TAILQ_REMOVE(&xd->cbclist.qh, &cbc->cbc_list, q);
+		xd->cbclist.qcount--;
+		pthread_mutex_unlock(&xd->cbclist.qmutex);
+
+		SVC_RELEASE(&xd->sm_dr.xprt, SVC_REF_FLAG_NONE);
+
+		if (cbc->non_registered_buf) {
+			mem_free(cbc->non_registered_buf, cbc->non_registered_buf_len);
+		}
+
+
+		/* cbqh is pointed by recvq */
+		xdr_rdma_ioq_release(&cbc->sendq.ioq_uv.uvqh, false, &cbc->sendq);
+		xdr_rdma_ioq_release(&cbc->dataq.ioq_uv.uvqh, false, &cbc->dataq);
+		xdr_rdma_ioq_release(&cbc->freeq.ioq_uv.uvqh, false, &cbc->freeq);
+		xdr_rdma_ioq_release(&cbc->recvq.ioq_uv.uvqh, false, &cbc->recvq);
+
+		/* Remove cbc from ioq before we add it back to cbqh */
+		pthread_mutex_lock(&xd->sm_dr.ioq.ioq_uv.uvqh.qmutex);
+		TAILQ_REMOVE(&xd->sm_dr.ioq.ioq_uv.uvqh.qh, &cbc->recvq.ioq_s, q);
+		(xd->sm_dr.ioq.ioq_uv.uvqh.qcount)--;
+		pthread_mutex_unlock(&xd->sm_dr.ioq.ioq_uv.uvqh.qmutex);
+
+		__warnx(TIRPC_DEBUG_FLAG_XDR, "%s: cbc_track end %p recvq %p %d sendq %p %d "
+			"dataq %p %d freeq %p %d ioq %p %d xd %p",
+			__func__, cbc, &cbc->recvq, cbc->recvq.ioq_uv.uvqh.qcount,
+			&cbc->sendq, cbc->sendq.ioq_uv.uvqh.qcount, &cbc->dataq,
+			cbc->dataq.ioq_uv.uvqh.qcount, &cbc->freeq,
+			cbc->freeq.ioq_uv.uvqh.qcount, &xd->sm_dr.ioq,
+			xd->sm_dr.ioq.ioq_uv.uvqh.qcount, xd);
+
+		/* Add cbc back to cbqh */
+		xdr_rdma_ioq_release(&cbc->recvq.ioq_uv.uvqh, true, &cbc->recvq);
+
+	}
+}
+
+extern struct rpc_rdma_state rpc_rdma_state;
 
 void rpc_rdma_internals_init(void);
 void rpc_rdma_internals_fini(void);
@@ -245,14 +404,30 @@ int rpc_rdma_connect_finalize(RDMAXPRT *);
 
 /* XDR functions */
 int xdr_rdma_create(RDMAXPRT *);
+void xdr_rdma_add_inbufs_data(RDMAXPRT *xd);
+void xdr_rdma_add_outbufs_data(RDMAXPRT *xd);
+void xdr_rdma_add_inbufs_hdr(RDMAXPRT *xd);
+void xdr_rdma_add_outbufs_hdr(RDMAXPRT *xd);
 void xdr_rdma_callq(RDMAXPRT *);
-void xdr_rdma_destroy(RDMAXPRT *);
 
 bool xdr_rdma_clnt_reply(XDR *, u_int32_t);
 bool xdr_rdma_clnt_flushout(struct rpc_rdma_cbc *);
 
 bool xdr_rdma_svc_recv(struct rpc_rdma_cbc *, u_int32_t);
-bool xdr_rdma_svc_reply(struct rpc_rdma_cbc *, u_int32_t);
-bool xdr_rdma_svc_flushout(struct rpc_rdma_cbc *);
+bool xdr_rdma_svc_reply(struct rpc_rdma_cbc *, u_int32_t,
+    bool rdma_buf_used);
+bool xdr_rdma_svc_flushout(struct rpc_rdma_cbc *, bool rdma_buf_used);
+void rpc_rdma_allocate_cbc_locked(struct poolq_head *ioqh);
+
+int rpc_rdma_fd_del(int fd, int epollfd);
+
+void svc_rdma_unlink(SVCXPRT *xprt, u_int flags, const char *tag,
+    const int line);
+void svc_rdma_destroy(SVCXPRT *xprt, u_int flags, const char *tag,
+    const int line);
+
+void rdma_cleanup_cbcs_task(struct work_pool_entry *wpe);
+
+void rpc_rdma_close_connection(RDMAXPRT *xd);
 
 #endif /* !_TIRPC_RPC_RDMA_H */

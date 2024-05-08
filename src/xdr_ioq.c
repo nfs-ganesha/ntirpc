@@ -51,6 +51,10 @@
 #include <misc/abstract_atomic.h>
 #include "rpc_com.h"
 
+#ifdef USE_RPC_RDMA
+#include "rpc_rdma.h"
+#endif
+
 #include <rpc/xdr_ioq.h>
 
 #define VREC_MAXBUFS 24
@@ -186,6 +190,188 @@ xdr_ioq_uv_recycle(struct poolq_head *ioqh, struct poolq_entry *have)
 
 	pthread_mutex_unlock(&ioqh->qmutex);
 }
+
+#ifdef USE_RPC_RDMA
+
+struct poolq_entry *
+xdr_rdma_ioq_uv_fetch(struct xdr_ioq *xioq, struct poolq_head *ioqh,
+		 char *comment, u_int count, u_int ioq_flags)
+{
+	struct poolq_entry *have = NULL;
+	RDMAXPRT *xd = NULL;
+
+	if (xioq->rdma_ioq) {
+		xd = xioq->xdrs[0].x_lib[1];
+	}
+
+	__warnx(TIRPC_DEBUG_FLAG_XDR,
+		"%s() %u %s xd %p",
+		__func__, count, comment, xd);
+
+	pthread_mutex_lock(&ioqh->qmutex);
+
+	while (1) {
+		/* positive for buffer(s) */
+		have = TAILQ_FIRST(&ioqh->qh);
+		__warnx(TIRPC_DEBUG_FLAG_XDR,
+			"%s() %u %s xioq %p %d ioqh %p %d have %p",
+			__func__, count, comment, xioq, xioq->ioq_uv.uvqh.qcount,
+			ioqh, ioqh->qcount, have);
+		if (have) {
+			TAILQ_REMOVE(&ioqh->qh, have, q);
+
+			/* added directly to the queue.
+			 * this lock is needed for context header queues,
+			 * but is not a burden on uncontested data queues.
+			 */
+			pthread_mutex_lock(&xioq->ioq_uv.uvqh.qmutex);
+			(xioq->ioq_uv.uvqh.qcount)++;
+			__warnx(TIRPC_DEBUG_FLAG_XDR, "ioq_track xdr_ioq_uv_fetch insert "
+				"have %p to q %p", have, xioq);
+			TAILQ_INSERT_TAIL(&xioq->ioq_uv.uvqh.qh, have, q);
+			pthread_mutex_unlock(&xioq->ioq_uv.uvqh.qmutex);
+			ioqh->qcount--;
+			count--;
+			if(count == 0)
+				break;
+		} else {
+			if (xd) {
+				pthread_mutex_unlock(&ioqh->qmutex);
+
+				if (ioqh == &xd->inbufs_data.uvqh) {
+					xdr_rdma_add_inbufs_data(xd);
+				}
+
+				if (ioqh == &xd->outbufs_data.uvqh) {
+					xdr_rdma_add_outbufs_data(xd);
+				}
+
+				if (ioqh == &xd->inbufs_hdr.uvqh) {
+					xdr_rdma_add_inbufs_hdr(xd);
+				}
+
+				if (ioqh == &xd->outbufs_hdr.uvqh) {
+					xdr_rdma_add_outbufs_hdr(xd);
+				}
+
+				if (unlikely(ioqh == &xd->cbqh)) {
+					__warnx(TIRPC_DEBUG_FLAG_EVENT, "cbc buffers exhausetd xd %p "
+						"ioqh %p qcount %d", xd, ioqh, ioqh->qcount);
+					rpc_rdma_allocate_cbc_locked(ioqh);
+				}
+
+				pthread_mutex_lock(&ioqh->qmutex);
+			}
+		}
+	}
+
+	pthread_mutex_unlock(&ioqh->qmutex);
+	return have;
+}
+
+struct poolq_entry *
+xdr_rdma_ioq_uv_fetch_nothing(struct xdr_ioq *xioq, struct poolq_head *ioqh,
+			 char *comment, u_int count, u_int ioq_flags)
+{
+	return NULL;
+}
+
+static inline void
+xdr_rdma_ioq_uv_recycle(struct poolq_head *ioqh, struct poolq_entry *have)
+{
+	pthread_mutex_lock(&ioqh->qmutex);
+
+	__warnx(TIRPC_DEBUG_FLAG_XDR, "%s() ioq_track Reccycle ioqh %p %d have %p",
+		__func__, ioqh, ioqh->qcount, have);
+
+	TAILQ_INSERT_TAIL(&ioqh->qh, have, q);
+	ioqh->qcount++;
+
+	pthread_mutex_unlock(&ioqh->qmutex);
+}
+
+void
+xdr_rdma_ioq_uv_release(struct xdr_ioq_uv *uv)
+{
+	uv->u.uio_references = 1;	/* keeping one */
+	xdr_rdma_ioq_uv_recycle(uv->u.uio_p1, &uv->uvq);
+}
+
+void
+xdr_rdma_ioq_release(struct poolq_head *ioqh, bool xioq_recycle,
+    struct xdr_ioq *xioq)
+{
+	struct poolq_entry *have = TAILQ_FIRST(&ioqh->qh);
+
+	/* release queued buffers */
+	while (have) {
+		assert(xioq->rdma_ioq);
+
+		__warnx(TIRPC_DEBUG_FLAG_XDR, "xdr_rdma_ioq_release ioqh %p %d "
+		    "xioq %p have %p",
+		    ioqh, ioqh->qcount, xioq, have);
+
+		pthread_mutex_lock(&ioqh->qmutex);
+
+		TAILQ_REMOVE(&ioqh->qh, have, q);
+		(ioqh->qcount)--;
+
+		pthread_mutex_unlock(&ioqh->qmutex);
+
+		xdr_rdma_ioq_uv_release(IOQ_(have));
+
+		have = TAILQ_FIRST(&ioqh->qh);
+	}
+
+	assert(ioqh->qcount == 0);
+
+	/* Recycle cbc */
+	if (xioq && xioq->ioq_pool && xioq_recycle) {
+		xdr_rdma_ioq_uv_recycle(xioq->ioq_pool, &xioq->ioq_s);
+	}
+
+}
+
+static void
+xdr_rdma_ioq_uv_destroy(struct xdr_ioq_uv *uv)
+{
+	mem_free(uv, sizeof(*uv));
+}
+
+void
+xdr_rdma_buf_pool_destroy(struct poolq_head *ioqh)
+{
+	/* pool_head may not be initialized, so check for qcount */
+	if (ioqh->qcount && !TAILQ_EMPTY(&ioqh->qh)) {
+
+		pthread_mutex_lock(&ioqh->qmutex);
+
+		struct poolq_entry *have = TAILQ_FIRST(&ioqh->qh);
+
+		/* release queued buffers */
+		while (have) {
+			struct poolq_entry *next = TAILQ_NEXT(have, q);
+
+			__warnx(TIRPC_DEBUG_FLAG_XDR,
+			    "xdr_rdma_ioq_release ioqh %p %d have %p",
+			    ioqh, ioqh->qcount, have);
+
+			TAILQ_REMOVE(&ioqh->qh, have, q);
+			(ioqh->qcount)--;
+
+			xdr_rdma_ioq_uv_destroy(IOQ_(have));
+			have = next;
+		}
+
+		assert(ioqh->qcount == 0);
+
+		pthread_mutex_unlock(&ioqh->qmutex);
+
+		poolq_head_destroy(ioqh);
+	}
+}
+
+#endif
 
 void
 xdr_ioq_uv_release(struct xdr_ioq_uv *uv)
@@ -489,6 +675,83 @@ xdr_ioq_getbytes(XDR *xdrs, char *addr, u_int len)
 	return (true);
 }
 
+#ifdef USE_RPC_RDMA
+
+static void
+xdr_ioq_destroy_internal_rdma(XDR *xdrs)
+{
+	__warnx(TIRPC_DEBUG_FLAG_XDR, "%s: no op for rdma",
+	    __func__);
+}
+
+static bool
+xdr_ioq_getbytes_rdma(XDR *xdrs, char *addr, u_int len)
+{
+	struct xdr_ioq_uv *uv;
+	ssize_t delta;
+
+	struct xdr_ioq *xioq = XIOQ(xdrs);
+	XDR orig_xdr;
+	int restore_xdr = 0;
+
+	__warnx(TIRPC_DEBUG_FLAG_XDR, "%s: xdata %p xioq %p rdma %d",
+	    __func__, xdrs->x_data, xioq, xioq->rdma_ioq);
+
+	/* Check if we are getting rdma_write bytes, we could have some
+	 * header part to get next compound, so restore hdr xdr at end */
+	if (xioq->rdma_ioq &&
+	    (len > ((uintptr_t)xdrs->x_v.vio_tail - (uintptr_t)xdrs->x_data))) {
+
+		__warnx(TIRPC_DEBUG_FLAG_XDR, "%s: rdma_write len %u hdr delta %u",
+		    __func__, len, ((uintptr_t)xdrs->x_v.vio_tail -
+		    (uintptr_t)xdrs->x_data));
+
+		memcpy(&orig_xdr, xdrs, sizeof(XDR));
+		uv = xdr_ioq_uv_advance(XIOQ(xdrs));
+		if (!uv) {
+			__warnx(TIRPC_DEBUG_FLAG_XDR, "%s NULL uv", __func__);
+			return (false);
+		}
+		xdr_ioq_uv_update(XIOQ(xdrs), uv);
+		restore_xdr = 1;
+	}
+
+	while (len > 0
+		&& XIOQ(xdrs)->ioq_uv.pcount < XIOQ(xdrs)->ioq_uv.uvqh.qcount) {
+		delta = (uintptr_t)xdrs->x_v.vio_tail
+			- (uintptr_t)xdrs->x_data;
+
+		if (unlikely(delta > len)) {
+			delta = len;
+		} else if (unlikely(!delta)) {
+			/* advance fill pointer */
+			uv = xdr_ioq_uv_advance(XIOQ(xdrs));
+			if (!uv) {
+				return (false);
+			}
+			xdr_ioq_uv_update(XIOQ(xdrs), uv);
+			continue;
+		}
+		memcpy(addr, xdrs->x_data, delta);
+		xdrs->x_data += delta;
+		addr += delta;
+		len -= delta;
+	}
+
+	if (restore_xdr) {
+		__warnx(TIRPC_DEBUG_FLAG_XDR, "%s: rdma_write restore xdr hdr",
+		    __func__);
+		memcpy(xdrs, &orig_xdr, sizeof(XDR));
+	}
+	__warnx(TIRPC_DEBUG_FLAG_XDR, "%s: xdata %p xioq %p rdma %d",
+	    __func__, xdrs->x_data, xioq, xioq->rdma_ioq);
+
+	/* assert(len == 0); */
+	return (true);
+}
+
+#endif
+
 static bool
 xdr_ioq_putbytes(XDR *xdrs, const char *addr, u_int len)
 {
@@ -768,6 +1031,10 @@ xdr_ioq_destroy(struct xdr_ioq *xioq, size_t qsize)
 	__warnx(TIRPC_DEBUG_FLAG_XDR,
 		"%s() xioq %p",
 		__func__, xioq);
+
+#ifdef USE_RPC_RDMA
+	assert(!xioq->rdma_ioq);
+#endif
 
 	xdr_ioq_release(&xioq->ioq_uv.uvqh);
 
@@ -1271,3 +1538,22 @@ const struct xdr_ops xdr_ioq_ops = {
 	xdr_ioq_fillbufs,	/* x_fillbufs */
 	xdr_ioq_allochdrs,	/* x_allochdrs */
 };
+
+#ifdef USE_RPC_RDMA
+const struct xdr_ops xdr_ioq_ops_rdma = {
+	xdr_ioq_getunit,
+	xdr_ioq_putunit,
+	xdr_ioq_getbytes_rdma,
+	xdr_ioq_putbytes,
+	xdr_ioq_getpos,
+	xdr_ioq_setpos,
+	xdr_ioq_destroy_internal_rdma,
+	xdr_ioq_control,
+	xdr_ioq_getbufs,
+	xdr_ioq_putbufs,
+	xdr_ioq_newbuf,		/* x_newbuf */
+	xdr_ioq_iovcount,	/* x_iovcount */
+	xdr_ioq_fillbufs,	/* x_fillbufs */
+	xdr_ioq_allochdrs,	/* x_allochdrs */
+};
+#endif

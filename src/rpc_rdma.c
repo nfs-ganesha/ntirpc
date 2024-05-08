@@ -87,35 +87,9 @@
 /** defaults **/
 #define WORKER_STACK_SIZE (65535) /* was 2116488 */
 
-struct connection_requests {
-	struct rdma_cm_id **id_queue;
-	sem_t	q_sem;
-	sem_t	u_sem;
-	uint32_t q_head;
-	uint32_t q_tail;
-	u_int	q_size;
-};
-
-struct rpc_rdma_state {
-	LIST_HEAD(pdh_s, rpc_rdma_pd) pdh;	/**< Protection Domain list */
-	mutex_t lock;
-
-	struct connection_requests c_r;		/* never freed??? */
-
-	pthread_t cm_thread;		/**< Thread id for connection manager */
-	pthread_t cq_thread;		/**< Thread id for completion queue */
-	pthread_t stats_thread;
-
-	int cm_epollfd;
-	int cq_epollfd;
-	int stats_epollfd;
-
-	int32_t run_count;
-};
-
 /* GLOBAL VARIABLES */
 
-static struct rpc_rdma_state rpc_rdma_state;
+struct rpc_rdma_state rpc_rdma_state;
 
 void
 rpc_rdma_internals_init(void)
@@ -403,6 +377,11 @@ rpc_rdma_worker_callback(struct work_pool_entry *wpe)
 		opr_containerof(wpe, struct rpc_rdma_cbc, wpe);
 	RDMAXPRT *xprt = (RDMAXPRT *)wpe->arg;
 
+	__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA,
+		"%s() %p opcode: %d %d %d %d %d %d",
+		__func__, cbc->opcode, xprt, IBV_WC_SEND, IBV_WC_RDMA_WRITE,
+		IBV_WC_RDMA_READ, IBV_WC_RECV, IBV_WC_RECV_RDMA_WITH_IMM);
+
 	if (cbc->status) {
 		if (cbc->negative_cb) {
 			__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA,
@@ -412,7 +391,8 @@ rpc_rdma_worker_callback(struct work_pool_entry *wpe)
 		}
 
 		/* wpe->arg referenced before work_pool_submit() */
-		SVC_RELEASE(&xprt->sm_dr.xprt, SVC_REF_FLAG_NONE);
+		if (!cbc->call_inline)
+			SVC_RELEASE(&xprt->sm_dr.xprt, SVC_REF_FLAG_NONE);
 		return;
 	}
 
@@ -438,7 +418,8 @@ rpc_rdma_worker_callback(struct work_pool_entry *wpe)
 	}
 
 	/* wpe->arg referenced before work_pool_submit() */
-	SVC_RELEASE(&xprt->sm_dr.xprt, SVC_REF_FLAG_NONE);
+	if (!cbc->call_inline)
+		SVC_RELEASE(&xprt->sm_dr.xprt, SVC_REF_FLAG_NONE);
 }
 
 /**
@@ -476,7 +457,7 @@ rpc_rdma_fd_add(RDMAXPRT *xprt, int fd, int epollfd)
 	return 0;
 }
 
-static int
+int
 rpc_rdma_fd_del(int fd, int epollfd)
 {
 	int rc = epoll_ctl(epollfd, EPOLL_CTL_DEL, fd, NULL);
@@ -684,27 +665,34 @@ rpc_rdma_cq_event_handler(RDMAXPRT *xprt)
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s() ibv_req_notify_cq failed: %d.",
 			__func__, rc);
+		return rc;
 	}
 
 	while (rc == 0
 	       && (npoll = ibv_poll_cq(xprt->cq, IBV_POLL_EVENTS, wc)) > 0) {
 		for (i = 0; i < npoll; i++) {
 			if (xprt->bad_recv_wr) {
-				__warnx(TIRPC_DEBUG_FLAG_ERROR,
+				__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA,
 					"%s() Something was bad on that recv",
 					__func__);
+				rc = -1;
 			}
+
 			if (xprt->bad_send_wr) {
 				__warnx(TIRPC_DEBUG_FLAG_ERROR,
 					"%s() Something was bad on that send",
 					__func__);
+				rc = -1;
 			}
+
 			cbc = (struct rpc_rdma_cbc *)wc[i].wr_id;
 			cbc->opcode = wc[i].opcode;
 			cbc->status = wc[i].status;
 			cbc->wpe.arg = xprt;
 
 			if (wc[i].status) {
+				rc = -1;
+
 				switch (wc[i].opcode) {
 					case IBV_WC_SEND:
 					case IBV_WC_RDMA_WRITE:
@@ -719,19 +707,19 @@ rpc_rdma_cq_event_handler(RDMAXPRT *xprt)
 						break;
 				}
 
-				SVC_REF(&xprt->sm_dr.xprt, SVC_REF_FLAG_NONE);
-				work_pool_submit(&svc_work_pool, &cbc->wpe);
+				__warnx(TIRPC_DEBUG_FLAG_ERROR,
+					"%s() cq completion status: %s (%d) xprt state %x opcode %d cbc %p "
+					"inline %d",
+					__func__, ibv_wc_status_str(wc[i].status), wc[i].status,
+					xprt->state, wc[i].opcode, cbc, cbc->call_inline);
 
-				if (xprt->state != RDMAXS_CLOSING
-				 && xprt->state != RDMAXS_CLOSED
-				 && xprt->state != RDMAXS_ERROR) {
-					rc = wc[i].status;
-					__warnx(TIRPC_DEBUG_FLAG_ERROR,
-						"%s() cq completion failed status: %s (%d)",
-						__func__,
-						ibv_wc_status_str(rc), rc);
-
+				if (cbc->call_inline) {
+					rpc_rdma_worker_callback(&cbc->wpe);
+				} else {
+					SVC_REF(&xprt->sm_dr.xprt, SVC_REF_FLAG_NONE);
+					work_pool_submit(&svc_work_pool, &cbc->wpe);
 				}
+
 				continue;
 			}
 
@@ -756,9 +744,14 @@ rpc_rdma_cq_event_handler(RDMAXPRT *xprt)
 						__func__,
 						ntohl(wc[i].imm_data));
 				}
-
-				SVC_REF(&xprt->sm_dr.xprt, SVC_REF_FLAG_NONE);
-				work_pool_submit(&svc_work_pool, &cbc->wpe);
+				__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA, "%s:%d submit cbc %p wpe %p inline %d",
+					__func__, __LINE__, cbc, &cbc->wpe, cbc->call_inline);
+				if (cbc->call_inline) {
+					rpc_rdma_worker_callback(&cbc->wpe);
+				} else {
+					SVC_REF(&xprt->sm_dr.xprt, SVC_REF_FLAG_NONE);
+					work_pool_submit(&svc_work_pool, &cbc->wpe);
+				}
 				break;
 
 			case IBV_WC_RECV:
@@ -784,7 +777,7 @@ rpc_rdma_cq_event_handler(RDMAXPRT *xprt)
 				/* fill all the sizes in case of multiple sge
 				 * assumes _tail was set to _wrap before call
 				 */
-				data = IOQ_(TAILQ_FIRST(&cbc->workq.ioq_uv.uvqh.qh));
+				data = IOQ_(TAILQ_FIRST(&cbc->recvq.ioq_uv.uvqh.qh));
 				while (data && ioquv_length(data) < len) {
 					VALGRIND_MAKE_MEM_DEFINED(data->v.vio_head, ioquv_length(data));
 					len -= ioquv_length(data);
@@ -798,9 +791,14 @@ rpc_rdma_cq_event_handler(RDMAXPRT *xprt)
 						"%s() ERROR %d leftover bytes?",
 						__func__, len);
 				}
-
-				SVC_REF(&xprt->sm_dr.xprt, SVC_REF_FLAG_NONE);
-				work_pool_submit(&svc_work_pool, &cbc->wpe);
+				__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA, "%s:%d submit cbc %p wpe %p inline %d",
+					__func__, __LINE__, cbc, &cbc->wpe, cbc->call_inline);
+				if (cbc->call_inline) {
+					rpc_rdma_worker_callback(&cbc->wpe);
+				} else {
+					SVC_REF(&xprt->sm_dr.xprt, SVC_REF_FLAG_NONE);
+					work_pool_submit(&svc_work_pool, &cbc->wpe);
+				}
 				break;
 
 			default:
@@ -838,7 +836,9 @@ rpc_rdma_cq_thread(void *arg)
 	int n;
 	int rc;
 
+	__warnx(TIRPC_DEBUG_FLAG_ERROR, "Starting rpc_rdma_cq_thread");
 	rcu_register_thread();
+
 	while (rpc_rdma_state.run_count > 0) {
 		n = epoll_wait(rpc_rdma_state.cq_epollfd,
 				epoll_events, EPOLL_EVENTS, EPOLL_WAIT_MS);
@@ -860,7 +860,8 @@ rpc_rdma_cq_thread(void *arg)
 			xprt = (RDMAXPRT*)epoll_events[i].data.ptr;
 			if (!xprt) {
 				__warnx(TIRPC_DEBUG_FLAG_ERROR,
-					"%s() got an event on a fd that should have been removed! (no xprt)",
+					"%s() got an event on a fd that should have "
+					"been removed! (no xprt)",
 					__func__);
 				continue;
 			}
@@ -868,33 +869,25 @@ rpc_rdma_cq_thread(void *arg)
 			if (epoll_events[i].events == EPOLLERR
 			 || epoll_events[i].events == EPOLLHUP) {
 				__warnx(TIRPC_DEBUG_FLAG_ERROR,
-					"%s() epoll error or hup (%d)",
-					__func__, epoll_events[i].events);
+					"%s() epoll error or hup (%d) xprt %p",
+					__func__, epoll_events[i].events, xprt);
+
+				SVC_DESTROY(&xprt->sm_dr.xprt);
 				continue;
+			}
+
+			if (xprt->sm_dr.xprt.xp_flags & SVC_XPRT_FLAG_DESTROYED) {
+				__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s : xprt already "
+					" destroyed %p", __func__, xprt);
 			}
 
 			mutex_lock(&xprt->cm_lock);
-			if (xprt->state >= RDMAXS_CLOSING) {
-				/* CLOSING, CLOSED, ERROR */
-				// closing xprt, skip this, will be done on flush
-				rpc_rdma_fd_del(xprt->comp_channel->fd,
-						rpc_rdma_state.cq_epollfd);
-				mutex_unlock(&xprt->cm_lock);
-				continue;
-			}
 
 			rc = rpc_rdma_cq_event_handler(xprt);
 			if (rc) {
-				if (xprt->state != RDMAXS_CLOSING
-				 && xprt->state != RDMAXS_CLOSED
-				 && xprt->state != RDMAXS_ERROR) {
-					__warnx(TIRPC_DEBUG_FLAG_ERROR,
-						"%s() something went wrong with our cq_event_handler",
-						__func__);
-					xprt->state = RDMAXS_ERROR;
-					cond_broadcast(&xprt->cm_cond);
-				}
+				SVC_DESTROY(&xprt->sm_dr.xprt);
 			}
+
 			mutex_unlock(&xprt->cm_lock);
 		}
 	}
@@ -911,8 +904,11 @@ static int
 rpc_rdma_cm_event_handler(RDMAXPRT *ep_xprt, struct rdma_cm_event *event)
 {
 	struct rdma_cm_id *cm_id = event->id;
+
+	/* cm_id->context set in rpc_rdma_clone set for client xprt.
+	 * for connect its listen xprt set by rdma_create_id.
+	 * For established its new connected client xprt*/
 	RDMAXPRT *xprt = cm_id->context;
-	uint32_t u;
 	int rc = 0;
 
 	__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA,
@@ -972,58 +968,9 @@ rpc_rdma_cm_event_handler(RDMAXPRT *ep_xprt, struct rdma_cm_event *event)
 		__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA,
 			"%s() %p CONNECT_REQUEST",
 			__func__, xprt);
+		rpc_rdma_state.c_r.id_queue[0] = cm_id;
+		svc_rdma_rendezvous(&xprt->sm_dr.xprt);
 
-		rc = sem_trywait(&rpc_rdma_state.c_r.u_sem);
-		if (rc) {
-			rc = errno;
-			if (EAGAIN != rc) {
-				__warnx(TIRPC_DEBUG_FLAG_ERROR,
-					"%s() %p[%u] sem_trywait failed: %s (%d)",
-					__func__, xprt, xprt->state,
-					strerror(rc), rc);
-				return rc;
-			}
-
-			__warnx(TIRPC_DEBUG_FLAG_ERROR,
-				"%s() %p WARNING too many connection requests! "
-				"Need to increase backlog parameter.\n",
-				__func__, xprt);
-
-			/* After advisory message, wait for available slot.
-			 */
-			rc = sem_wait(&rpc_rdma_state.c_r.u_sem);
-			if (rc) {
-				rc = errno;
-				__warnx(TIRPC_DEBUG_FLAG_ERROR,
-					"%s() %p[%u] sem_wait failed: %s (%d)",
-					__func__, xprt, xprt->state,
-					strerror(rc), rc);
-				return rc;
-			}
-		}
-
-		u = atomic_postinc_uint32_t(&rpc_rdma_state.c_r.q_tail);
-		if (u >= rpc_rdma_state.c_r.q_size) {
-			u_int q_mask = rpc_rdma_state.c_r.q_size - 1;
-
-			/* masking allows update by lock-free tasks,
-			 * as long as overrun never 2 * q_size
-			 */
-			u &= q_mask;
-			atomic_clear_uint32_t_bits(&rpc_rdma_state.c_r.q_tail,
-						   ~q_mask);
-		}
-		rpc_rdma_state.c_r.id_queue[u] = cm_id;
-
-		/* signal accept handler */
-		rc = sem_post(&rpc_rdma_state.c_r.q_sem);
-		if (rc) {
-			rc = errno;
-			__warnx(TIRPC_DEBUG_FLAG_ERROR,
-				"%s() sem_post failed",
-				__func__, strerror(rc), rc);
-			return rc;
-		}
 		break;
 
 	case RDMA_CM_EVENT_ADDR_ERROR:
@@ -1035,10 +982,9 @@ rpc_rdma_cm_event_handler(RDMAXPRT *ep_xprt, struct rdma_cm_event *event)
 			"%s() %p[%u] cma event %s, error %d",
 			__func__, xprt, xprt->state,
 			rdma_event_str(event->event), event->status);
-		mutex_lock(&xprt->cm_lock);
-		xprt->state = RDMAXS_ERROR;
-		cond_broadcast(&xprt->cm_cond);
-		mutex_unlock(&xprt->cm_lock);
+
+		SVC_DESTROY(&xprt->sm_dr.xprt);
+
 		break;
 
 	case RDMA_CM_EVENT_DISCONNECTED:
@@ -1046,18 +992,8 @@ rpc_rdma_cm_event_handler(RDMAXPRT *ep_xprt, struct rdma_cm_event *event)
 			"%s() %p[%u] DISCONNECT EVENT...",
 			__func__, xprt, xprt->state);
 
-		// don't call completion again
-		if (xprt->comp_channel)
-			rpc_rdma_fd_del(xprt->comp_channel->fd,
-					rpc_rdma_state.cq_epollfd);
+		SVC_DESTROY(&xprt->sm_dr.xprt);
 
-		mutex_lock(&xprt->cm_lock);
-		xprt->state = RDMAXS_CLOSED;
-		cond_broadcast(&xprt->cm_cond);
-		mutex_unlock(&xprt->cm_lock);
-
-		if (__svc_params->disconnect_cb)
-			__svc_params->disconnect_cb(&xprt->sm_dr.xprt);
 		break;
 
 	case RDMA_CM_EVENT_DEVICE_REMOVAL:
@@ -1087,7 +1023,6 @@ static void *
 rpc_rdma_cm_thread(void *nullarg)
 {
 	RDMAXPRT *xprt;
-	RDMAXPRT *cm_xprt;
 	struct rdma_cm_event *event;
 	struct epoll_event epoll_events[EPOLL_EVENTS];
 	int i;
@@ -1113,6 +1048,7 @@ rpc_rdma_cm_thread(void *nullarg)
 		}
 
 		for (i = 0; i < n; ++i) {
+			/* data.ptr is in rpc_rdma_fd_add */
 			xprt = (RDMAXPRT*)epoll_events[i].data.ptr;
 			if (!xprt) {
 				__warnx(TIRPC_DEBUG_FLAG_ERROR,
@@ -1124,23 +1060,24 @@ rpc_rdma_cm_thread(void *nullarg)
 			if (epoll_events[i].events == EPOLLERR
 			 || epoll_events[i].events == EPOLLHUP) {
 				__warnx(TIRPC_DEBUG_FLAG_ERROR,
-					"%s() epoll error or hup (%d)",
-					__func__, epoll_events[i].events);
+					"%s() epoll error or hup (%d) xprt %p",
+					__func__, epoll_events[i].events, xprt);
+				SVC_DESTROY(&xprt->sm_dr.xprt);
 				continue;
 			}
 
-			if (xprt->state == RDMAXS_CLOSED) {
+			if (xprt->sm_dr.xprt.xp_flags & SVC_XPRT_FLAG_DESTROYED) {
 				__warnx(TIRPC_DEBUG_FLAG_ERROR,
-					"%s() got a cm event on a closed xprt?",
-					__func__);
+					"%s() got a cm event on a closed xprt %p",
+					__func__, xprt);
 				continue;
 			}
 
 			if (!xprt->event_channel) {
-				if (xprt->state != RDMAXS_CLOSED)
-					__warnx(TIRPC_DEBUG_FLAG_ERROR,
-						"%s() no event channel? :D",
-						__func__);
+				__warnx(TIRPC_DEBUG_FLAG_ERROR,
+					"%s() no event channel xprt %p",
+					__func__, xprt);
+				SVC_DESTROY(&xprt->sm_dr.xprt);
 				continue;
 			}
 
@@ -1148,26 +1085,20 @@ rpc_rdma_cm_thread(void *nullarg)
 			if (rc) {
 				rc = errno;
 				__warnx(TIRPC_DEBUG_FLAG_ERROR,
-					"%s() rdma_get_cm_event failed: %d.",
-					__func__, rc);
+					"%s() rdma_get_cm_event failed: %d xprt %p",
+					__func__, rc, xprt);
+				SVC_DESTROY(&xprt->sm_dr.xprt);
 				continue;
 			}
 
-			cm_xprt = event->id->context;
+			/* For connect events xprt and cm_xprt should be same */
+
 			rc = rpc_rdma_cm_event_handler(xprt, event);
+
 			rdma_ack_cm_event(event);
 
-			if (rc
-			 && (cm_xprt->state != RDMAXS_LISTENING
-			  || cm_xprt == xprt)) {
-				__warnx(TIRPC_DEBUG_FLAG_ERROR,
-					"%s() rpc_rdma_cm_event_handler: %d.",
-					__func__, rc);
-			}
-
-			if (cm_xprt->state == RDMAXS_CLOSED
-			 && cm_xprt->destroy_on_disconnect)
-				SVC_DESTROY(&cm_xprt->sm_dr.xprt);
+			if (rc)
+				SVC_DESTROY(&xprt->sm_dr.xprt);
 		}
 	}
 	rcu_unregister_thread();
@@ -1184,7 +1115,8 @@ rpc_rdma_cm_thread(void *nullarg)
 static void
 rpc_rdma_flush_buffers(RDMAXPRT *xprt)
 {
-	int rc;
+	/* Wait for > cb_timeout */
+	int retries = RDMA_CB_TIMEOUT_SEC * 2;
 
 	__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA,
 		"%s() %p[%u]",
@@ -1192,53 +1124,178 @@ rpc_rdma_flush_buffers(RDMAXPRT *xprt)
 
 	mutex_lock(&xprt->cm_lock);
 
-	if (xprt->state != RDMAXS_ERROR) {
-		do {
-			rc = rpc_rdma_cq_event_handler(xprt);
-		} while (rc == 0);
+	rpc_rdma_cq_event_handler(xprt);
 
-		if (rc != EAGAIN)
-			__warnx(TIRPC_DEBUG_FLAG_ERROR,
-				"%s() couldn't flush pending data in cq: %d",
-				__func__, rc);
-	}
-#ifdef FIXME
-	/* only flush rx if client or accepting server */
-	if (xprt->server >= 0)
-	    for (i = 0, ctx = xprt->rcb;
-		 i < xprt->xa->rq_depth;
-		 i++,
-		 ctx = (struct rpc_rdma_cbc*)((uint8_t*)ctx + sizeof(struct rpc_rdma_cbc) + xprt->xa->max_recv_sge*sizeof(struct ibv_sge)))
-			if (ctx->used == MSK_CTX_PENDING)
-				rpc_rdma_worker_signal(xprt, ctx, IBV_WC_FATAL_ERR, IBV_WC_RECV);
-
-	for (i = 0, ctx = (struct rpc_rdma_cbc *)xprt->wcb;
-	     i < xprt->xa->sq_depth;
-	     i++, ctx = (struct rpc_rdma_cbc*)((uint8_t*)ctx + sizeof(struct rpc_rdma_cbc) + xprt->xa->max_send_sge*sizeof(struct ibv_sge)))
-		if (ctx->used == MSK_CTX_PENDING)
-			rpc_rdma_worker_signal(xprt, ctx, IBV_WC_FATAL_ERR, IBV_WC_SEND);
-
-	/* only flush rx if client or accepting server */
-	if (xprt->server >= 0) do {
-		wait = 0;
-			for (i = 0, ctx = xprt->rcb;
-			     i < xprt->xa->rq_depth;
-			     i++, ctx = rpc_rdma_next_ctx(ctx, xprt->xa->max_recv_sge))
-				if (ctx->used != MSK_CTX_FREE)
-					wait++;
-
-	} while (wait && usleep(100000));
-	do {
-		wait = 0;
-		for (i = 0, ctx = (struct rpc_rdma_cbc *)xprt->wcb;
-		     i < xprt->xa->sq_depth;
-		     i++, ctx = rpc_rdma_next_ctx(ctx, xprt->xa->max_recv_sge))
-			if (ctx->used != MSK_CTX_FREE)
-				wait++;
-
-	} while (wait && usleep(100000));
-#endif
 	mutex_unlock(&xprt->cm_lock);
+
+	while(atomic_fetch_uint32_t(&xprt->active_requests) && retries--) {
+		__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s retry %d "
+		    "active requests %u xprt %p", __func__, retries,
+		    atomic_fetch_uint32_t(&xprt->active_requests), xprt);
+		sleep(1);
+	}
+}
+
+/* Destroy all the buf/cbc queues/pools and
+ * free registered memory */
+void
+rdma_cleanup_cbcs_task(struct work_pool_entry *wpe) {
+	struct rpc_dplx_rec *rec =
+	    opr_containerof(wpe, struct rpc_dplx_rec, ioq.ioq_wpe);
+
+	RDMAXPRT *xd = (RDMAXPRT *) &(rec->xprt);
+
+	rpc_rdma_flush_buffers(xd);
+	rpc_rdma_close_connection(xd);
+
+	/* If cbclist is still not empty, then most likely we won't
+	 * get any callbacks, since we already destroyed qp and cq,
+	 * so just force remove outstanding cbcs and release refs.
+	 * pool_head may not be initialized, so check for qcount */
+
+	if (xd->cbclist.qcount && !TAILQ_EMPTY(&xd->cbclist.qh)) {
+		struct poolq_head *ioqh = &xd->cbclist;
+
+		pthread_mutex_lock(&ioqh->qmutex);
+
+		struct poolq_entry *have = TAILQ_FIRST(&ioqh->qh);
+
+		/* release queued buffers */
+		while (have) {
+			struct rpc_rdma_cbc *cbc =
+				opr_containerof(have, struct rpc_rdma_cbc, cbc_list);
+
+			__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA, "%s cbc %p refcnt %d "
+			    "xd %p", __func__, cbc, cbc->refcnt, xd);
+
+			assert(cbc->refcnt);
+
+			cbc->cbc_flags = CBC_FLAG_RELEASE;
+
+			if (cbc->refcnt > 1) {
+				__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA, "%s cbc %p refcnt "
+				    "%d > 1 xd %p", __func__, cbc, cbc->refcnt, xd);
+				cbc->refcnt = 1;
+			}
+
+			pthread_mutex_unlock(&ioqh->qmutex);
+
+			/* This will remove it from cbclist */
+			cbc_release_it(cbc);
+
+			pthread_mutex_lock(&ioqh->qmutex);
+
+			have = TAILQ_FIRST(&ioqh->qh);;
+		}
+
+		assert(ioqh->qcount == 0);
+
+		pthread_mutex_unlock(&ioqh->qmutex);
+	}
+	SVC_RELEASE(&rec->xprt, SVC_REF_FLAG_NONE);
+}
+
+static void
+rdma_destroy_cbcs(RDMAXPRT *xd) {
+	/* pool_head may not be initialized, so check for qcount */
+	if (xd->cbqh.qcount && !TAILQ_EMPTY(&xd->cbqh.qh)) {
+		struct poolq_head *ioqh = &xd->cbqh;
+
+		pthread_mutex_lock(&ioqh->qmutex);
+
+		struct poolq_entry *have = TAILQ_FIRST(&ioqh->qh);
+
+		/* release queued buffers */
+		while (have) {
+			struct poolq_entry *next = TAILQ_NEXT(have, q);
+
+			struct xdr_ioq *recvq =
+				opr_containerof(have, struct xdr_ioq, ioq_s);
+
+			struct rpc_rdma_cbc *cbc =
+			     opr_containerof(recvq, struct rpc_rdma_cbc, recvq);
+
+			TAILQ_REMOVE(&ioqh->qh, have, q);
+			(ioqh->qcount)--;
+
+			mem_free(cbc, ioqh->qsize);
+
+			have = next;
+		}
+		assert(ioqh->qcount == 0);
+
+		pthread_mutex_unlock(&ioqh->qmutex);
+
+		poolq_head_destroy(ioqh);
+	}
+}
+
+static void
+rdma_destroy_extra_bufs(RDMAXPRT *xd) {
+	/* pool_head may not be initialized, so check for qcount */
+	if (xd->extra_bufs.qcount && !TAILQ_EMPTY(&xd->extra_bufs.qh)) {
+		struct poolq_head *ioqh = &xd->extra_bufs;
+
+		pthread_mutex_lock(&ioqh->qmutex);
+
+		struct poolq_entry *have = TAILQ_FIRST(&ioqh->qh);
+
+		/* release queued buffers */
+		while (have) {
+			struct poolq_entry *next = TAILQ_NEXT(have, q);
+
+			struct rpc_extra_io_bufs *io_buf =
+				opr_containerof(have, struct rpc_extra_io_bufs, q);
+
+			assert(io_buf->mr);
+			ibv_dereg_mr(io_buf->mr);
+			io_buf->mr = NULL;
+
+			assert(io_buf->buffer_aligned);
+			mem_free(io_buf->buffer_aligned, io_buf->buffer_total);
+			io_buf->buffer_aligned = NULL;
+
+			xd->extra_bufs_count--;
+
+			TAILQ_REMOVE(&ioqh->qh, have, q);
+			(ioqh->qcount)--;
+
+			mem_free(io_buf, ioqh->qsize);
+
+			have = next;
+		}
+		assert(ioqh->qcount == 0);
+
+		pthread_mutex_unlock(&ioqh->qmutex);
+
+		poolq_head_destroy(ioqh);
+	}
+}
+
+/* Destroy all the buf/cbc queues/pools and
+ * free registered memory */
+static void
+xdr_ioq_rdma_destroy_pools(RDMAXPRT *xd) {
+
+	xdr_rdma_buf_pool_destroy(&xd->inbufs_hdr.uvqh);
+	xdr_rdma_buf_pool_destroy(&xd->outbufs_hdr.uvqh);
+
+	xdr_rdma_buf_pool_destroy(&xd->inbufs_data.uvqh);
+	xdr_rdma_buf_pool_destroy(&xd->outbufs_data.uvqh);
+
+	rdma_destroy_cbcs(xd);
+
+	if (xd->mr) {
+		ibv_dereg_mr(xd->mr);
+		xd->mr = NULL;
+	}
+
+	if (xd->buffer_aligned) {
+		mem_free(xd->buffer_aligned, xd->buffer_total);
+		xd->buffer_aligned = NULL;
+	}
+
+	rdma_destroy_extra_bufs(xd);
 }
 
 /**
@@ -1246,16 +1303,13 @@ rpc_rdma_flush_buffers(RDMAXPRT *xprt)
  *
  * @param[INOUT] xprt
  *
- * @return void, even if the functions _can_ fail we choose to ignore it. //FIXME?
+ * @return void
  */
 static void
 rpc_rdma_destroy_stuff(RDMAXPRT *xprt)
 {
 	if (xprt->qp) {
-		// flush all pending receive/send buffers to error callback
-		rpc_rdma_flush_buffers(xprt);
-
-		ibv_destroy_qp(xprt->qp);
+		rdma_destroy_qp(xprt->cm_id);
 		xprt->qp = NULL;
 	}
 
@@ -1265,13 +1319,34 @@ rpc_rdma_destroy_stuff(RDMAXPRT *xprt)
 	}
 
 	if (xprt->comp_channel) {
+		if (((RDMAXPRT *)xprt)->state == RDMAXS_CONNECTED) {
+			rpc_rdma_fd_del(((RDMAXPRT *)xprt)->comp_channel->fd,
+			    rpc_rdma_state.cq_epollfd);
+		}
+
 		ibv_destroy_comp_channel(xprt->comp_channel);
 		xprt->comp_channel = NULL;
 	}
 
-	if (!TAILQ_EMPTY(&xprt->cbqh.qh)) {
-		xdr_ioq_destroy_pool(&xprt->cbqh);
+	if (xprt->cm_id) {
+		rdma_destroy_id(xprt->cm_id);
+		xprt->cm_id = NULL;
 	}
+}
+
+void
+rpc_rdma_close_connection(RDMAXPRT *xd)
+{
+	/* inhibit repeated destroy */
+	xd->destroy_on_disconnect = false;
+
+	if (xd->cm_id && xd->cm_id->verbs)
+		rdma_disconnect(xd->cm_id);
+
+	if (xd->stats_sock)
+		rpc_rdma_stats_del(xd);
+
+	rpc_rdma_destroy_stuff(xd);
 }
 
 /**
@@ -1282,53 +1357,7 @@ rpc_rdma_destroy_stuff(RDMAXPRT *xprt)
 void
 rpc_rdma_destroy(RDMAXPRT *xd)
 {
-	/* inhibit repeated destroy */
-	xd->destroy_on_disconnect = false;
-
-	if (xd->state == RDMAXS_CONNECTED
-	 || xd->state == RDMAXS_CLOSED) {
-		mutex_lock(&xd->cm_lock);
-		if (xd->state != RDMAXS_CLOSED
-		 && xd->state != RDMAXS_LISTENING
-		 && xd->state != RDMAXS_ERROR)
-			xd->state = RDMAXS_CLOSING;
-
-		if (xd->cm_id && xd->cm_id->verbs)
-			rdma_disconnect(xd->cm_id);
-
-		while (xd->state != RDMAXS_CLOSED
-			&& xd->state != RDMAXS_LISTENING
-			&& xd->state != RDMAXS_ERROR) {
-			__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA,
-				"%s() we're not closed yet, "
-				"waiting for disconnect_event",
-				__func__);
-			cond_wait(&xd->cm_cond, &xd->cm_lock);
-		}
-		xd->state = RDMAXS_CLOSED;
-		mutex_unlock(&xd->cm_lock);
-	}
-
-	if (xd->cm_id) {
-		rdma_destroy_id(xd->cm_id);
-		xd->cm_id = NULL;
-	}
-
-	if (xd->stats_sock)
-		rpc_rdma_stats_del(xd);
-
-	/* event channel is shared between all children,
-	 * so don't close it unless it's its own.
-	 */
-	if ((xd->server != RDMAX_SERVER_CHILD)
-	 && xd->event_channel) {
-		rpc_rdma_fd_del(xd->event_channel->fd,
-				rpc_rdma_state.cm_epollfd);
-		rdma_destroy_event_channel(xd->event_channel);
-		xd->event_channel = NULL;
-	}
-
-	rpc_rdma_destroy_stuff(xd);
+	xdr_ioq_rdma_destroy_pools(xd);
 	rpc_rdma_pd_put(xd);
 
 	if (atomic_dec_int32_t(&rpc_rdma_state.run_count) <= 0) {
@@ -1341,7 +1370,6 @@ rpc_rdma_destroy(RDMAXPRT *xd)
 	 */
 	cond_destroy(&xd->cm_cond);
 	mutex_destroy(&xd->cm_lock);
-	XDR_DESTROY(xd->sm_dr.ioq.xdrs);
 	rpc_dplx_rec_destroy(&xd->sm_dr);
 
 	mem_free(xd, sizeof(*xd));
@@ -1370,7 +1398,6 @@ rpc_rdma_allocate(const struct rpc_rdma_attr *xa)
 	xd = mem_zalloc(sizeof(*xd));
 
 	xd->sm_dr.xprt.xp_type = XPRT_RDMA;
-	xd->sm_dr.xprt.xp_refcnt = 1;
 	xd->sm_dr.xprt.xp_ops = &rpc_rdma_ops;
 
 	xd->xa = xa;
@@ -1380,7 +1407,13 @@ rpc_rdma_allocate(const struct rpc_rdma_attr *xa)
 	/* initialize locking first, will be destroyed last (above).
 	 */
 	xdr_ioq_setup(&xd->sm_dr.ioq);
+
+	/* svc_xprt ref taken here */
 	rpc_dplx_rec_init(&xd->sm_dr);
+
+	xd->sm_dr.ioq.rdma_ioq = true;
+	xd->sm_dr.ioq.xdrs[0].x_lib[1] = xd;
+	xd->active_requests = 0;
 
 	rc = mutex_init(&xd->cm_lock, NULL);
 	if (rc) {
@@ -1478,22 +1511,9 @@ rpc_rdma_ncreatef(const struct rpc_rdma_attr *xa,
 
 	/* buffer sizes MUST be page sized */
 	xd->sm_dr.pagesz = sysconf(_SC_PAGESIZE);
-	if (recvsize) {
-		/* round up */
-		xd->sm_dr.recvsz = recvsize + (xd->sm_dr.pagesz - 1);
-		xd->sm_dr.recvsz &= ~(xd->sm_dr.pagesz - 1);
-	} else {
-		/* default */
-		xd->sm_dr.recvsz = xd->sm_dr.pagesz;
-	}
-	if (sendsize) {
-		/* round up */
-		xd->sm_dr.sendsz = sendsize + (xd->sm_dr.pagesz - 1);
-		xd->sm_dr.sendsz &= ~(xd->sm_dr.pagesz - 1);
-	} else {
-		/* default */
-		xd->sm_dr.recvsz = xd->sm_dr.pagesz;
-	}
+
+	xd->sm_dr.recv_hdr_sz = xd->sm_dr.send_hdr_sz = RDMA_HDR_CHUNK_SZ;
+	xd->sm_dr.recvsz = xd->sm_dr.sendsz = RDMA_DATA_CHUNK_SZ;
 
 	/* round up to the next power of two */
 	rpc_rdma_state.c_r.q_size = 2;
@@ -1512,13 +1532,12 @@ rpc_rdma_ncreatef(const struct rpc_rdma_attr *xa,
 		goto failure;
 	}
 	__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA,
-		"%s() NFS/RDMA engine bound",
-		__func__);
+		"%s() NFS/RDMA engine bound recvsz %llu sendsz %llu xd %p",
+		__func__, xd->sm_dr.recvsz, xd->sm_dr.sendsz, xd);
 
 	return (&xd->sm_dr.xprt);
 
 failure:
-	rpc_rdma_destroy(xd);
 	return NULL;
 }
 
@@ -1535,9 +1554,9 @@ rpc_rdma_create_qp(RDMAXPRT *xprt, struct rdma_cm_id *cm_id)
 {
 	int rc;
 	struct ibv_qp_init_attr qp_attr = {
-		.cap.max_send_wr = xprt->xa->sq_depth,
+		.cap.max_send_wr = MAX_CBC_OUTSTANDING,
 		.cap.max_send_sge = xprt->xa->max_send_sge,
-		.cap.max_recv_wr = xprt->xa->rq_depth,
+		.cap.max_recv_wr = MAX_CBC_OUTSTANDING,
 		.cap.max_recv_sge = xprt->xa->max_recv_sge,
 		.cap.max_inline_data = 0, // change if IMM
 		.qp_type = (xprt->conn_type == RDMA_PS_UDP
@@ -1556,6 +1575,17 @@ rpc_rdma_create_qp(RDMAXPRT *xprt, struct rdma_cm_id *cm_id)
 			__func__, xprt, xprt->state, strerror(rc), rc);
 		return rc;
 	}
+
+	struct ibv_qp_attr attr;
+	memset(&attr, 0, sizeof(attr));
+	ibv_query_qp(cm_id->qp, &attr, IBV_QP_STATE | IBV_QP_AV |
+	    IBV_QP_PATH_MTU | IBV_QP_DEST_QPN | IBV_QP_RQ_PSN |
+	    IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER, &qp_attr);
+
+	__warnx(TIRPC_DEBUG_FLAG_EVENT,
+		"%s() %p[%u] ibv_query_qp path mtu %d state %d qp type %d",
+		__func__, xprt, xprt->state, attr.qp_state,
+		attr.path_mtu, qp_attr.qp_type);
 
 	xprt->qp = cm_id->qp;
 	return 0;
@@ -1635,9 +1665,48 @@ rpc_rdma_setup_stuff(RDMAXPRT *xprt)
 	}
 
 	__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA,
-		"%s() %p[%u] created qp %p",
-		__func__, xprt, xprt->state, xprt->qp);
+		"%s() %p[%u] created qp %p handle %u qp_num %u",
+		__func__, xprt, xprt->state, xprt->qp,
+		xprt->qp->handle, xprt->qp->qp_num);
 	return 0;
+}
+
+void
+rpc_rdma_allocate_cbc_locked(struct poolq_head *ioqh)
+{
+
+	struct rpc_rdma_cbc *cbc = mem_zalloc(ioqh->qsize);
+
+	xdr_ioq_setup(&cbc->recvq);
+	xdr_ioq_setup(&cbc->sendq);
+	xdr_ioq_setup(&cbc->dataq);
+	xdr_ioq_setup(&cbc->freeq);
+
+	cbc->recvq.ioq_uv.uvq_fetch =
+	cbc->sendq.ioq_uv.uvq_fetch =
+	cbc->dataq.ioq_uv.uvq_fetch =
+	cbc->freeq.ioq_uv.uvq_fetch = xdr_rdma_ioq_uv_fetch_nothing;
+
+	cbc->recvq.rdma_ioq = cbc->sendq.rdma_ioq =
+	cbc->dataq.rdma_ioq = cbc->freeq.rdma_ioq = true;
+
+	cbc->recvq.xdrs[0].x_ops =
+	cbc->sendq.xdrs[0].x_ops =
+	cbc->dataq.xdrs[0].x_ops =
+	cbc->freeq.xdrs[0].x_ops = &xdr_ioq_ops_rdma;
+
+	cbc->recvq.xdrs[0].x_op =
+	cbc->sendq.xdrs[0].x_op =
+	cbc->dataq.xdrs[0].x_op =
+	cbc->freeq.xdrs[0].x_op = XDR_FREE; /* catch setup errors */
+
+	cbc->recvq.ioq_pool = ioqh;
+	cbc->wpe.fun = rpc_rdma_worker_callback;
+	pthread_cond_init(&cbc->cb_done, NULL);
+	pthread_mutex_init(&cbc->cb_done_mutex, NULL);
+
+	(ioqh->qcount)++;
+	TAILQ_INSERT_TAIL(&ioqh->qh, &cbc->recvq.ioq_s, q);
 }
 
 /**
@@ -1646,8 +1715,6 @@ rpc_rdma_setup_stuff(RDMAXPRT *xprt)
 static int
 rpc_rdma_setup_cbq(struct poolq_head *ioqh, u_int depth, u_int sge)
 {
-	struct rpc_rdma_cbc *cbc;
-
 	if (ioqh->qsize) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s() contexts already allocated",
@@ -1656,31 +1723,23 @@ rpc_rdma_setup_cbq(struct poolq_head *ioqh, u_int depth, u_int sge)
 	}
 	ioqh->qsize = sizeof(struct rpc_rdma_cbc)
 		    + sizeof(struct ibv_sge) * sge;
-	TAILQ_INIT(&ioqh->qh);
+
+	poolq_head_setup(ioqh);
 
 	/* individual entries is less efficient than big array -- but uses
 	 * "standard" IOQ operations, xdr_ioq_destroy_pool(), and
 	 * debugging memory bounds checking of trailing ibv_sge array.
 	 */
+	/* Initiaze recvq and sendq */
+
+	pthread_mutex_lock(&ioqh->qmutex);
+
 	while (depth--) {
-		cbc = mem_zalloc(ioqh->qsize);
-
-		xdr_ioq_setup(&cbc->workq);
-		xdr_ioq_setup(&cbc->holdq);
-
-		cbc->workq.ioq_uv.uvq_fetch =
-		cbc->holdq.ioq_uv.uvq_fetch = xdr_ioq_uv_fetch_nothing;
-		cbc->workq.xdrs[0].x_ops =
-		cbc->holdq.xdrs[0].x_ops = &xdr_ioq_ops;
-		cbc->workq.xdrs[0].x_op =
-		cbc->holdq.xdrs[0].x_op = XDR_FREE; /* catch setup errors */
-
-		cbc->workq.ioq_pool = ioqh;
-		cbc->wpe.fun = rpc_rdma_worker_callback;
-
-		(ioqh->qcount)++;
-		TAILQ_INSERT_TAIL(&ioqh->qh, &cbc->workq.ioq_s, q);
+		rpc_rdma_allocate_cbc_locked(ioqh);
 	}
+
+	pthread_mutex_unlock(&ioqh->qmutex);
+
 	return 0;
 }
 
@@ -1847,8 +1906,7 @@ rpc_rdma_clone(RDMAXPRT *l_xprt, struct rdma_cm_id *cm_id)
 		}
 	} else {
 		rc = rpc_rdma_setup_cbq(&xd->cbqh,
-					xd->xa->rq_depth +
-					xd->xa->sq_depth,
+					MAX_CBC_ALLOCATION,
 					xd->xa->credits);
 		if (rc) {
 			__warnx(TIRPC_DEBUG_FLAG_ERROR,
@@ -1873,7 +1931,7 @@ rpc_rdma_clone(RDMAXPRT *l_xprt, struct rdma_cm_id *cm_id)
 	return xd;
 
 failure:
-	rpc_rdma_destroy(xd);
+	SVC_DESTROY(&xd->sm_dr.xprt);
 	return (NULL);
 }
 
@@ -1930,8 +1988,10 @@ static RDMAXPRT *
 rpc_rdma_accept_timedwait(RDMAXPRT *l_xprt, struct timespec *abstime)
 {
 	struct rdma_cm_id *cm_id;
-	uint32_t u;
-	int rc;
+
+	__warnx(TIRPC_DEBUG_FLAG_ERROR,
+		"%s() %p[%u] listening (after bind_server)?",
+		__func__, l_xprt, l_xprt->state);
 
 	if (!l_xprt || l_xprt->state != RDMAXS_LISTENING) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
@@ -1940,61 +2000,7 @@ rpc_rdma_accept_timedwait(RDMAXPRT *l_xprt, struct timespec *abstime)
 		return (NULL);
 	}
 
-	/* Drain connection_requests */
-	if (abstime) {
-		rc = sem_timedwait(&rpc_rdma_state.c_r.q_sem, abstime);
-		if (rc) {
-			rc = errno;
-			if (ETIMEDOUT == rc) {
-				__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA,
-					"%s() ETIMEDOUT",
-					__func__);
-			} else {
-				__warnx(TIRPC_DEBUG_FLAG_ERROR,
-					"%s() sem_timedwait failed",
-					__func__, strerror(rc), rc);
-			}
-			return (NULL);
-		}
-	} else {
-		rc = sem_wait(&rpc_rdma_state.c_r.q_sem);
-		if (rc) {
-			rc = errno;
-			__warnx(TIRPC_DEBUG_FLAG_ERROR,
-				"%s() sem_wait failed",
-				__func__, strerror(rc), rc);
-			return (NULL);
-		}
-	}
-
-	u = atomic_postinc_uint32_t(&rpc_rdma_state.c_r.q_head);
-	if (u >= rpc_rdma_state.c_r.q_size) {
-		u_int q_mask = rpc_rdma_state.c_r.q_size - 1;
-
-		/* masking allows update by lock-free tasks,
-		 * as long as overrun never 2 * q_size
-		 */
-		u &= q_mask;
-		atomic_clear_uint32_t_bits(&rpc_rdma_state.c_r.q_head, ~q_mask);
-	}
-	cm_id = rpc_rdma_state.c_r.id_queue[u];
-
-	/* Increase available count */
-	rc = sem_post(&rpc_rdma_state.c_r.u_sem);
-	if (rc) {
-		rc = errno;
-		__warnx(TIRPC_DEBUG_FLAG_ERROR,
-			"%s() sem_post failed",
-			__func__, strerror(rc), rc);
-		return (NULL);
-	}
-
-	__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA,
-		"%s() thread %lx, q %u, cm_id %p",
-		__func__,
-		pthread_self(),
-		u,
-		cm_id);
+	cm_id = rpc_rdma_state.c_r.id_queue[0];
 
 	if (!cm_id) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
@@ -2011,6 +2017,9 @@ rpc_rdma_accept_wait(RDMAXPRT *l_xprt,int msleep)
 {
 	struct timespec ts;
 
+	__warnx(TIRPC_DEBUG_FLAG_ERROR,
+		"%s() accept wait msleep %d",
+		__func__, msleep);
 	if (msleep == 0)
 		return rpc_rdma_accept_timedwait(l_xprt, NULL);
 
@@ -2206,22 +2215,6 @@ rpc_rdma_connect(RDMAXPRT *xprt)
 				rpc_rdma_state.cm_epollfd);
 }
 
-static void
-rpc_rdma_unlink_it(SVCXPRT *xprt, u_int flags, const char *tag, const int line)
-{
-	return;
-}
-
-static void
-rpc_rdma_destroy_it(SVCXPRT *xprt, u_int flags, const char *tag, const int line)
-{
-	if (xprt->xp_ops->xp_free_user_data) {
-		/* call free hook */
-		xprt->xp_ops->xp_free_user_data(xprt);
-	}
-	rpc_rdma_destroy(RDMA_DR(REC_XPRT(xprt)));
-}
-
 extern mutex_t ops_lock;
 
 static bool
@@ -2261,9 +2254,9 @@ static struct xp_ops rpc_rdma_ops = {
 	.xp_decode = (svc_req_fun_t)abort,
 	.xp_reply = (svc_req_fun_t)abort,
 	.xp_checksum = NULL,		/* not used */
-	.xp_unlink = rpc_rdma_unlink_it,
-	.xp_unref_user_data = NULL,	/* no default */
-	.xp_destroy = rpc_rdma_destroy_it,
+	.xp_unlink = svc_rdma_unlink,
+	.xp_unref_user_data = NULL,     /* no default */
+	.xp_destroy = svc_rdma_destroy,
 	.xp_control = rpc_rdma_control,
 	.xp_free_user_data = NULL,	/* no default */
 };
