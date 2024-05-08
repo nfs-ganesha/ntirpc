@@ -88,7 +88,7 @@ clnt_rdma_data_zalloc(void)
  * followed by CLNT_DESTROY() as necessary.
  */
 CLIENT *
-clnt_rdma_ncreatef(RDMAXPRT *xd,		/* init but NOT connect()ed */
+clnt_rdma_ncreatef(RDMAXPRT *rdma_xprt,		/* init but NOT connect()ed */
 		   const rpcprog_t program,
 		   const rpcvers_t version,
 		   const u_int flags)
@@ -100,22 +100,22 @@ clnt_rdma_ncreatef(RDMAXPRT *xd,		/* init but NOT connect()ed */
 
 	cl->cl_ops = clnt_rdma_ops();
 
-	if (!xd || xd->state != RDMAXS_INITIAL) {
+	if (!rdma_xprt || rdma_xprt->state != RDMAXS_INITIAL) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s: %p@%p called with invalid transport address",
-			__func__, cl, xd);
+			__func__, cl, rdma_xprt);
 		cl->cl_error.re_status = RPC_UNKNOWNADDR;
 		return (cl);
 	}
-	cm->cm_cx.cx_rec = &xd->sm_dr;
+	cm->cm_cx.cx_rec = &rdma_xprt->sm_dr;
 
-	rpc_rdma_connect(xd);
-	rpc_rdma_connect_finalize(xd);
+	rpc_rdma_connect(rdma_xprt);
+	rpc_rdma_connect_finalize(rdma_xprt);
 
 	/*
 	 * initialize call message
 	 */
-	call_msg.rm_xid = xd->sm_dr.call_xid;
+	call_msg.rm_xid = rdma_xprt->sm_dr.call_xid;
 	call_msg.rm_direction = CALL;
 	call_msg.rm_call.cb_rpcvers = RPC_MSG_VERSION;
 	call_msg.cb_prog = program;
@@ -129,7 +129,7 @@ clnt_rdma_ncreatef(RDMAXPRT *xd,		/* init but NOT connect()ed */
 	if (!xdr_callhdr(xdrs, &call_msg)) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s: %p@%p xdr_callhdr failed",
-			__func__, cl, xd);
+			__func__, cl, rdma_xprt);
 		cl->cl_error.re_status = RPC_CANTENCODEARGS;
 		XDR_DESTROY(xdrs);
 		return (cl);
@@ -139,7 +139,7 @@ clnt_rdma_ncreatef(RDMAXPRT *xd,		/* init but NOT connect()ed */
 
 	__warnx(TIRPC_DEBUG_FLAG_CLNT_RDMA,
 		"%s: %p@%p completed",
-		__func__, cl, xd);
+		__func__, cl, rdma_xprt);
 	return (cl);
 }
 
@@ -157,9 +157,9 @@ clnt_rdma_call(struct clnt_req *cc)
 	CLIENT *cl = cc->cc_clnt;
 	struct cx_data *cx = CX_DATA(cl);
 	struct rpc_dplx_rec *rec = cx->cx_rec;
-	RDMAXPRT *xd = RDMA_DR(rec);
+	RDMAXPRT *rdma_xprt = RDMA_DR(rec);
 	struct poolq_entry *have =
-		xdr_rdma_ioq_uv_fetch(&xd->sm_dr.ioq, &xd->cbqh,
+		xdr_rdma_ioq_uv_fetch(&rdma_xprt->sm_dr.ioq, &rdma_xprt->cbqh,
 				 "call context", 1, IOQ_FLAG_NONE);
 	struct rpc_rdma_cbc *cbc = (struct rpc_rdma_cbc *)(_IOQ(have));
 	XDR *xdrs;
@@ -168,12 +168,12 @@ clnt_rdma_call(struct clnt_req *cc)
 	/* free old buffers (should do nothing) */
 	xdr_ioq_release(&cbc->recvq.ioq_uv.uvqh);
 	xdr_ioq_release(&cbc->sendq.ioq_uv.uvqh);
-	xdr_rdma_callq(xd);
+	xdr_rdma_callq(rdma_xprt);
 
 	cbc->recvq.xdrs[0].x_lib[1] =
-	cbc->sendq.xdrs[0].x_lib[1] = xd;
+	cbc->sendq.xdrs[0].x_lib[1] = rdma_xprt;
 
-	(void) xdr_rdma_ioq_uv_fetch(&cbc->sendq, &xd->outbufs_data.uvqh,
+	(void) xdr_rdma_ioq_uv_fetch(&cbc->sendq, &rdma_xprt->outbufs_data.uvqh,
 				"call buffer", 1, IOQ_FLAG_NONE);
 	xdr_ioq_reset(&cbc->sendq, 0);
 

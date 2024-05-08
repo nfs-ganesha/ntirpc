@@ -158,14 +158,14 @@ extern void xdr_rdma_ioq_release(struct poolq_head *ioqh, bool xioq_recycle,
 extern void xdr_rdma_buf_pool_destroy(struct poolq_head *ioqh);
 
 extern struct poolq_entry *xdr_rdma_ioq_uv_fetch(struct xdr_ioq *xioq,
-					     struct poolq_head *ioqh,
-					     char *comment,
-					     u_int count,
-					     u_int ioq_flags);
+						 struct poolq_head *ioqh,
+						 char *comment,
+						 u_int count,
+						 u_int ioq_flags);
 extern struct poolq_entry *xdr_rdma_ioq_uv_fetch_nothing(struct xdr_ioq *xioq,
-						     struct poolq_head *ioqh,
-						     char *comment,
-						     u_int count,
-						     u_int ioq_flags);
+							 struct poolq_head *ioqh,
+							 char *comment,
+							 u_int count,
+							 u_int ioq_flags);
 #endif
 #endif				/* XDR_IOQ_H */

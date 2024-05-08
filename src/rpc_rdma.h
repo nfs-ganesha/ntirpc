@@ -83,7 +83,7 @@ struct rpc_extra_io_bufs {
 typedef struct rpc_rdma_xprt RDMAXPRT;
 
 struct rpc_rdma_cbc;
-typedef int (*rpc_rdma_callback_t)(struct rpc_rdma_cbc *cbc, RDMAXPRT *xprt);
+typedef int (*rpc_rdma_callback_t)(struct rpc_rdma_cbc *cbc, RDMAXPRT *rdma_xprt);
 
 #define CBC_FLAG_NONE		0x0000
 #define CBC_FLAG_RELEASE	0x0001
@@ -227,46 +227,6 @@ struct rpc_rdma_xprt {
 };
 #define RDMA_DR(p) (opr_containerof((p), struct rpc_rdma_xprt, sm_dr))
 
-typedef struct rec_rdma_strm {
-	RDMAXPRT *xprt;
-	/*
-	 * out-going bits
-	 */
-	int (*writeit)(void *, void *, int);
-	TAILQ_HEAD(out_buffers_head, xdr_ioq_uv) out_buffers;
-	char *out_base;		/* output buffer (points to frag header) */
-	char *out_finger;	/* next output position */
-	char *out_boundry;	/* data cannot up to this address */
-	u_int32_t *frag_header;	/* beginning of curren fragment */
-	bool frag_sent;	/* true if buffer sent in middle of record */
-	/*
-	 * in-coming bits
-	 */
-	TAILQ_HEAD(in_buffers_head, xdr_ioq_uv) in_buffers;
-	u_long in_size;	/* fixed size of the input buffer */
-	char *in_base;
-	char *in_finger;	/* location of next byte to be had */
-	char *in_boundry;	/* can read up to this location */
-	long fbtbc;		/* fragment bytes to be consumed */
-	bool last_frag;
-	u_int sendsize;
-	u_int recvsize;
-
-	bool nonblock;
-	u_int32_t in_header;
-	char *in_hdrp;
-	int in_hdrlen;
-	int in_reclen;
-	int in_received;
-	int in_maxrec;
-
-	cond_t cond;
-	mutex_t lock;
-	uint8_t *rdmabuf;
-	struct ibv_mr *mr;
-	int credits;
-} RECRDMA;
-
 struct connection_requests {
 	struct rdma_cm_id **id_queue;
 	sem_t	q_sem;
@@ -316,14 +276,14 @@ static inline void cbc_ref_it(struct rpc_rdma_cbc *cbc)
 		__func__, cbc, cbc->refcnt, refs);
 }
 
-#define x_xprt(xdrs) ((RDMAXPRT *)((xdrs)->x_lib[1]))
+#define x_rdma_xprt(xdrs) ((RDMAXPRT *)((xdrs)->x_lib[1]))
 
 /* Release ref on cbc on callback from ibv_post */
 static inline void cbc_release_it(struct rpc_rdma_cbc *cbc)
 {
 	int32_t refs =
 		atomic_dec_int32_t(&cbc->refcnt);
-	RDMAXPRT *xd = x_xprt(cbc->recvq.xdrs);
+	RDMAXPRT *rdma_xprt = x_rdma_xprt(cbc->recvq.xdrs);
 
 	__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA, "%s: release_ref cbc %p ref %d "
 		"refs %d",
@@ -348,12 +308,12 @@ static inline void cbc_release_it(struct rpc_rdma_cbc *cbc)
 			" destroying cbc %p ref %d flags %x",
 			__func__, cbc, cbc->refcnt, cbc->cbc_flags);
 
-		pthread_mutex_lock(&xd->cbclist.qmutex);
-		TAILQ_REMOVE(&xd->cbclist.qh, &cbc->cbc_list, q);
-		xd->cbclist.qcount--;
-		pthread_mutex_unlock(&xd->cbclist.qmutex);
+		pthread_mutex_lock(&rdma_xprt->cbclist.qmutex);
+		TAILQ_REMOVE(&rdma_xprt->cbclist.qh, &cbc->cbc_list, q);
+		rdma_xprt->cbclist.qcount--;
+		pthread_mutex_unlock(&rdma_xprt->cbclist.qmutex);
 
-		SVC_RELEASE(&xd->sm_dr.xprt, SVC_REF_FLAG_NONE);
+		SVC_RELEASE(&rdma_xprt->sm_dr.xprt, SVC_REF_FLAG_NONE);
 
 		if (cbc->non_registered_buf) {
 			mem_free(cbc->non_registered_buf, cbc->non_registered_buf_len);
@@ -367,18 +327,18 @@ static inline void cbc_release_it(struct rpc_rdma_cbc *cbc)
 		xdr_rdma_ioq_release(&cbc->recvq.ioq_uv.uvqh, false, &cbc->recvq);
 
 		/* Remove cbc from ioq before we add it back to cbqh */
-		pthread_mutex_lock(&xd->sm_dr.ioq.ioq_uv.uvqh.qmutex);
-		TAILQ_REMOVE(&xd->sm_dr.ioq.ioq_uv.uvqh.qh, &cbc->recvq.ioq_s, q);
-		(xd->sm_dr.ioq.ioq_uv.uvqh.qcount)--;
-		pthread_mutex_unlock(&xd->sm_dr.ioq.ioq_uv.uvqh.qmutex);
+		pthread_mutex_lock(&rdma_xprt->sm_dr.ioq.ioq_uv.uvqh.qmutex);
+		TAILQ_REMOVE(&rdma_xprt->sm_dr.ioq.ioq_uv.uvqh.qh, &cbc->recvq.ioq_s, q);
+		(rdma_xprt->sm_dr.ioq.ioq_uv.uvqh.qcount)--;
+		pthread_mutex_unlock(&rdma_xprt->sm_dr.ioq.ioq_uv.uvqh.qmutex);
 
 		__warnx(TIRPC_DEBUG_FLAG_XDR, "%s: cbc_track end %p recvq %p %d sendq %p %d "
-			"dataq %p %d freeq %p %d ioq %p %d xd %p",
+			"dataq %p %d freeq %p %d ioq %p %d rdma_xprt %p",
 			__func__, cbc, &cbc->recvq, cbc->recvq.ioq_uv.uvqh.qcount,
 			&cbc->sendq, cbc->sendq.ioq_uv.uvqh.qcount, &cbc->dataq,
 			cbc->dataq.ioq_uv.uvqh.qcount, &cbc->freeq,
-			cbc->freeq.ioq_uv.uvqh.qcount, &xd->sm_dr.ioq,
-			xd->sm_dr.ioq.ioq_uv.uvqh.qcount, xd);
+			cbc->freeq.ioq_uv.uvqh.qcount, &rdma_xprt->sm_dr.ioq,
+			rdma_xprt->sm_dr.ioq.ioq_uv.uvqh.qcount, rdma_xprt);
 
 		/* Add cbc back to cbqh */
 		xdr_rdma_ioq_release(&cbc->recvq.ioq_uv.uvqh, true, &cbc->recvq);
@@ -404,10 +364,10 @@ int rpc_rdma_connect_finalize(RDMAXPRT *);
 
 /* XDR functions */
 int xdr_rdma_create(RDMAXPRT *);
-void xdr_rdma_add_inbufs_data(RDMAXPRT *xd);
-void xdr_rdma_add_outbufs_data(RDMAXPRT *xd);
-void xdr_rdma_add_inbufs_hdr(RDMAXPRT *xd);
-void xdr_rdma_add_outbufs_hdr(RDMAXPRT *xd);
+void xdr_rdma_add_inbufs_data(RDMAXPRT *rdma_xprt);
+void xdr_rdma_add_outbufs_data(RDMAXPRT *rdma_xprt);
+void xdr_rdma_add_inbufs_hdr(RDMAXPRT *rdma_xprt);
+void xdr_rdma_add_outbufs_hdr(RDMAXPRT *rdma_xprt);
 void xdr_rdma_callq(RDMAXPRT *);
 
 bool xdr_rdma_clnt_reply(XDR *, u_int32_t);
@@ -428,6 +388,6 @@ void svc_rdma_destroy(SVCXPRT *xprt, u_int flags, const char *tag,
 
 void rdma_cleanup_cbcs_task(struct work_pool_entry *wpe);
 
-void rpc_rdma_close_connection(RDMAXPRT *xd);
+void rpc_rdma_close_connection(RDMAXPRT *rdma_xprt);
 
 #endif /* !_TIRPC_RPC_RDMA_H */

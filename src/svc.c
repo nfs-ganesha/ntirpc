@@ -130,11 +130,6 @@ svc_init(svc_init_params *params)
 	struct work_pool_params work_pool_params = {0,};
 	uint32_t channels = params->channels ? params->channels : 8;
 
-#ifdef USE_RPC_RDMA
-	__svc_params->nfs_rdma_port = params->nfs_rdma_port;
-	__svc_params->enable_rdma_dump = params->enable_rdma_dump;
-#endif
-
 	mutex_lock(&__svc_params->mtx);
 	if (__svc_params->initialized) {
 		__warnx(TIRPC_DEBUG_FLAG_WARN,
@@ -237,6 +232,7 @@ svc_init(svc_init_params *params)
 
 #ifdef USE_RPC_RDMA
 	rpc_rdma_internals_init();
+	__svc_params->nfs_rdma_port = params->nfs_rdma_port;
 	__svc_params->max_rdma_connections = params->max_rdma_connections;
 #endif
 

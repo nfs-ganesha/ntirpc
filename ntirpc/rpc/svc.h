@@ -145,15 +145,12 @@ typedef struct svc_init_params {
 	u_int gss_max_idle_gen;
 	u_int gss_max_gc;
 	uint32_t channels;
-
+	int32_t idle_timeout;
+	uint32_t thr_stack_size;
 #if defined(_USE_NFS_RDMA) || defined(USE_RPC_RDMA)
 	uint16_t nfs_rdma_port; /* Shared with Ganesha */
 	uint32_t max_rdma_connections;
-	bool enable_rdma_dump;
 #endif
-
-	int32_t idle_timeout;
-	uint32_t thr_stack_size;
 } svc_init_params;
 
 /* Svc param flags */

@@ -58,10 +58,6 @@
 #define RFC5666_BUFFER_SIZE (1024)
 #define RPCRDMA_VERSION (1)
 
-#define x_xprt(xdrs) ((RDMAXPRT *)((xdrs)->x_lib[1]))
-
-//#define rpcrdma_dump_msg(data, comment, xid)
-
 #ifndef rpcrdma_dump_msg
 #define DUMP_BYTES_PER_GROUP (4)
 #define DUMP_GROUPS_PER_LINE (4)
@@ -70,7 +66,7 @@
 static void
 rpcrdma_dump_msg(struct xdr_ioq_uv *data, char *comment, uint32_t xid)
 {
-	if (!__svc_params->enable_rdma_dump)
+	if (!__debug_flag(TIRPC_DEBUG_FLAG_XDR))
 		return;
 
 	char *buffer;
@@ -194,7 +190,7 @@ struct rdma_msg {
 /* note parameter order matching svc.h svc_req callbacks */
 
 static void
-xdr_rdma_callback_signal(struct rpc_rdma_cbc *cbc, RDMAXPRT *xprt)
+xdr_rdma_callback_signal(struct rpc_rdma_cbc *cbc, RDMAXPRT *rdma_xprt)
 {
 	pthread_mutex_lock(&cbc->cb_done_mutex);
 	cbc_release_it(cbc);
@@ -203,107 +199,107 @@ xdr_rdma_callback_signal(struct rpc_rdma_cbc *cbc, RDMAXPRT *xprt)
 }
 
 static int
-xdr_rdma_respond_callback_send(struct rpc_rdma_cbc *cbc, RDMAXPRT *xprt)
+xdr_rdma_respond_callback_send(struct rpc_rdma_cbc *cbc, RDMAXPRT *rdma_xprt)
 {
 	int ret = 0;
 
 	__warnx(TIRPC_DEBUG_FLAG_XDR,
 		"%s() %p[%u] cbc %p\n",
-		__func__, xprt, xprt->state, cbc);
+		__func__, rdma_xprt, rdma_xprt->state, cbc);
 
-	if (xprt->sm_dr.xprt.xp_flags & SVC_XPRT_FLAG_DESTROYED) {
-		__warnx(TIRPC_DEBUG_FLAG_ERROR, " %s xprt %p cbc %p "
-			"already destroyed", __func__, xprt, cbc);
+	if (rdma_xprt->sm_dr.xprt.xp_flags & SVC_XPRT_FLAG_DESTROYED) {
+		__warnx(TIRPC_DEBUG_FLAG_ERROR, " %s rdma_xprt %p cbc %p "
+			"already destroyed", __func__, rdma_xprt, cbc);
 
 		ret =  -1;
 	}
 
 	cbc_release_it(cbc);
 
-	SVC_RELEASE(&xprt->sm_dr.xprt, SVC_RELEASE_FLAG_NONE);
+	SVC_RELEASE(&rdma_xprt->sm_dr.xprt, SVC_RELEASE_FLAG_NONE);
 
 	return ret;
 }
 
 static int
-xdr_rdma_destroy_callback_send(struct rpc_rdma_cbc *cbc, RDMAXPRT *xprt)
+xdr_rdma_destroy_callback_send(struct rpc_rdma_cbc *cbc, RDMAXPRT *rdma_xprt)
 {
 	int ret = 0;
 
 	__warnx(TIRPC_DEBUG_FLAG_XDR,
 		"%s() %p[%u] cbc %p\n",
-		__func__, xprt, xprt->state, cbc);
+		__func__, rdma_xprt, rdma_xprt->state, cbc);
 
-	if (xprt->sm_dr.xprt.xp_flags & SVC_XPRT_FLAG_DESTROYED) {
-		__warnx(TIRPC_DEBUG_FLAG_ERROR, " %s xprt %p cbc %p "
-			"already destroyed", __func__, xprt, cbc);
+	if (rdma_xprt->sm_dr.xprt.xp_flags & SVC_XPRT_FLAG_DESTROYED) {
+		__warnx(TIRPC_DEBUG_FLAG_ERROR, " %s rdma_xprt %p cbc %p "
+			"already destroyed", __func__, rdma_xprt, cbc);
 
 		ret = -1;
 	}
 
 	cbc_release_it(cbc);
 
-	SVC_DESTROY(&xprt->sm_dr.xprt);
-	SVC_RELEASE(&xprt->sm_dr.xprt, SVC_RELEASE_FLAG_NONE);
+	SVC_DESTROY(&rdma_xprt->sm_dr.xprt);
+	SVC_RELEASE(&rdma_xprt->sm_dr.xprt, SVC_RELEASE_FLAG_NONE);
 
 	return ret;
 }
 
 static int
-xdr_rdma_respond_callback(struct rpc_rdma_cbc *cbc, RDMAXPRT *xprt)
+xdr_rdma_respond_callback(struct rpc_rdma_cbc *cbc, RDMAXPRT *rdma_xprt)
 {
 	int ret = 0;
 
 	__warnx(TIRPC_DEBUG_FLAG_XDR,
 		"%s() %p[%u] cbc %p\n",
-		__func__, xprt, xprt->state, cbc);
+		__func__, rdma_xprt, rdma_xprt->state, cbc);
 
-	if (xprt->sm_dr.xprt.xp_flags & SVC_XPRT_FLAG_DESTROYED) {
-		__warnx(TIRPC_DEBUG_FLAG_ERROR, " %s xprt %p cbc %p "
-			"already destroyed", __func__, xprt, cbc);
+	if (rdma_xprt->sm_dr.xprt.xp_flags & SVC_XPRT_FLAG_DESTROYED) {
+		__warnx(TIRPC_DEBUG_FLAG_ERROR, " %s rdma_xprt %p cbc %p "
+			"already destroyed", __func__, rdma_xprt, cbc);
 
 		ret = -1;
 	}
 
-	xdr_rdma_callback_signal(cbc, xprt);
+	xdr_rdma_callback_signal(cbc, rdma_xprt);
 
 	return ret;
 }
 
 static int
-xdr_rdma_destroy_callback(struct rpc_rdma_cbc *cbc, RDMAXPRT *xprt)
+xdr_rdma_destroy_callback(struct rpc_rdma_cbc *cbc, RDMAXPRT *rdma_xprt)
 {
 	int ret = 0;
 	__warnx(TIRPC_DEBUG_FLAG_XDR,
 		"%s() %p[%u] cbc %p\n",
-		__func__, xprt, xprt->state, cbc);
+		__func__, rdma_xprt, rdma_xprt->state, cbc);
 
-	if (xprt->sm_dr.xprt.xp_flags & SVC_XPRT_FLAG_DESTROYED) {
-		__warnx(TIRPC_DEBUG_FLAG_ERROR, " %s xprt %p cbc %p "
-			"already destroyed", __func__, xprt, cbc);
+	if (rdma_xprt->sm_dr.xprt.xp_flags & SVC_XPRT_FLAG_DESTROYED) {
+		__warnx(TIRPC_DEBUG_FLAG_ERROR, " %s rdma_xprt %p cbc %p "
+			"already destroyed", __func__, rdma_xprt, cbc);
 
 		ret = -1;
 	}
 
-	xdr_rdma_callback_signal(cbc, xprt);
+	xdr_rdma_callback_signal(cbc, rdma_xprt);
 
-	SVC_DESTROY(&xprt->sm_dr.xprt);
+	SVC_DESTROY(&rdma_xprt->sm_dr.xprt);
 
 	return ret;
 }
 
 static int
-xdr_rdma_destroy_callback_recv(struct rpc_rdma_cbc *cbc, RDMAXPRT *xprt)
+xdr_rdma_destroy_callback_recv(struct rpc_rdma_cbc *cbc, RDMAXPRT *rdma_xprt)
 {
 	int ret = 0;
 
 	__warnx(TIRPC_DEBUG_FLAG_XDR,
 		"Error in recv callback %s() %p[%u] cbc %p\n",
-		__func__, xprt, xprt->state, cbc);
+		__func__, rdma_xprt, rdma_xprt->state, cbc);
 
-	if (xprt->sm_dr.xprt.xp_flags & SVC_XPRT_FLAG_DESTROYED) {
-		__warnx(TIRPC_DEBUG_FLAG_ERROR, " %s xprt %p cbc %p "
-			"already destroyed", __func__, xprt, cbc);
+	if (rdma_xprt->sm_dr.xprt.xp_flags & SVC_XPRT_FLAG_DESTROYED) {
+		__warnx(TIRPC_DEBUG_FLAG_ERROR, " %s rdma_xprt %p cbc %p "
+			"already destroyed", __func__, rdma_xprt, cbc);
 
 		ret = -1;
 	}
@@ -313,8 +309,8 @@ xdr_rdma_destroy_callback_recv(struct rpc_rdma_cbc *cbc, RDMAXPRT *xprt)
 	/* Release senital ref */
 	cbc_release_it(cbc);
 
-	SVC_DESTROY(&xprt->sm_dr.xprt);
-	SVC_RELEASE(&xprt->sm_dr.xprt, SVC_RELEASE_FLAG_NONE);
+	SVC_DESTROY(&rdma_xprt->sm_dr.xprt);
+	SVC_RELEASE(&rdma_xprt->sm_dr.xprt, SVC_RELEASE_FLAG_NONE);
 
 	return ret;
 }
@@ -324,13 +320,13 @@ xdr_rdma_destroy_callback_recv(struct rpc_rdma_cbc *cbc, RDMAXPRT *xprt)
  *
  */
 static int
-xdr_rdma_wrap_callback(struct rpc_rdma_cbc *cbc, RDMAXPRT *xprt)
+xdr_rdma_wrap_callback(struct rpc_rdma_cbc *cbc, RDMAXPRT *rdma_xprt)
 {
 	int ret = 0;
 
-	if (xprt->sm_dr.xprt.xp_flags & SVC_XPRT_FLAG_DESTROYED) {
-		__warnx(TIRPC_DEBUG_FLAG_ERROR, " %s xprt %p cbc %p "
-			"already destroyed", __func__, xprt, cbc);
+	if (rdma_xprt->sm_dr.xprt.xp_flags & SVC_XPRT_FLAG_DESTROYED) {
+		__warnx(TIRPC_DEBUG_FLAG_ERROR, " %s rdma_xprt %p cbc %p "
+			"already destroyed", __func__, rdma_xprt, cbc);
 
 		ret = -1;
 		goto err;
@@ -339,11 +335,11 @@ xdr_rdma_wrap_callback(struct rpc_rdma_cbc *cbc, RDMAXPRT *xprt)
 	/* Use xdrs from recvq in context */
 	XDR *xdrs = cbc->recvq.xdrs;
 
-	atomic_inc_uint32_t(&xprt->active_requests);
+	atomic_inc_uint32_t(&rdma_xprt->active_requests);
 
-	ret = (int)svc_request(&xprt->sm_dr.xprt, xdrs);
+	ret = (int)svc_request(&rdma_xprt->sm_dr.xprt, xdrs);
 
-	atomic_dec_uint32_t(&xprt->active_requests);
+	atomic_dec_uint32_t(&rdma_xprt->active_requests);
 
 err:
 	cbc->cbc_flags = CBC_FLAG_RELEASE;
@@ -351,7 +347,7 @@ err:
 	/* Release senital ref */
 	cbc_release_it(cbc);
 
-	SVC_RELEASE(&xprt->sm_dr.xprt, SVC_RELEASE_FLAG_NONE);
+	SVC_RELEASE(&rdma_xprt->sm_dr.xprt, SVC_RELEASE_FLAG_NONE);
 
 	return ret;
 }
@@ -364,7 +360,7 @@ err:
  * xdr_rdma_post_recv_n: Post receive chunk(s).
  *
  * Need to post recv buffers before the opposite side tries to send anything!
- * @param[IN] xprt
+ * @param[IN] rdma_xprt
  * @param[INOUT] cbc	CallBack Context xdr_ioq and xdr_ioq_uv(s)
  * @param[IN] sge	scatter/gather elements to register
  *
@@ -376,32 +372,32 @@ err:
  * @return 0 on success, the value of errno on error
  */
 static int
-xdr_rdma_post_recv_n(RDMAXPRT *xprt, struct rpc_rdma_cbc *cbc, int sge)
+xdr_rdma_post_recv_n(RDMAXPRT *rdma_xprt, struct rpc_rdma_cbc *cbc, int sge)
 {
 	struct poolq_entry *have = TAILQ_FIRST(&cbc->recvq.ioq_uv.uvqh.qh);
 	int i = 0;
 	int ret;
 
-	if (!xprt) {
+	if (!rdma_xprt) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
-			"%s() xprt state missing",
+			"%s() rdma_xprt state missing",
 			__func__);
 		return EINVAL;
 	}
 
-	switch (xprt->state) {
+	switch (rdma_xprt->state) {
 	case RDMAXS_CONNECTED:
 	case RDMAXS_ROUTE_RESOLVED:
 	case RDMAXS_CONNECT_REQUEST:
 		__warnx(TIRPC_DEBUG_FLAG_XDR,
 			"%s() %p[%u] cbc %p posting recv",
-			__func__, xprt, xprt->state, cbc);
+			__func__, rdma_xprt, rdma_xprt->state, cbc);
 		break;
 	default:
 		__warnx(TIRPC_DEBUG_FLAG_XDR,
 			"%s() %p[%u] != "
 			"connect request, connected, or resolved",
-			__func__, xprt, xprt->state);
+			__func__, rdma_xprt, rdma_xprt->state);
 		return EINVAL;
 	}
 
@@ -436,17 +432,17 @@ xdr_rdma_post_recv_n(RDMAXPRT *xprt, struct rpc_rdma_cbc *cbc, int sge)
 	cbc->wr.rwr.sg_list = cbc->sg_list;
 	cbc->wr.rwr.num_sge = i;
 
-	if (xprt->srq)
-		ret = ibv_post_srq_recv(xprt->srq, &cbc->wr.rwr,
-					&xprt->bad_recv_wr);
+	if (rdma_xprt->srq)
+		ret = ibv_post_srq_recv(rdma_xprt->srq, &cbc->wr.rwr,
+					&rdma_xprt->bad_recv_wr);
 	else
-		ret = ibv_post_recv(xprt->qp, &cbc->wr.rwr,
-					&xprt->bad_recv_wr);
+		ret = ibv_post_recv(rdma_xprt->qp, &cbc->wr.rwr,
+					&rdma_xprt->bad_recv_wr);
 
 	if (ret) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s() %p[%u] cbc %p ibv_post_recv failed: %s (%d)",
-			__func__, xprt, xprt->state, cbc, strerror(ret), ret);
+			__func__, rdma_xprt, rdma_xprt->state, cbc, strerror(ret), ret);
 		return ret; // FIXME np_uerror(ret)
 	}
 
@@ -457,35 +453,35 @@ xdr_rdma_post_recv_n(RDMAXPRT *xprt, struct rpc_rdma_cbc *cbc, int sge)
  * xdr_rdma_post_recv_cb: Post receive chunk(s) with standard callbacks.
  *
  * Need to post recv buffers before the opposite side tries to send anything!
- * @param[IN] xprt
+ * @param[IN] rdma_xprt
  * @param[INOUT] cbc	CallBack Context xdr_ioq and xdr_ioq_uv(s)
  * @param[IN] sge	scatter/gather elements to register
  *
  * @return 0 on success, the value of errno on error
  */
 static int
-xdr_rdma_post_recv_cb(RDMAXPRT *xprt, struct rpc_rdma_cbc *cbc, int sge)
+xdr_rdma_post_recv_cb(RDMAXPRT *rdma_xprt, struct rpc_rdma_cbc *cbc, int sge)
 {
 	cbc->positive_cb = xdr_rdma_wrap_callback;
 	cbc->negative_cb = xdr_rdma_destroy_callback_recv;
 	cbc->callback_arg = NULL;
 	cbc->call_inline = 0;
 
-	SVC_REF(&xprt->sm_dr.xprt, SVC_REF_FLAG_NONE);
+	SVC_REF(&rdma_xprt->sm_dr.xprt, SVC_REF_FLAG_NONE);
 
-	int ret = xdr_rdma_post_recv_n(xprt, cbc, sge);
+	int ret = xdr_rdma_post_recv_n(rdma_xprt, cbc, sge);
 
 	if (ret) {
-		__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s post_recv failed xprt %p "
-			"cbc %p error %d", __func__, xprt, cbc, ret);
+		__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s post_recv failed rdma_xprt %p "
+			"cbc %p error %d", __func__, rdma_xprt, cbc, ret);
 
 		cbc->cbc_flags = CBC_FLAG_RELEASE;
 
 		/* Release senital ref */
 		cbc_release_it(cbc);
 
-		SVC_DESTROY(&xprt->sm_dr.xprt);
-		SVC_RELEASE(&xprt->sm_dr.xprt, SVC_RELEASE_FLAG_NONE);
+		SVC_DESTROY(&rdma_xprt->sm_dr.xprt);
+		SVC_RELEASE(&rdma_xprt->sm_dr.xprt, SVC_RELEASE_FLAG_NONE);
 	}
 
 	return ret;
@@ -494,7 +490,7 @@ xdr_rdma_post_recv_cb(RDMAXPRT *xprt, struct rpc_rdma_cbc *cbc, int sge)
 /**
  * Post a work chunk.
  *
- * @param[IN] xprt
+ * @param[IN] rdma_xprt
  * @param[IN] cbc	CallBack Context xdr_ioq and xdr_ioq_uv(s)
  * @param[IN] sge	scatter/gather elements to send
  * @param[IN] rs	remote segment
@@ -508,7 +504,7 @@ xdr_rdma_post_recv_cb(RDMAXPRT *xprt, struct rpc_rdma_cbc *cbc, int sge)
  * @return 0 on success, the value of errno on error
  */
 static int
-xdr_rdma_post_send_n(RDMAXPRT *xprt, struct rpc_rdma_cbc *cbc, int sge,
+xdr_rdma_post_send_n(RDMAXPRT *rdma_xprt, struct rpc_rdma_cbc *cbc, int sge,
 		     struct xdr_rdma_segment *rs, enum ibv_wr_opcode opcode)
 {
 	struct poolq_entry *have = cbc->have;
@@ -517,24 +513,24 @@ xdr_rdma_post_send_n(RDMAXPRT *xprt, struct rpc_rdma_cbc *cbc, int sge,
 	int i = 0;
 	int ret;
 
-	if (!xprt) {
+	if (!rdma_xprt) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
-			"%s() xprt state missing",
+			"%s() rdma_xprt state missing",
 			__func__);
 		return EINVAL;
 	}
 
-	switch (xprt->state) {
+	switch (rdma_xprt->state) {
 	case RDMAXS_CONNECTED:
 		__warnx(TIRPC_DEBUG_FLAG_XDR,
 			"%s() %p[%u] cbc %p posting a send with op %d",
-			__func__, xprt, xprt->state, cbc, opcode);
+			__func__, rdma_xprt, rdma_xprt->state, cbc, opcode);
 		break;
 	default:
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s() %p[%u] != "
 			"connected",
-			__func__, xprt, xprt->state);
+			__func__, rdma_xprt, rdma_xprt->state);
 		return EINVAL;
 	}
 
@@ -616,12 +612,12 @@ xdr_rdma_post_send_n(RDMAXPRT *xprt, struct rpc_rdma_cbc *cbc, int sge,
 		}
 	}
 
-	ret = ibv_post_send(xprt->qp, &cbc->wr.wwr, &xprt->bad_send_wr);
+	ret = ibv_post_send(rdma_xprt->qp, &cbc->wr.wwr, &rdma_xprt->bad_send_wr);
 	if (ret) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s() %p[%u] cbc %p ibv_post_send failed: %s (%d), "
 			"num sge %d imm_data %d",
-			__func__, xprt, xprt->state, cbc, strerror(ret), ret,
+			__func__, rdma_xprt, rdma_xprt->state, cbc, strerror(ret), ret,
 			cbc->wr.wwr.num_sge, cbc->wr.wwr.imm_data);
 		return ret; // FIXME np_uerror(ret)
 	}
@@ -644,14 +640,14 @@ xdr_rdma_wait_cb_done_locked(struct rpc_rdma_cbc *cbc)
 /**
  * Post a work chunk with standard callbacks.
  *
- * @param[IN] xprt
+ * @param[IN] rdma_xprt
  * @param[IN] cbc	CallBack Context xdr_ioq and xdr_ioq_uv(s)
  * @param[IN] sge	scatter/gather elements to send
  *
  * @return 0 on success, the value of errno on error
  */
 static inline int
-xdr_rdma_post_send_cb(RDMAXPRT *xprt, struct rpc_rdma_cbc *cbc, int sge)
+xdr_rdma_post_send_cb(RDMAXPRT *rdma_xprt, struct rpc_rdma_cbc *cbc, int sge)
 {
 	int ret;
 
@@ -662,25 +658,25 @@ xdr_rdma_post_send_cb(RDMAXPRT *xprt, struct rpc_rdma_cbc *cbc, int sge)
 
 	cbc_ref_it(cbc);
 
-	SVC_REF(&xprt->sm_dr.xprt, SVC_REF_FLAG_NONE);
+	SVC_REF(&rdma_xprt->sm_dr.xprt, SVC_REF_FLAG_NONE);
 
-	ret = xdr_rdma_post_send_n(xprt, cbc, sge, NULL, IBV_WR_SEND);
+	ret = xdr_rdma_post_send_n(rdma_xprt, cbc, sge, NULL, IBV_WR_SEND);
 
 	if (ret) {
 		/* Assuming there won't be callback */
 		__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s: failed ret %d err %d "
-			" xprt %p cbc %p", __func__, ret, errno, xprt, cbc);
+			" rdma_xprt %p cbc %p", __func__, ret, errno, rdma_xprt, cbc);
 		cbc_release_it(cbc);
 
-		SVC_DESTROY(&xprt->sm_dr.xprt);
-		SVC_RELEASE(&xprt->sm_dr.xprt, SVC_RELEASE_FLAG_NONE);
+		SVC_DESTROY(&rdma_xprt->sm_dr.xprt);
+		SVC_RELEASE(&rdma_xprt->sm_dr.xprt, SVC_RELEASE_FLAG_NONE);
 	}
 
 	return ret;
 }
 
 static int
-xdr_rdma_wait_read_cb(RDMAXPRT *xprt, struct rpc_rdma_cbc *cbc, int sge,
+xdr_rdma_wait_read_cb(RDMAXPRT *rdma_xprt, struct rpc_rdma_cbc *cbc, int sge,
 		     struct xdr_rdma_segment *rs)
 {
 	int ret;
@@ -694,14 +690,14 @@ xdr_rdma_wait_read_cb(RDMAXPRT *xprt, struct rpc_rdma_cbc *cbc, int sge,
 
 	cbc_ref_it(cbc);
 
-	SVC_REF(&xprt->sm_dr.xprt, SVC_REF_FLAG_NONE);
+	SVC_REF(&rdma_xprt->sm_dr.xprt, SVC_REF_FLAG_NONE);
 
-	ret = xdr_rdma_post_send_n(xprt, cbc, sge, rs, IBV_WR_RDMA_READ);
+	ret = xdr_rdma_post_send_n(rdma_xprt, cbc, sge, rs, IBV_WR_RDMA_READ);
 
 	if (ret) {
 		/* Assuming there won't be callback */
 		__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s: failed ret %d err %d "
-			" xprt %p cbc %p", __func__, ret, errno, xprt, cbc);
+			" rdma_xprt %p cbc %p", __func__, ret, errno, rdma_xprt, cbc);
 	} else {
 		ret = xdr_rdma_wait_cb_done_locked(cbc);
 
@@ -714,11 +710,11 @@ xdr_rdma_wait_read_cb(RDMAXPRT *xprt, struct rpc_rdma_cbc *cbc, int sge,
 
 	if (ret) {
 		cbc_release_it(cbc);
-		SVC_DESTROY(&xprt->sm_dr.xprt);
+		SVC_DESTROY(&rdma_xprt->sm_dr.xprt);
 	}
 
 	/* Release here since we wait for callback */
-	SVC_RELEASE(&xprt->sm_dr.xprt, SVC_RELEASE_FLAG_NONE);
+	SVC_RELEASE(&rdma_xprt->sm_dr.xprt, SVC_RELEASE_FLAG_NONE);
 
 	pthread_mutex_unlock(&cbc->cb_done_mutex);
 
@@ -726,7 +722,7 @@ xdr_rdma_wait_read_cb(RDMAXPRT *xprt, struct rpc_rdma_cbc *cbc, int sge,
 }
 
 static int
-xdr_rdma_wait_write_cb(RDMAXPRT *xprt, struct rpc_rdma_cbc *cbc, int sge,
+xdr_rdma_wait_write_cb(RDMAXPRT *rdma_xprt, struct rpc_rdma_cbc *cbc, int sge,
 		      struct xdr_rdma_segment *rs)
 {
 	int ret;
@@ -738,18 +734,18 @@ xdr_rdma_wait_write_cb(RDMAXPRT *xprt, struct rpc_rdma_cbc *cbc, int sge,
 
 	cbc_ref_it(cbc);
 
-	SVC_REF(&xprt->sm_dr.xprt, SVC_REF_FLAG_NONE);
+	SVC_REF(&rdma_xprt->sm_dr.xprt, SVC_REF_FLAG_NONE);
 
-	ret = xdr_rdma_post_send_n(xprt, cbc, sge, rs, IBV_WR_RDMA_WRITE);
+	ret = xdr_rdma_post_send_n(rdma_xprt, cbc, sge, rs, IBV_WR_RDMA_WRITE);
 
 	if (ret) {
 		/* Assuming there won't be callback */
 		__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s: failed ret %d err %d "
-			" xprt %p cbc %p", __func__, ret, errno, xprt, cbc);
+			" rdma_xprt %p cbc %p", __func__, ret, errno, rdma_xprt, cbc);
 		cbc_release_it(cbc);
 
-		SVC_DESTROY(&xprt->sm_dr.xprt);
-		SVC_RELEASE(&xprt->sm_dr.xprt, SVC_RELEASE_FLAG_NONE);
+		SVC_DESTROY(&rdma_xprt->sm_dr.xprt);
+		SVC_RELEASE(&rdma_xprt->sm_dr.xprt, SVC_RELEASE_FLAG_NONE);
 	}
 
 	return ret;
@@ -878,43 +874,43 @@ xdr_rdma_encode_error(struct xdr_ioq_uv *call_uv, enum rpcrdma_errcode err)
 
 /* post recv buffers */
 void
-xdr_rdma_callq(RDMAXPRT *xd)
+xdr_rdma_callq(RDMAXPRT *rdma_xprt)
 {
 	/* Get context buf from cbqh and add to sm_dr
-	 * rpc_rdma_allocate->xdr_ioq_setup(&xd->sm_dr.ioq);
+	 * rpc_rdma_allocate->xdr_ioq_setup(&rdma_xprt->sm_dr.ioq);
 	 * Check if we have credits availabled from cbqh
 	 * rpc_rdma_setup_cbq
-	 * rc = rpc_rdma_setup_cbq(&xd->cbqh,
-	 * xd->xa->rq_depth + xd->xa->sq_depth, xd->xa->credits);
+	 * rc = rpc_rdma_setup_cbq(&rdma_xprt->cbqh,
+	 * rdma_xprt->xa->rq_depth + rdma_xprt->xa->sq_depth, rdma_xprt->xa->credits);
 	 * Remove from cbqh and add to sm_dr.ioq */
 
 	struct poolq_entry *have =
-		xdr_rdma_ioq_uv_fetch(&xd->sm_dr.ioq, &xd->cbqh,
-				 "callq context", 1, IOQ_FLAG_NONE);
+		xdr_rdma_ioq_uv_fetch(&rdma_xprt->sm_dr.ioq, &rdma_xprt->cbqh,
+				      "callq context", 1, IOQ_FLAG_NONE);
 	struct rpc_rdma_cbc *cbc = (struct rpc_rdma_cbc *)(_IOQ(have));
 
 	cbc->recvq.xdrs[0].x_lib[1] =
 	cbc->sendq.xdrs[0].x_lib[1] =
 	cbc->dataq.xdrs[0].x_lib[1] =
-	cbc->freeq.xdrs[0].x_lib[1] = xd;
+	cbc->freeq.xdrs[0].x_lib[1] = rdma_xprt;
 
 	/* Get recv buf from inbufs_hdr and  add to context recvq */
-	have = xdr_rdma_ioq_uv_fetch(&cbc->recvq, &xd->inbufs_hdr.uvqh,
+	have = xdr_rdma_ioq_uv_fetch(&cbc->recvq, &rdma_xprt->inbufs_hdr.uvqh,
 				"callq buffer", 1, IOQ_FLAG_NONE);
 
 	/* input positions */
 	IOQ_(have)->v.vio_head = IOQ_(have)->v.vio_base;
 	IOQ_(have)->v.vio_tail = IOQ_(have)->v.vio_wrap;
 	IOQ_(have)->v.vio_wrap = (char *)IOQ_(have)->v.vio_base
-			       + xd->sm_dr.recv_hdr_sz;
+			       + rdma_xprt->sm_dr.recv_hdr_sz;
 
 	__warnx(TIRPC_DEBUG_FLAG_XDR, "%s: cbc_track start %p recvq %p %d "
-		"sendq %p %d dataq %p %d freeq %p %d ioq %p %d xd %p",
+		"sendq %p %d dataq %p %d freeq %p %d ioq %p %d rdma_xprt %p",
 		__func__, cbc, &cbc->recvq, cbc->recvq.ioq_uv.uvqh.qcount,
 		&cbc->sendq, cbc->sendq.ioq_uv.uvqh.qcount, &cbc->dataq,
 		cbc->dataq.ioq_uv.uvqh.qcount, &cbc->freeq,
-		cbc->freeq.ioq_uv.uvqh.qcount, &xd->sm_dr.ioq,
-		xd->sm_dr.ioq.ioq_uv.uvqh.qcount, xd);
+		cbc->freeq.ioq_uv.uvqh.qcount, &rdma_xprt->sm_dr.ioq,
+		rdma_xprt->sm_dr.ioq.ioq_uv.uvqh.qcount, rdma_xprt);
 
 	cbc->call_inline = 0;
 	cbc->data_chunk_uv = NULL;
@@ -923,15 +919,15 @@ xdr_rdma_callq(RDMAXPRT *xd)
 	cbc->non_registered_buf = NULL;
 	cbc->non_registered_buf_len = 0;
 
-	pthread_mutex_lock(&xd->cbclist.qmutex);
-	TAILQ_INSERT_TAIL(&xd->cbclist.qh, &cbc->cbc_list, q);
-	xd->cbclist.qcount++;
-	pthread_mutex_unlock(&xd->cbclist.qmutex);
+	pthread_mutex_lock(&rdma_xprt->cbclist.qmutex);
+	TAILQ_INSERT_TAIL(&rdma_xprt->cbclist.qh, &cbc->cbc_list, q);
+	rdma_xprt->cbclist.qcount++;
+	pthread_mutex_unlock(&rdma_xprt->cbclist.qmutex);
 
-	/* xprt ref is taken by xdr_rdma_post_recv_cb */
-	if (xdr_rdma_post_recv_cb(xd, cbc, 1)) {
+	/* rdma_xprt ref is taken by xdr_rdma_post_recv_cb */
+	if (xdr_rdma_post_recv_cb(rdma_xprt, cbc, 1)) {
 		 __warnx(TIRPC_DEBUG_FLAG_ERROR, "%s: recv failed %p",
-			__func__, xd);
+			__func__, rdma_xprt);
 	}
 }
 
@@ -942,16 +938,13 @@ xdr_rdma_callq(RDMAXPRT *xd)
 /* Split b_addr into buf_count chunks of size buf_size and
  * add it to uv_head */
 static void
-xdr_rdma_add_bufs(RDMAXPRT *xd, struct ibv_mr *mr,
+xdr_rdma_add_bufs_locked(RDMAXPRT *rdma_xprt, struct ibv_mr *mr,
     struct xdr_ioq_uv_head *uv_head, xdr_ioq_uv_type_t buf_type,
     uint32_t buf_size, uint32_t buf_count, uint8_t *b_addr)
 {
-
 	/* Each pre-allocated buffer has a corresponding xdr_ioq_uv,
 	 * stored on the pool queues.
 	 */
-
-	pthread_mutex_lock(&uv_head->uvqh.qmutex);
 
 	for (int qcount = 0;
 	     qcount < buf_count;
@@ -980,22 +973,40 @@ xdr_rdma_add_bufs(RDMAXPRT *xd, struct ibv_mr *mr,
 
 		b_addr += buf_size;
 	}
+}
+
+/* Split b_addr into buf_count chunks of size buf_size and
+ * add it to uv_head */
+static void
+xdr_rdma_add_bufs(RDMAXPRT *rdma_xprt, struct ibv_mr *mr,
+    struct xdr_ioq_uv_head *uv_head, xdr_ioq_uv_type_t buf_type,
+    uint32_t buf_size, uint32_t buf_count, uint8_t *b_addr)
+{
+
+	/* Each pre-allocated buffer has a corresponding xdr_ioq_uv,
+	 * stored on the pool queues.
+	 */
+
+	pthread_mutex_lock(&uv_head->uvqh.qmutex);
+
+	xdr_rdma_add_bufs_locked(rdma_xprt, mr, uv_head, buf_type,
+	    buf_size, buf_count, b_addr);
 
 	pthread_mutex_unlock(&uv_head->uvqh.qmutex);
 }
 
 /* Add on demand allocated buffers to the extra_bufs */
 static void
-xdr_rdma_update_extra_bufs(RDMAXPRT *xd, struct ibv_mr *mr, uint32_t buffer_total,
+xdr_rdma_update_extra_bufs(RDMAXPRT *rdma_xprt, struct ibv_mr *mr, uint32_t buffer_total,
     uint8_t *buffer_aligned, rpc_extra_io_buf_type_t type)
 {
 
-	pthread_mutex_lock(&xd->extra_bufs.qmutex);
+	pthread_mutex_lock(&rdma_xprt->extra_bufs.qmutex);
 
-	xd->extra_bufs.qsize = sizeof(struct rpc_extra_io_bufs);
+	rdma_xprt->extra_bufs.qsize = sizeof(struct rpc_extra_io_bufs);
 
 	struct rpc_extra_io_bufs *io_buf =
-	    mem_zalloc(xd->extra_bufs.qsize);
+	    mem_zalloc(rdma_xprt->extra_bufs.qsize);
 
 	assert(io_buf);
 
@@ -1004,160 +1015,160 @@ xdr_rdma_update_extra_bufs(RDMAXPRT *xd, struct ibv_mr *mr, uint32_t buffer_tota
 	io_buf->buffer_aligned = buffer_aligned;
 	io_buf->type = type;
 
-	TAILQ_INSERT_TAIL(&xd->extra_bufs.qh, &io_buf->q, q);
+	TAILQ_INSERT_TAIL(&rdma_xprt->extra_bufs.qh, &io_buf->q, q);
 
-	xd->extra_bufs_count++;
-	xd->extra_bufs.qcount++;
+	rdma_xprt->extra_bufs_count++;
+	rdma_xprt->extra_bufs.qcount++;
 
 	__warnx(TIRPC_DEBUG_FLAG_ERROR,
-		"%s() extra bufs count %u io_buf %p xd %p",
-		__func__, xd->extra_bufs_count, io_buf, xd);
+		"%s() extra bufs count %u io_buf %p rdma_xprt %p",
+		__func__, rdma_xprt->extra_bufs_count, io_buf, rdma_xprt);
 
-	pthread_mutex_unlock(&xd->extra_bufs.qmutex);
+	pthread_mutex_unlock(&rdma_xprt->extra_bufs.qmutex);
 }
 
 static struct ibv_mr *
-xdr_rdma_reg_mr(RDMAXPRT *xd, uint8_t *buffer_aligned, uint32_t buffer_total)
+xdr_rdma_reg_mr(RDMAXPRT *rdma_xprt, uint8_t *buffer_aligned, uint32_t buffer_total)
 {
-	return ibv_reg_mr(xd->pd->pd, buffer_aligned, buffer_total,
+	return ibv_reg_mr(rdma_xprt->pd->pd, buffer_aligned, buffer_total,
 			    IBV_ACCESS_LOCAL_WRITE |
 			    IBV_ACCESS_REMOTE_WRITE |
 			    IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC);
 }
 
 void
-xdr_rdma_add_outbufs_hdr(RDMAXPRT *xd)
+xdr_rdma_add_outbufs_hdr(RDMAXPRT *rdma_xprt)
 {
 	uint8_t *b;
 	int hdr_qdepth = RDMA_HDR_CHUNKS;
-	uint32_t buffer_total = xd->sm_dr.send_hdr_sz * hdr_qdepth;
+	uint32_t buffer_total = rdma_xprt->sm_dr.send_hdr_sz * hdr_qdepth;
 
 	__warnx(TIRPC_DEBUG_FLAG_ERROR,
-		"%s() buffer_total  %llu, sendsz %llu sq %llu xd %p pagesz %llu",
-		__func__, buffer_total, xd->sm_dr.send_hdr_sz, hdr_qdepth,
-		xd, xd->sm_dr.pagesz);
+		"%s() buffer_total  %llu, sendsz %llu sq %llu rdma_xprt %p pagesz %llu",
+		__func__, buffer_total, rdma_xprt->sm_dr.send_hdr_sz, hdr_qdepth,
+		rdma_xprt, rdma_xprt->sm_dr.pagesz);
 
-	uint8_t *buffer_aligned = mem_aligned(xd->sm_dr.pagesz, buffer_total);
+	uint8_t *buffer_aligned = mem_aligned(rdma_xprt->sm_dr.pagesz, buffer_total);
 
 	assert(buffer_aligned);
 	memset(buffer_aligned, 0, buffer_total);
 
 	__warnx(TIRPC_DEBUG_FLAG_ERROR,
-		"%s() buffer_aligned at %p proptection domain %p xd %p",
-		__func__, buffer_aligned, xd->pd->pd, xd);
+		"%s() buffer_aligned at %p proptection domain %p rdma_xprt %p",
+		__func__, buffer_aligned, rdma_xprt->pd->pd, rdma_xprt);
 
-	struct ibv_mr *mr = xdr_rdma_reg_mr(xd, buffer_aligned, buffer_total);
+	struct ibv_mr *mr = xdr_rdma_reg_mr(rdma_xprt, buffer_aligned, buffer_total);
 
 	assert(mr);
 
 	b = buffer_aligned;
 
-	xdr_rdma_add_bufs(xd, mr, &xd->outbufs_hdr, UV_HDR,
-	    xd->sm_dr.send_hdr_sz, hdr_qdepth, b);
+	xdr_rdma_add_bufs_locked(rdma_xprt, mr, &rdma_xprt->outbufs_hdr, UV_HDR,
+	    rdma_xprt->sm_dr.send_hdr_sz, hdr_qdepth, b);
 
-	xdr_rdma_update_extra_bufs(xd, mr, buffer_total, buffer_aligned,
+	xdr_rdma_update_extra_bufs(rdma_xprt, mr, buffer_total, buffer_aligned,
 	    IO_OUTBUF);
 }
 
 void
-xdr_rdma_add_outbufs_data(RDMAXPRT *xd)
+xdr_rdma_add_outbufs_data(RDMAXPRT *rdma_xprt)
 {
 	uint8_t *b;
 	int data_qdepth = RDMA_DATA_CHUNKS;
-	uint32_t buffer_total = xd->sm_dr.sendsz * data_qdepth;
+	uint32_t buffer_total = rdma_xprt->sm_dr.sendsz * data_qdepth;
 
 	__warnx(TIRPC_DEBUG_FLAG_ERROR,
-		"%s() buffer_total  %llu, sendsz %llu sq %llu xd %p pagesz %llu",
-		__func__, buffer_total, xd->sm_dr.sendsz, data_qdepth,
-		xd, xd->sm_dr.pagesz);
+		"%s() buffer_total  %llu, sendsz %llu sq %llu rdma_xprt %p pagesz %llu",
+		__func__, buffer_total, rdma_xprt->sm_dr.sendsz, data_qdepth,
+		rdma_xprt, rdma_xprt->sm_dr.pagesz);
 
-	uint8_t *buffer_aligned = mem_aligned(xd->sm_dr.pagesz, buffer_total);
+	uint8_t *buffer_aligned = mem_aligned(rdma_xprt->sm_dr.pagesz, buffer_total);
 
 	assert(buffer_aligned);
 	memset(buffer_aligned, 0, buffer_total);
 
 	__warnx(TIRPC_DEBUG_FLAG_ERROR,
-		"%s() buffer_aligned at %p proptection domain %p xd %p",
-		__func__, buffer_aligned, xd->pd->pd, xd);
+		"%s() buffer_aligned at %p proptection domain %p rdma_xprt %p",
+		__func__, buffer_aligned, rdma_xprt->pd->pd, rdma_xprt);
 
-	struct ibv_mr *mr = xdr_rdma_reg_mr(xd, buffer_aligned, buffer_total);
+	struct ibv_mr *mr = xdr_rdma_reg_mr(rdma_xprt, buffer_aligned, buffer_total);
 
 	assert(mr);
 
 	b = buffer_aligned;
 
-	xdr_rdma_add_bufs(xd, mr, &xd->outbufs_data, UV_DATA,
-	    xd->sm_dr.sendsz, data_qdepth, b);
+	xdr_rdma_add_bufs_locked(rdma_xprt, mr, &rdma_xprt->outbufs_data,
+	    UV_DATA, rdma_xprt->sm_dr.sendsz, data_qdepth, b);
 
-	xdr_rdma_update_extra_bufs(xd, mr, buffer_total, buffer_aligned,
+	xdr_rdma_update_extra_bufs(rdma_xprt, mr, buffer_total, buffer_aligned,
 	    IO_OUTBUF);
 }
 
 void
-xdr_rdma_add_inbufs_hdr(RDMAXPRT *xd)
+xdr_rdma_add_inbufs_hdr(RDMAXPRT *rdma_xprt)
 {
 	uint8_t *b;
 	int hdr_qdepth = RDMA_HDR_CHUNKS;
-	uint32_t buffer_total = xd->sm_dr.recv_hdr_sz * hdr_qdepth;
+	uint32_t buffer_total = rdma_xprt->sm_dr.recv_hdr_sz * hdr_qdepth;
 
 	__warnx(TIRPC_DEBUG_FLAG_ERROR,
-		"%s() buffer_total  %llu, recvsz %llu rq %llu xd %p pagesz %llu",
-		__func__, buffer_total, xd->sm_dr.recv_hdr_sz, hdr_qdepth,
-		xd, xd->sm_dr.pagesz);
+		"%s() buffer_total  %llu, recvsz %llu rq %llu rdma_xprt %p pagesz %llu",
+		__func__, buffer_total, rdma_xprt->sm_dr.recv_hdr_sz, hdr_qdepth,
+		rdma_xprt, rdma_xprt->sm_dr.pagesz);
 
-	uint8_t *buffer_aligned = mem_aligned(xd->sm_dr.pagesz, buffer_total);
+	uint8_t *buffer_aligned = mem_aligned(rdma_xprt->sm_dr.pagesz, buffer_total);
 
 	assert(buffer_aligned);
 	memset(buffer_aligned, 0, buffer_total);
 
 	__warnx(TIRPC_DEBUG_FLAG_ERROR,
-		"%s() buffer_aligned at %p proptection domain %p xd %p",
-		__func__, buffer_aligned, xd->pd->pd, xd);
+		"%s() buffer_aligned at %p proptection domain %p rdma_xprt %p",
+		__func__, buffer_aligned, rdma_xprt->pd->pd, rdma_xprt);
 
-	struct ibv_mr *mr = xdr_rdma_reg_mr(xd, buffer_aligned, buffer_total);
+	struct ibv_mr *mr = xdr_rdma_reg_mr(rdma_xprt, buffer_aligned, buffer_total);
 
 	assert(mr);
 
 	b = buffer_aligned;
 
-	xdr_rdma_add_bufs(xd, mr, &xd->inbufs_hdr, UV_HDR,
-	    xd->sm_dr.recv_hdr_sz, hdr_qdepth, b);
+	xdr_rdma_add_bufs_locked(rdma_xprt, mr, &rdma_xprt->inbufs_hdr, UV_HDR,
+	    rdma_xprt->sm_dr.recv_hdr_sz, hdr_qdepth, b);
 
-	xdr_rdma_update_extra_bufs(xd, mr, buffer_total, buffer_aligned,
+	xdr_rdma_update_extra_bufs(rdma_xprt, mr, buffer_total, buffer_aligned,
 	    IO_INBUF);
 }
 
 void
-xdr_rdma_add_inbufs_data(RDMAXPRT *xd)
+xdr_rdma_add_inbufs_data(RDMAXPRT *rdma_xprt)
 {
 	uint8_t *b;
 	int data_qdepth = RDMA_DATA_CHUNKS;
-	uint32_t buffer_total = xd->sm_dr.recvsz * data_qdepth;
+	uint32_t buffer_total = rdma_xprt->sm_dr.recvsz * data_qdepth;
 
 	__warnx(TIRPC_DEBUG_FLAG_ERROR,
-		"%s() buffer_total  %llu, recvsz %llu rq %llu xd %p pagesz %llu",
-		__func__, buffer_total, xd->sm_dr.recvsz, data_qdepth,
-		xd, xd->sm_dr.pagesz);
+		"%s() buffer_total  %llu, recvsz %llu rq %llu rdma_xprt %p pagesz %llu",
+		__func__, buffer_total, rdma_xprt->sm_dr.recvsz, data_qdepth,
+		rdma_xprt, rdma_xprt->sm_dr.pagesz);
 
-	uint8_t *buffer_aligned = mem_aligned(xd->sm_dr.pagesz, buffer_total);
+	uint8_t *buffer_aligned = mem_aligned(rdma_xprt->sm_dr.pagesz, buffer_total);
 
 	assert(buffer_aligned);
 	memset(buffer_aligned, 0, buffer_total);
 
 	__warnx(TIRPC_DEBUG_FLAG_ERROR,
-		"%s() buffer_aligned at %p proptection domain %p xd %p",
-		__func__, buffer_aligned, xd->pd->pd, xd);
+		"%s() buffer_aligned at %p proptection domain %p rdma_xprt %p",
+		__func__, buffer_aligned, rdma_xprt->pd->pd, rdma_xprt);
 
-	struct ibv_mr *mr = xdr_rdma_reg_mr(xd, buffer_aligned, buffer_total);
+	struct ibv_mr *mr = xdr_rdma_reg_mr(rdma_xprt, buffer_aligned, buffer_total);
 
 	assert(mr);
 
 	b = buffer_aligned;
 
-	xdr_rdma_add_bufs(xd, mr, &xd->inbufs_data, UV_DATA,
-	    xd->sm_dr.recvsz, data_qdepth, b);
+	xdr_rdma_add_bufs_locked(rdma_xprt, mr, &rdma_xprt->inbufs_data,
+	    UV_DATA, rdma_xprt->sm_dr.recvsz, data_qdepth, b);
 
-	xdr_rdma_update_extra_bufs(xd, mr, buffer_total, buffer_aligned,
+	xdr_rdma_update_extra_bufs(rdma_xprt, mr, buffer_total, buffer_aligned,
 	    IO_INBUF);
 }
 
@@ -1167,16 +1178,16 @@ xdr_rdma_add_inbufs_data(RDMAXPRT *xd)
  * credits is the number of buffers used
  */
 int
-xdr_rdma_create(RDMAXPRT *xd)
+xdr_rdma_create(RDMAXPRT *rdma_xprt)
 {
 	uint8_t *b;
 	int data_qdepth = RDMA_DATA_CHUNKS;
 	int hdr_qdepth = RDMA_HDR_CHUNKS;
 
-	if (!xd->pd || !xd->pd->pd) {
+	if (!rdma_xprt->pd || !rdma_xprt->pd->pd) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s() %p[%u] missing Protection Domain",
-			__func__, xd, xd->state);
+			__func__, rdma_xprt, rdma_xprt->state);
 		return ENODEV;
 	}
 
@@ -1191,72 +1202,72 @@ xdr_rdma_create(RDMAXPRT *xd)
 	 * but never need more ioq_uv heads than buffers.
 	 */
 	size_t total_hdr_sz = RDMA_HDR_CHUNK_SZ * (RDMA_HDR_CHUNKS * 2);
-	size_t tirpc_buff_total = xd->sm_dr.recvsz * data_qdepth
-				  + xd->sm_dr.sendsz * data_qdepth;
+	size_t tirpc_buff_total = rdma_xprt->sm_dr.recvsz * data_qdepth
+				  + rdma_xprt->sm_dr.sendsz * data_qdepth;
 
-	xd->buffer_total = tirpc_buff_total + total_hdr_sz;
+	rdma_xprt->buffer_total = tirpc_buff_total + total_hdr_sz;
 
 	__warnx(TIRPC_DEBUG_FLAG_EVENT,
-		"%s() buffer_total %llu(%llu + %llu), xd %p pagesz %llu "
+		"%s() buffer_total %llu(%llu + %llu), rdma_xprt %p pagesz %llu "
 		"recvsz data %llu hdr %llu rq %llu "
 		"sendsz data %llu hdr %llu sq %llu",
-		__func__, xd->buffer_total,
-		tirpc_buff_total, total_hdr_sz, xd, xd->sm_dr.pagesz,
-		xd->sm_dr.recvsz, xd->sm_dr.recv_hdr_sz, data_qdepth,
-		xd->sm_dr.sendsz, xd->sm_dr.send_hdr_sz, data_qdepth);
+		__func__, rdma_xprt->buffer_total,
+		tirpc_buff_total, total_hdr_sz, rdma_xprt, rdma_xprt->sm_dr.pagesz,
+		rdma_xprt->sm_dr.recvsz, rdma_xprt->sm_dr.recv_hdr_sz, data_qdepth,
+		rdma_xprt->sm_dr.sendsz, rdma_xprt->sm_dr.send_hdr_sz, data_qdepth);
 
-	xd->buffer_aligned = mem_aligned(xd->sm_dr.pagesz, xd->buffer_total);
+	rdma_xprt->buffer_aligned = mem_aligned(rdma_xprt->sm_dr.pagesz, rdma_xprt->buffer_total);
 
-	assert(xd->buffer_aligned);
-	memset(xd->buffer_aligned, 0, xd->buffer_total);
+	assert(rdma_xprt->buffer_aligned);
+	memset(rdma_xprt->buffer_aligned, 0, rdma_xprt->buffer_total);
 
 	__warnx(TIRPC_DEBUG_FLAG_EVENT,
-		"%s() buffer_aligned at %p protection domain %p xd %p",
-		__func__, xd->buffer_aligned, xd->pd->pd, xd);
+		"%s() buffer_aligned at %p protection domain %p rdma_xprt %p",
+		__func__, rdma_xprt->buffer_aligned, rdma_xprt->pd->pd, rdma_xprt);
 
-	xd->mr = xdr_rdma_reg_mr(xd, xd->buffer_aligned,
-	    xd->buffer_total);
+	rdma_xprt->mr = xdr_rdma_reg_mr(rdma_xprt, rdma_xprt->buffer_aligned,
+	    rdma_xprt->buffer_total);
 
-	assert(xd->mr);
+	assert(rdma_xprt->mr);
 
-	xd->sm_dr.xprt.xp_rdma = true;
+	rdma_xprt->sm_dr.xprt.xp_rdma = true;
 
-	poolq_head_setup(&xd->inbufs_data.uvqh);
-	xd->inbufs_data.min_bsize = xd->sm_dr.pagesz;
-	xd->inbufs_data.max_bsize = xd->sm_dr.recvsz;
+	poolq_head_setup(&rdma_xprt->inbufs_data.uvqh);
+	rdma_xprt->inbufs_data.min_bsize = rdma_xprt->sm_dr.pagesz;
+	rdma_xprt->inbufs_data.max_bsize = rdma_xprt->sm_dr.recvsz;
 
-	poolq_head_setup(&xd->outbufs_data.uvqh);
-	xd->outbufs_data.min_bsize = xd->sm_dr.pagesz;
-	xd->outbufs_data.max_bsize = xd->sm_dr.sendsz;
+	poolq_head_setup(&rdma_xprt->outbufs_data.uvqh);
+	rdma_xprt->outbufs_data.min_bsize = rdma_xprt->sm_dr.pagesz;
+	rdma_xprt->outbufs_data.max_bsize = rdma_xprt->sm_dr.sendsz;
 
-	poolq_head_setup(&xd->inbufs_hdr.uvqh);
-	xd->inbufs_hdr.min_bsize = xd->sm_dr.pagesz;
-	xd->inbufs_hdr.max_bsize = xd->sm_dr.recv_hdr_sz;
+	poolq_head_setup(&rdma_xprt->inbufs_hdr.uvqh);
+	rdma_xprt->inbufs_hdr.min_bsize = rdma_xprt->sm_dr.pagesz;
+	rdma_xprt->inbufs_hdr.max_bsize = rdma_xprt->sm_dr.recv_hdr_sz;
 
-	poolq_head_setup(&xd->outbufs_hdr.uvqh);
-	xd->outbufs_hdr.min_bsize = xd->sm_dr.pagesz;
-	xd->outbufs_hdr.max_bsize = xd->sm_dr.send_hdr_sz;
+	poolq_head_setup(&rdma_xprt->outbufs_hdr.uvqh);
+	rdma_xprt->outbufs_hdr.min_bsize = rdma_xprt->sm_dr.pagesz;
+	rdma_xprt->outbufs_hdr.max_bsize = rdma_xprt->sm_dr.send_hdr_sz;
 
-	b = xd->buffer_aligned;
+	b = rdma_xprt->buffer_aligned;
 
-	xdr_rdma_add_bufs(xd, xd->mr, &xd->inbufs_data, UV_DATA,
-	    xd->sm_dr.recvsz, data_qdepth, b);
-	b = b + (data_qdepth * xd->sm_dr.recvsz);
+	xdr_rdma_add_bufs(rdma_xprt, rdma_xprt->mr, &rdma_xprt->inbufs_data, UV_DATA,
+	    rdma_xprt->sm_dr.recvsz, data_qdepth, b);
+	b = b + (data_qdepth * rdma_xprt->sm_dr.recvsz);
 
-	xdr_rdma_add_bufs(xd, xd->mr, &xd->outbufs_data, UV_DATA,
-	    xd->sm_dr.sendsz, data_qdepth, b);
-	b = b + (data_qdepth * xd->sm_dr.sendsz);
+	xdr_rdma_add_bufs(rdma_xprt, rdma_xprt->mr, &rdma_xprt->outbufs_data, UV_DATA,
+	    rdma_xprt->sm_dr.sendsz, data_qdepth, b);
+	b = b + (data_qdepth * rdma_xprt->sm_dr.sendsz);
 
-	xdr_rdma_add_bufs(xd, xd->mr, &xd->inbufs_hdr, UV_HDR,
-	    xd->sm_dr.recv_hdr_sz, hdr_qdepth, b);
-	b = b + (hdr_qdepth * xd->sm_dr.recv_hdr_sz);
+	xdr_rdma_add_bufs(rdma_xprt, rdma_xprt->mr, &rdma_xprt->inbufs_hdr, UV_HDR,
+	    rdma_xprt->sm_dr.recv_hdr_sz, hdr_qdepth, b);
+	b = b + (hdr_qdepth * rdma_xprt->sm_dr.recv_hdr_sz);
 
-	xdr_rdma_add_bufs(xd, xd->mr, &xd->outbufs_hdr, UV_HDR,
-	    xd->sm_dr.send_hdr_sz, hdr_qdepth, b);
-	b = b + (hdr_qdepth * xd->sm_dr.send_hdr_sz);
+	xdr_rdma_add_bufs(rdma_xprt, rdma_xprt->mr, &rdma_xprt->outbufs_hdr, UV_HDR,
+	    rdma_xprt->sm_dr.send_hdr_sz, hdr_qdepth, b);
+	b = b + (hdr_qdepth * rdma_xprt->sm_dr.send_hdr_sz);
 
-	poolq_head_setup(&xd->extra_bufs);
-	xd->extra_bufs_count = 0;
+	poolq_head_setup(&rdma_xprt->extra_bufs);
+	rdma_xprt->extra_bufs_count = 0;
 
 	/* Keep enough cbc available to serve cbc allocation.
 	 * We allocate MAX_CBC_OUTSTANDING * 2 cbcs.
@@ -1265,15 +1276,15 @@ xdr_rdma_create(RDMAXPRT *xd)
 
 	__warnx(TIRPC_DEBUG_FLAG_EVENT, "callq size %d", callq_size);
 
-	poolq_head_setup(&xd->cbclist);
+	poolq_head_setup(&rdma_xprt->cbclist);
 
-	while (xd->sm_dr.ioq.ioq_uv.uvqh.qcount < callq_size) {
+	while (rdma_xprt->sm_dr.ioq.ioq_uv.uvqh.qcount < callq_size) {
 		/* Post callq_size buffers to do first recvs
 		 * callback will be done on recv which should rearam again */
 		__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA,
 			"%s() qcount %d callq size %d",
-			__func__, xd->sm_dr.ioq.ioq_uv.uvqh.qcount);
-		xdr_rdma_callq(xd);
+			__func__, rdma_xprt->sm_dr.ioq.ioq_uv.uvqh.qcount);
+		xdr_rdma_callq(rdma_xprt);
 	}
 
 	return 0;
@@ -1293,7 +1304,7 @@ bool
 xdr_rdma_clnt_reply(XDR *xdrs, u_int32_t xid)
 {
 	struct rpc_rdma_cbc *cbc = (struct rpc_rdma_cbc *)xdrs;
-	RDMAXPRT *xprt;
+	RDMAXPRT *rdma_xprt;
 	struct xdr_write_list *reply_array;
 	struct xdr_ioq_uv *work_uv;
 	struct poolq_entry *have;
@@ -1304,7 +1315,7 @@ xdr_rdma_clnt_reply(XDR *xdrs, u_int32_t xid)
 			__func__);
 		return (false);
 	}
-	xprt = x_xprt(xdrs);
+	rdma_xprt = x_rdma_xprt(xdrs);
 
 	work_uv = IOQ_(TAILQ_FIRST(&cbc->recvq.ioq_uv.uvqh.qh));
 	rpcrdma_dump_msg(work_uv, "creply head", htonl(xid));
@@ -1326,7 +1337,7 @@ xdr_rdma_clnt_reply(XDR *xdrs, u_int32_t xid)
 			 * failing if no match. add a zero timeout
 			 * when implemented
 			 */
-			have = xdr_rdma_ioq_uv_fetch(&cbc->sendq, &xprt->inbufs_data.uvqh,
+			have = xdr_rdma_ioq_uv_fetch(&cbc->sendq, &rdma_xprt->inbufs_data.uvqh,
 				"creply body", 1, IOQ_FLAG_NONE);
 			rpcrdma_dump_msg(IOQ_(have), "creply body", ntohl(xid));
 
@@ -1356,7 +1367,7 @@ xdr_rdma_clnt_reply(XDR *xdrs, u_int32_t xid)
 bool
 xdr_rdma_svc_recv(struct rpc_rdma_cbc *cbc, u_int32_t xid)
 {
-	RDMAXPRT *xprt;
+	RDMAXPRT *rdma_xprt;
 	struct rdma_msg *cmsg;
 	uint32_t l;
 	bool ret = true;
@@ -1370,19 +1381,19 @@ xdr_rdma_svc_recv(struct rpc_rdma_cbc *cbc, u_int32_t xid)
 	}
 
 	/* Both sendq and recvq (xdrs)->x_lib[1] points to xprt */
-	xprt = x_xprt(cbc->recvq.xdrs);
+	rdma_xprt = x_rdma_xprt(cbc->recvq.xdrs);
 
-	if (xprt->sm_dr.xprt.xp_flags & SVC_XPRT_FLAG_DESTROYED) {
-		__warnx(TIRPC_DEBUG_FLAG_ERROR, " %s xprt %p cbc %p "
-		    "already destroyed", __func__, xprt, cbc);
+	if (rdma_xprt->sm_dr.xprt.xp_flags & SVC_XPRT_FLAG_DESTROYED) {
+		__warnx(TIRPC_DEBUG_FLAG_ERROR, " %s rdma_xprt %p cbc %p "
+		    "already destroyed", __func__, rdma_xprt, cbc);
 		return false;
 	}
 
         __warnx(TIRPC_DEBUG_FLAG_XDR, "%s: cbc %p recvq %p %d sendq %p %d "
-		"dataq %p %d xd %p",
+		"dataq %p %d rdma_xprt %p",
                 __func__, cbc, &cbc->recvq, cbc->recvq.ioq_uv.uvqh.qcount, &cbc->sendq,
                 cbc->sendq.ioq_uv.uvqh.qcount, &cbc->dataq, cbc->dataq.ioq_uv.uvqh.qcount,
-		xprt);
+		rdma_xprt);
 
 	/* recvq will have request header part */
 	assert(cbc->recvq.ioq_uv.uvqh.qcount == 1);
@@ -1391,7 +1402,7 @@ xdr_rdma_svc_recv(struct rpc_rdma_cbc *cbc, u_int32_t xid)
 	assert(cbc->freeq.ioq_uv.uvqh.qcount == 0);
 
 	/* Maintain max_outstanding */
-	xdr_rdma_callq(xprt);
+	xdr_rdma_callq(rdma_xprt);
 
 	/* Get inbuf from recvq */
 	cbc->call_uv = IOQ_(TAILQ_FIRST(&cbc->recvq.ioq_uv.uvqh.qh));
@@ -1408,7 +1419,7 @@ xdr_rdma_svc_recv(struct rpc_rdma_cbc *cbc, u_int32_t xid)
 			__func__, ntohl(cmsg->rdma_vers));
 		xdr_rdma_encode_error(cbc->call_uv, RDMA_ERR_VERS);
 		cbc->have = TAILQ_FIRST(&cbc->recvq.ioq_uv.uvqh.qh);
-		xdr_rdma_post_send_cb(xprt, cbc, 1);
+		xdr_rdma_post_send_cb(rdma_xprt, cbc, 1);
 		return (false);
 	}
 
@@ -1422,7 +1433,7 @@ xdr_rdma_svc_recv(struct rpc_rdma_cbc *cbc, u_int32_t xid)
 			__func__, ntohl(cmsg->rdma_type));
 		xdr_rdma_encode_error(cbc->call_uv, RDMA_ERR_BADHEADER);
 		cbc->have = TAILQ_FIRST(&cbc->recvq.ioq_uv.uvqh.qh);
-		xdr_rdma_post_send_cb(xprt, cbc, 1);
+		xdr_rdma_post_send_cb(rdma_xprt, cbc, 1);
 		return (false);
 	}
 
@@ -1466,7 +1477,7 @@ xdr_rdma_svc_recv(struct rpc_rdma_cbc *cbc, u_int32_t xid)
 	/* Allocate data buffer for read/readdir */
 	if (data_chunk) {
 		struct xdr_ioq_uv *data_chunk_uv = IOQ_(xdr_rdma_ioq_uv_fetch(&cbc->dataq,
-		    &xprt->outbufs_data.uvqh,
+		    &rdma_xprt->outbufs_data.uvqh,
 		    "sreply data_chunk_L", 1, IOQ_FLAG_NONE));
 
 		/* entry was already added directly to the queue */
@@ -1474,7 +1485,7 @@ xdr_rdma_svc_recv(struct rpc_rdma_cbc *cbc, u_int32_t xid)
 		    data_chunk_uv->v.vio_base;
 		/* tail adjusted below */
 		data_chunk_uv->v.vio_wrap = (char *)data_chunk_uv->v.vio_base +
-		    xprt->sm_dr.sendsz;
+		    rdma_xprt->sm_dr.sendsz;
 
 		cbc->data_chunk_uv = data_chunk_uv;
 		__warnx(TIRPC_DEBUG_FLAG_XDR, "data_chunk_uv data %p cbc %p",
@@ -1483,7 +1494,7 @@ xdr_rdma_svc_recv(struct rpc_rdma_cbc *cbc, u_int32_t xid)
 		/* For read/readdir without reply/write list, we should not need
 		 * big buffer */
 		struct xdr_ioq_uv *data_chunk_uv = IOQ_(xdr_rdma_ioq_uv_fetch(&cbc->dataq,
-		    &xprt->outbufs_hdr.uvqh,
+		    &rdma_xprt->outbufs_hdr.uvqh,
 		    "sreply data_chunk_S", 1, IOQ_FLAG_NONE));
 
 		/* entry was already added directly to the queue */
@@ -1491,7 +1502,7 @@ xdr_rdma_svc_recv(struct rpc_rdma_cbc *cbc, u_int32_t xid)
 		    data_chunk_uv->v.vio_base;
 		/* tail adjusted below */
 		data_chunk_uv->v.vio_wrap = (char *)data_chunk_uv->v.vio_base +
-		    xprt->sm_dr.send_hdr_sz;
+		    rdma_xprt->sm_dr.send_hdr_sz;
 
 		cbc->data_chunk_uv = data_chunk_uv;
 		__warnx(TIRPC_DEBUG_FLAG_XDR, "data_chunk_uv hdr %p cbc %p",
@@ -1528,10 +1539,10 @@ xdr_rdma_svc_recv(struct rpc_rdma_cbc *cbc, u_int32_t xid)
 			"%s() length %u",
 			__func__, l);
 
-		assert(l <= xprt->sm_dr.recvsz);
+		assert(l <= rdma_xprt->sm_dr.recvsz);
 
 		struct xdr_ioq_uv *data_chunk_uv = IOQ_(xdr_rdma_ioq_uv_fetch(&cbc->recvq,
-		    &xprt->inbufs_data.uvqh,
+		    &rdma_xprt->inbufs_data.uvqh,
 		    "sreply rdma_read", 1, IOQ_FLAG_NONE));
 
 		/* entry was already added directly to the queue */
@@ -1545,9 +1556,11 @@ xdr_rdma_svc_recv(struct rpc_rdma_cbc *cbc, u_int32_t xid)
 
 		cbc->have = TAILQ_FIRST(&cbc->recvq.ioq_uv.uvqh.qh);
 
-		if (xdr_rdma_wait_read_cb(xprt, cbc, 1, &rl(cbc->read_chunk)->target)) {
-			__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s: rdma_read failed xprt %p "
-			    "cbc %p", __func__, xprt, cbc);
+		if (xdr_rdma_wait_read_cb(rdma_xprt, cbc, 1,
+					  &rl(cbc->read_chunk)->target)) {
+			__warnx(TIRPC_DEBUG_FLAG_ERROR,
+				"%s: rdma_read failed rdma_xprt %p cbc %p",
+				__func__, rdma_xprt, cbc);
 			ret = false;
 		}
 
@@ -1585,10 +1598,10 @@ xdr_rdma_svc_recv(struct rpc_rdma_cbc *cbc, u_int32_t xid)
 			 "call chunk", cmsg->rdma_xid);
 
         __warnx(TIRPC_DEBUG_FLAG_XDR, "%s: cbc %p recvq %p %d "
-		"sendq %p %d freeq %p %d xd %p ",
+		"sendq %p %d freeq %p %d rdma_xprt %p ",
                 __func__, cbc, &cbc->recvq, cbc->recvq.ioq_uv.uvqh.qcount, &cbc->sendq,
                 cbc->sendq.ioq_uv.uvqh.qcount, &cbc->freeq,
-		cbc->freeq.ioq_uv.uvqh.qcount, xprt);
+		cbc->freeq.ioq_uv.uvqh.qcount, rdma_xprt);
 
 	return ret;
 }
@@ -1608,7 +1621,7 @@ bool
 xdr_rdma_svc_reply(struct rpc_rdma_cbc *cbc, u_int32_t xid,
     bool rdma_buf_used)
 {
-	RDMAXPRT *xprt;
+	RDMAXPRT *rdma_xprt;
 	struct xdr_write_list *reply_array;
 	struct poolq_entry *have;
 	bool allocate_header = 0;
@@ -1620,17 +1633,17 @@ xdr_rdma_svc_reply(struct rpc_rdma_cbc *cbc, u_int32_t xid,
 			__func__);
 		return (false);
 	}
-	xprt = x_xprt(cbc->recvq.xdrs);
+	rdma_xprt = x_rdma_xprt(cbc->recvq.xdrs);
 
-	if (xprt->sm_dr.xprt.xp_flags & SVC_XPRT_FLAG_DESTROYED) {
-		__warnx(TIRPC_DEBUG_FLAG_ERROR, " %s xprt %p cbc %p "
-		    "already destroyed", __func__, xprt, cbc);
+	if (rdma_xprt->sm_dr.xprt.xp_flags & SVC_XPRT_FLAG_DESTROYED) {
+		__warnx(TIRPC_DEBUG_FLAG_ERROR, " %s rdma_xprt %p cbc %p "
+		    "already destroyed", __func__, rdma_xprt, cbc);
 		return false;
 	}
 
-        __warnx(TIRPC_DEBUG_FLAG_XDR, "%s: cbc %p recvq %p %d sendq %p %d xd %p",
+        __warnx(TIRPC_DEBUG_FLAG_XDR, "%s: cbc %p recvq %p %d sendq %p %d rdma_xprt %p",
                 __func__, cbc, &cbc->recvq, cbc->recvq.ioq_uv.uvqh.qcount, &cbc->sendq,
-                cbc->sendq.ioq_uv.uvqh.qcount, xprt);
+                cbc->sendq.ioq_uv.uvqh.qcount, rdma_xprt);
 
 	reply_array = (wl_t *)cbc->reply_chunk;
 	 /* For write_chuks we need to allocate seperate buffer for
@@ -1649,25 +1662,25 @@ xdr_rdma_svc_reply(struct rpc_rdma_cbc *cbc, u_int32_t xid,
 			"replying inline and hope it works", __func__);
 
 		have = xdr_rdma_ioq_uv_fetch(&cbc->sendq,
-		    &xprt->outbufs_hdr.uvqh,
+		    &rdma_xprt->outbufs_hdr.uvqh,
 		    "sreply buffer", 1, IOQ_FLAG_NONE);
 
 		/* buffer is limited size */
 		IOQ_(have)->v.vio_head =
 		IOQ_(have)->v.vio_tail = IOQ_(have)->v.vio_base;
 		IOQ_(have)->v.vio_wrap = (char *)IOQ_(have)->v.vio_base
-					+ xprt->sm_dr.send_hdr_sz;
+					+ rdma_xprt->sm_dr.send_hdr_sz;
 
 		/* Should be only set for read and readdir */
 		if (rdma_buf_used) {
-			have = xdr_rdma_ioq_uv_fetch(&cbc->sendq, &xprt->outbufs_hdr.uvqh,
+			have = xdr_rdma_ioq_uv_fetch(&cbc->sendq, &rdma_xprt->outbufs_hdr.uvqh,
 						"sreply buffer", 1, IOQ_FLAG_NONE);
 
 			/* buffer is limited size */
 			IOQ_(have)->v.vio_head =
 			IOQ_(have)->v.vio_tail = IOQ_(have)->v.vio_base;
 			IOQ_(have)->v.vio_wrap = (char *)IOQ_(have)->v.vio_base
-						+ xprt->sm_dr.send_hdr_sz;
+						+ rdma_xprt->sm_dr.send_hdr_sz;
 		}
 		/* make room at head for RDMA header */
 		xdr_ioq_reset(&cbc->sendq, 0);
@@ -1690,7 +1703,7 @@ xdr_rdma_svc_reply(struct rpc_rdma_cbc *cbc, u_int32_t xid,
 		allocate_header = 1;
 
 		if (allocate_header) {
-			have = xdr_rdma_ioq_uv_fetch(&cbc->sendq, &xprt->outbufs_hdr.uvqh,
+			have = xdr_rdma_ioq_uv_fetch(&cbc->sendq, &rdma_xprt->outbufs_hdr.uvqh,
 					"sreply buffer", 1, IOQ_FLAG_NONE);
 
 
@@ -1698,7 +1711,7 @@ xdr_rdma_svc_reply(struct rpc_rdma_cbc *cbc, u_int32_t xid,
 			IOQ_(have)->v.vio_head =
 			IOQ_(have)->v.vio_tail = IOQ_(have)->v.vio_base;
 			IOQ_(have)->v.vio_wrap = (char *)IOQ_(have)->v.vio_base
-					+ xprt->sm_dr.send_hdr_sz;
+					+ rdma_xprt->sm_dr.send_hdr_sz;
 			/* make room at head for RDMA header */
 			xdr_ioq_reset(&cbc->sendq, 0);
 		}
@@ -1711,19 +1724,19 @@ xdr_rdma_svc_reply(struct rpc_rdma_cbc *cbc, u_int32_t xid,
 			if (write_chunk) {
 				/* For write_list we get buffer from protocol,
 				 * we need buffer to refer it */
-				have = xdr_rdma_ioq_uv_fetch(&cbc->sendq, &xprt->outbufs_hdr.uvqh,
+				have = xdr_rdma_ioq_uv_fetch(&cbc->sendq, &rdma_xprt->outbufs_hdr.uvqh,
 				    "sreply buffer", 1, IOQ_FLAG_NONE);
 
 				/* buffer is limited size */
 				IOQ_(have)->v.vio_head =
 				IOQ_(have)->v.vio_tail = IOQ_(have)->v.vio_base;
 				IOQ_(have)->v.vio_wrap = (char *)IOQ_(have)->v.vio_base
-					+ xprt->sm_dr.send_hdr_sz;
+					+ rdma_xprt->sm_dr.send_hdr_sz;
 			} else {
 				/* For reply_list we copy from protocol buffer so allocate bigger
 				 * chunk */
-				assert(l <= xprt->sm_dr.sendsz);
-				have = xdr_rdma_ioq_uv_fetch(&cbc->sendq, &xprt->outbufs_data.uvqh,
+				assert(l <= rdma_xprt->sm_dr.sendsz);
+				have = xdr_rdma_ioq_uv_fetch(&cbc->sendq, &rdma_xprt->outbufs_data.uvqh,
 				    "sreply buffer", 1, IOQ_FLAG_NONE);
 
 				/* buffer is limited size */
@@ -1736,9 +1749,9 @@ xdr_rdma_svc_reply(struct rpc_rdma_cbc *cbc, u_int32_t xid,
 			xdr_ioq_reset(&cbc->sendq, 0);
 	}
 
-        __warnx(TIRPC_DEBUG_FLAG_XDR, "%s: cbc %p recvq %p %d sendq %p %d xd %p",
+        __warnx(TIRPC_DEBUG_FLAG_XDR, "%s: cbc %p recvq %p %d sendq %p %d rdma_xprt %p",
                 __func__, cbc, &cbc->recvq, cbc->recvq.ioq_uv.uvqh.qcount, &cbc->sendq,
-                cbc->sendq.ioq_uv.uvqh.qcount, xprt);
+                cbc->sendq.ioq_uv.uvqh.qcount, rdma_xprt);
 
 	return (true);
 }
@@ -1756,9 +1769,9 @@ bool
 xdr_rdma_clnt_flushout(struct rpc_rdma_cbc *cbc)
 {
 /* FIXME: decide how many buffers we use in argument!!!!!! */
-#define num_chunks (xd->xa->credits - 1)
+#define num_chunks (rdma_xprt->xa->credits - 1)
 
-	RDMAXPRT *xd = x_xprt(cbc->recvq.xdrs);
+	RDMAXPRT *rdma_xprt = x_rdma_xprt(cbc->recvq.xdrs);
 	struct rpc_msg *msg;
 	struct rdma_msg *rmsg;
 	struct xdr_write_list *w_array;
@@ -1789,16 +1802,16 @@ xdr_rdma_clnt_flushout(struct rpc_rdma_cbc *cbc)
 
 	cbc->recvq.ioq_uv.uvq_fetch = xdr_rdma_ioq_uv_fetch_nothing;
 
-	head_uv = IOQ_(xdr_rdma_ioq_uv_fetch(&cbc->recvq, &xd->outbufs_data.uvqh,
+	head_uv = IOQ_(xdr_rdma_ioq_uv_fetch(&cbc->recvq, &rdma_xprt->outbufs_data.uvqh,
 					"c_head buffer", 1, IOQ_FLAG_NONE));
 
-	(void)xdr_rdma_ioq_uv_fetch(&cbc->sendq, &xd->inbufs_data.uvqh,
+	(void)xdr_rdma_ioq_uv_fetch(&cbc->sendq, &rdma_xprt->inbufs_data.uvqh,
 				"call buffers", num_chunks, IOQ_FLAG_NONE);
 
 	rmsg = m_(head_uv->v.vio_head);
 	rmsg->rdma_xid = msg->rm_xid;
 	rmsg->rdma_vers = htonl(RPCRDMA_VERSION);
-	rmsg->rdma_credit = htonl(xd->xa->credits);
+	rmsg->rdma_credit = htonl(rdma_xprt->xa->credits);
 	rmsg->rdma_type = htonl(RDMA_MSG);
 
 	/* no read, write chunks. */
@@ -1815,7 +1828,7 @@ xdr_rdma_clnt_flushout(struct rpc_rdma_cbc *cbc)
 			&w_array->entry[i++].target;
 		uint32_t length = ioquv_length(IOQ_(have));
 
-		w_seg->handle = htonl(xd->mr->rkey);
+		w_seg->handle = htonl(rdma_xprt->mr->rkey);
 		w_seg->length = htonl(length);
 		xdr_encode_hyper((uint32_t*)&w_seg->offset,
 				 (uintptr_t)IOQ_(have)->v.vio_head);
@@ -1828,7 +1841,7 @@ xdr_rdma_clnt_flushout(struct rpc_rdma_cbc *cbc)
 	rpcrdma_dump_msg(hold_uv, "clntcall", msg->rm_xid);
 
 	/* actual send, callback will take care of cleanup */
-	xdr_rdma_post_send_cb(xd, cbc, 2);
+	xdr_rdma_post_send_cb(rdma_xprt, cbc, 2);
 	return (true);
 }
 
@@ -1866,7 +1879,7 @@ xdr_rdma_clnt_flushout(struct rpc_rdma_cbc *cbc)
 bool
 xdr_rdma_svc_flushout(struct rpc_rdma_cbc *cbc, bool rdma_buf_used)
 {
-	RDMAXPRT *xprt;
+	RDMAXPRT *rdma_xprt;
 	struct rpc_msg *msg;
 	struct rdma_msg *cmsg;
 	struct rdma_msg *rmsg;
@@ -1887,11 +1900,11 @@ xdr_rdma_svc_flushout(struct rpc_rdma_cbc *cbc, bool rdma_buf_used)
 			__func__);
 		return (false);
 	}
-	xprt = x_xprt(cbc->recvq.xdrs);
+	rdma_xprt = x_rdma_xprt(cbc->recvq.xdrs);
 
-        __warnx(TIRPC_DEBUG_FLAG_XDR, "%s: cbc %p recvq %p %d sendq %p %d xd %p",
+        __warnx(TIRPC_DEBUG_FLAG_XDR, "%s: cbc %p recvq %p %d sendq %p %d rdma_xprt %p",
                 __func__, cbc, &cbc->recvq, cbc->recvq.ioq_uv.uvqh.qcount, &cbc->sendq,
-                cbc->sendq.ioq_uv.uvqh.qcount, xprt);
+                cbc->sendq.ioq_uv.uvqh.qcount, rdma_xprt);
 
 	reply_array = (wl_t *)cbc->reply_chunk;
 
@@ -1936,7 +1949,7 @@ xdr_rdma_svc_flushout(struct rpc_rdma_cbc *cbc, bool rdma_buf_used)
 
 	/* usurp the sendq for the head, move to recvq later */
 	/* Allocate seperate buf to send RPCoRDMA header */
-	rdma_head_uv = IOQ_(xdr_rdma_ioq_uv_fetch(&cbc->sendq, &xprt->outbufs_hdr.uvqh,
+	rdma_head_uv = IOQ_(xdr_rdma_ioq_uv_fetch(&cbc->sendq, &rdma_xprt->outbufs_hdr.uvqh,
 					"sreply head", 1, IOQ_FLAG_NONE));
 
 	/* entry was already added directly to the queue */
@@ -1944,13 +1957,13 @@ xdr_rdma_svc_flushout(struct rpc_rdma_cbc *cbc, bool rdma_buf_used)
 	    rdma_head_uv->v.vio_base;
 	/* tail adjusted below */
 	rdma_head_uv->v.vio_wrap = (char *)rdma_head_uv->v.vio_base +
-	    xprt->sm_dr.send_hdr_sz;
+	    rdma_xprt->sm_dr.send_hdr_sz;
 
 	/* build the header that goes with the data */
 	rmsg = m_(rdma_head_uv->v.vio_head);
 	rmsg->rdma_xid = cmsg->rdma_xid;
 	rmsg->rdma_vers = cmsg->rdma_vers;
-	rmsg->rdma_credit = htonl(MIN(xprt->xa->credits, MAX_RECV_OUTSTANDING));
+	rmsg->rdma_credit = htonl(MIN(rdma_xprt->xa->credits, MAX_RECV_OUTSTANDING));
 
 	/* no read, write chunks. */
 	rmsg->rdma_body.rdma_msg.rdma_reads = 0; /* htonl(0); */
@@ -1990,7 +2003,7 @@ xdr_rdma_svc_flushout(struct rpc_rdma_cbc *cbc, bool rdma_buf_used)
 
 			assert(rdma_buf_used);
 			assert(cbc->sendq.ioq_uv.uvqh.qcount == 1);
-			assert(len <= xprt->sm_dr.send_hdr_sz);
+			assert(len <= rdma_xprt->sm_dr.send_hdr_sz);
 
 			/* If its rdma_buf from protocol we should have
 			 * UIO_FLAG_REFER set. */
@@ -2079,7 +2092,7 @@ xdr_rdma_svc_flushout(struct rpc_rdma_cbc *cbc, bool rdma_buf_used)
 			uint32_t length = ntohl(c_seg->length);
 			uint32_t nfs_header_len = ioquv_length(nfs_header_uv);
 
-			assert(length <= xprt->sm_dr.sendsz);
+			assert(length <= rdma_xprt->sm_dr.sendsz);
 
 			*w_seg = *c_seg;
 
@@ -2114,9 +2127,9 @@ xdr_rdma_svc_flushout(struct rpc_rdma_cbc *cbc, bool rdma_buf_used)
 				rdma_buf_len = rdma_buf_len - write_len;
 			}
 
-			if (xdr_rdma_wait_write_cb(xprt, cbc, 1, w_seg)) {
-				__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s rdma_write failed xprt %p "
-				    "cbc %p", __func__, xprt, cbc);
+			if (xdr_rdma_wait_write_cb(rdma_xprt, cbc, 1, w_seg)) {
+				__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s rdma_write failed rdma_xprt %p "
+				    "cbc %p", __func__, rdma_xprt, cbc);
 				ret = false;
 			}
 
@@ -2187,9 +2200,10 @@ xdr_rdma_svc_flushout(struct rpc_rdma_cbc *cbc, bool rdma_buf_used)
 
 	cbc->have = TAILQ_FIRST(&cbc->sendq.ioq_uv.uvqh.qh);
 
-	if (xdr_rdma_post_send_cb(xprt, cbc, cbc->sendq.ioq_uv.uvqh.qcount)) {
-		__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s rdma_send failed xprt %p "
-		    "cbc %p", __func__, xprt, cbc);
+	if (xdr_rdma_post_send_cb(rdma_xprt, cbc,
+				  cbc->sendq.ioq_uv.uvqh.qcount)) {
+		__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s rdma_send failed rdma_xprt %p "
+		    "cbc %p", __func__, rdma_xprt, cbc);
 		ret = false;
 	}
 
@@ -2198,9 +2212,9 @@ xdr_rdma_svc_flushout(struct rpc_rdma_cbc *cbc, bool rdma_buf_used)
 		uio_refer->uio_release(uio_refer, UIO_FLAG_NONE);
 	}
 
-	__warnx(TIRPC_DEBUG_FLAG_XDR, "%s: cbc %p recvq %p %d sendq %p %d xd %p",
+	__warnx(TIRPC_DEBUG_FLAG_XDR, "%s: cbc %p recvq %p %d sendq %p %d rdma_xprt %p",
 		__func__, cbc, &cbc->recvq, cbc->recvq.ioq_uv.uvqh.qcount, &cbc->sendq,
-		cbc->sendq.ioq_uv.uvqh.qcount, xprt);
+		cbc->sendq.ioq_uv.uvqh.qcount, rdma_xprt);
 
 	return ret;
 }

@@ -428,16 +428,17 @@ svc_xprt_shutdown(void)
 
 #ifdef USE_RPC_RDMA
 int
-svc_rdma_add_xprt_fd(SVCXPRT *xprt) {
+svc_rdma_add_xprt_fd(SVCXPRT *xprt)
+{
 	struct rpc_dplx_rec sk;
 	struct rpc_dplx_rec *rec;
 	struct rbtree_x_part *t;
 	struct opr_rbtree_node *nv;
 
-	RDMAXPRT *xd = RDMA_DR(REC_XPRT(xprt));
+	RDMAXPRT *rdma_xprt = RDMA_DR(REC_XPRT(xprt));
 
-	sk.xprt.xp_fd = xd->sm_dr.xprt.xp_fd;
-	sk.xprt.xp_rdma = xd->sm_dr.xprt.xp_rdma;
+	sk.xprt.xp_fd = rdma_xprt->sm_dr.xprt.xp_fd;
+	sk.xprt.xp_rdma = rdma_xprt->sm_dr.xprt.xp_rdma;
 	t = rbtx_partition_of_scalar(&svc_xprt_fd.xt, sk.xprt.xp_fd);
 
 	rwlock_wrlock(&t->lock);
@@ -450,14 +451,14 @@ svc_rdma_add_xprt_fd(SVCXPRT *xprt) {
 			    "%s: fd %d max_rdma_connections %u exceeded\n",
 			    __func__, sk.xprt.xp_fd,
 			    __svc_params->max_rdma_connections);
-			SVC_DESTROY(&xd->sm_dr.xprt);
+			SVC_DESTROY(&rdma_xprt->sm_dr.xprt);
 			return -1;
 		}
 
 		/* Get ref */
-		SVC_REF(&xd->sm_dr.xprt, SVC_REF_FLAG_NONE);
+		SVC_REF(&rdma_xprt->sm_dr.xprt, SVC_REF_FLAG_NONE);
 
-		rec = REC_XPRT(&xd->sm_dr.xprt);
+		rec = REC_XPRT(&rdma_xprt->sm_dr.xprt);
 
 		rpc_dplx_rli(rec);
 
@@ -469,8 +470,9 @@ svc_rdma_add_xprt_fd(SVCXPRT *xprt) {
 
 			rpc_dplx_rui(rec);
 			rwlock_unlock(&t->lock);
-			SVC_DESTROY(&xd->sm_dr.xprt);
-			SVC_RELEASE(&xd->sm_dr.xprt, SVC_RELEASE_FLAG_NONE);
+			SVC_DESTROY(&rdma_xprt->sm_dr.xprt);
+			SVC_RELEASE(&rdma_xprt->sm_dr.xprt,
+			            SVC_RELEASE_FLAG_NONE);
 			return -1;
 		}
 
@@ -478,7 +480,7 @@ svc_rdma_add_xprt_fd(SVCXPRT *xprt) {
 
 		atomic_inc_uint32_t(&svc_xprt_fd.rdma_connections);
 
-		SVC_RELEASE(&xd->sm_dr.xprt, SVC_RELEASE_FLAG_NONE);
+		SVC_RELEASE(&rdma_xprt->sm_dr.xprt, SVC_RELEASE_FLAG_NONE);
 	}
 	rwlock_unlock(&t->lock);
 	return 0;

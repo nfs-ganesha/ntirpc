@@ -192,21 +192,20 @@ xdr_ioq_uv_recycle(struct poolq_head *ioqh, struct poolq_entry *have)
 }
 
 #ifdef USE_RPC_RDMA
-
 struct poolq_entry *
 xdr_rdma_ioq_uv_fetch(struct xdr_ioq *xioq, struct poolq_head *ioqh,
 		 char *comment, u_int count, u_int ioq_flags)
 {
 	struct poolq_entry *have = NULL;
-	RDMAXPRT *xd = NULL;
+	RDMAXPRT *rdma_xprt = NULL;
 
 	if (xioq->rdma_ioq) {
-		xd = xioq->xdrs[0].x_lib[1];
+		rdma_xprt = xioq->xdrs[0].x_lib[1];
 	}
 
 	__warnx(TIRPC_DEBUG_FLAG_XDR,
-		"%s() %u %s xd %p",
-		__func__, count, comment, xd);
+		"%s() %u %s rdma_xprt %p",
+		__func__, count, comment, rdma_xprt);
 
 	pthread_mutex_lock(&ioqh->qmutex);
 
@@ -235,32 +234,29 @@ xdr_rdma_ioq_uv_fetch(struct xdr_ioq *xioq, struct poolq_head *ioqh,
 			if(count == 0)
 				break;
 		} else {
-			if (xd) {
-				pthread_mutex_unlock(&ioqh->qmutex);
-
-				if (ioqh == &xd->inbufs_data.uvqh) {
-					xdr_rdma_add_inbufs_data(xd);
+			if (rdma_xprt) {
+				if (ioqh == &rdma_xprt->inbufs_data.uvqh) {
+					xdr_rdma_add_inbufs_data(rdma_xprt);
 				}
 
-				if (ioqh == &xd->outbufs_data.uvqh) {
-					xdr_rdma_add_outbufs_data(xd);
+				if (ioqh == &rdma_xprt->outbufs_data.uvqh) {
+					xdr_rdma_add_outbufs_data(rdma_xprt);
 				}
 
-				if (ioqh == &xd->inbufs_hdr.uvqh) {
-					xdr_rdma_add_inbufs_hdr(xd);
+				if (ioqh == &rdma_xprt->inbufs_hdr.uvqh) {
+					xdr_rdma_add_inbufs_hdr(rdma_xprt);
 				}
 
-				if (ioqh == &xd->outbufs_hdr.uvqh) {
-					xdr_rdma_add_outbufs_hdr(xd);
+				if (ioqh == &rdma_xprt->outbufs_hdr.uvqh) {
+					xdr_rdma_add_outbufs_hdr(rdma_xprt);
 				}
 
-				if (unlikely(ioqh == &xd->cbqh)) {
-					__warnx(TIRPC_DEBUG_FLAG_EVENT, "cbc buffers exhausetd xd %p "
-						"ioqh %p qcount %d", xd, ioqh, ioqh->qcount);
+				if (unlikely(ioqh == &rdma_xprt->cbqh)) {
+					__warnx(TIRPC_DEBUG_FLAG_EVENT, "cbc buffers exhausetd rdma_xprt %p "
+						"ioqh %p qcount %d", rdma_xprt, ioqh, ioqh->qcount);
 					rpc_rdma_allocate_cbc_locked(ioqh);
 				}
 
-				pthread_mutex_lock(&ioqh->qmutex);
 			}
 		}
 	}
