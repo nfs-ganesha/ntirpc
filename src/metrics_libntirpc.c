@@ -7,6 +7,26 @@
 
 #define ARRAY_SIZE(a) (sizeof(a)/sizeof(a[0]))
 
+/* Generic enum to represent commonly used operation status */
+typedef enum generic_op_status {
+	GENERIC_SUCCESS_STATUS = 0,
+	GENERIC_FAILURE_STATUS,
+	GENERIC_OP_STATUS_COUNT,
+} generic_op_status_t;
+
+static inline const char *get_generic_op_status_name(
+	generic_op_status_t op_status)
+{
+	switch (op_status) {
+	case GENERIC_SUCCESS_STATUS:
+		return "success";
+	case GENERIC_FAILURE_STATUS:
+		return "failure";
+	default:
+		abort();
+	}
+}
+
 /* Concurrent TCP Connections */
 static gauge_metric_handle_t concurrent_tcp_metric;
 static bool initialized = false;
@@ -209,19 +229,19 @@ static void register_svc_auth_request_latency_metric(void) {
 				continue;
 
 			const metric_label_t labels[] = {
-				GMONITORING_INIT_LABEL("sec_flavor", sec_flavor),
-				GMONITORING_INIT_LABEL("auth_status", get_auth_stat_string(as))
+				METRIC_LABEL("sec_flavor", sec_flavor),
+				METRIC_LABEL("auth_status", get_auth_stat_string(as))
 			};
 
 			svc_auth_request_latency[sf_idx][as_idx] =
-				gmonitoring_register_histogram_metric(
+				monitoring__register_histogram(
 					"libntirpc__svc_auth_request_latency",
-					GMONITORING_INIT_METADATA(
+					METRIC_METADATA(
 						"Distribution of time taken by an authentication request to complete",
-						GMONITORING_UNIT_MICROSECOND),
+						METRIC_UNIT_MICROSECOND),
 					labels,
 					ARRAY_SIZE(labels),
-					gmonitoring_get_exp2_histogram_buckets_compact());
+					monitoring__buckets_exp2_compact());
 		}
 	}
 }
@@ -242,20 +262,20 @@ static void register_gss_svc_auth_steps_latency_metric(void) {
 
 			for (status = 0; status < GENERIC_OP_STATUS_COUNT; status++) {
 				const metric_label_t labels[] = {
-					GMONITORING_INIT_LABEL("svc", svc_str),
-					GMONITORING_INIT_LABEL("auth_step", auth_step_str),
-					GMONITORING_INIT_LABEL("step_status",
-						gmonitoring_get_generic_op_status_name(status))
+					METRIC_LABEL("svc", svc_str),
+					METRIC_LABEL("auth_step", auth_step_str),
+					METRIC_LABEL("step_status",
+						get_generic_op_status_name(status))
 				};
 				gss_svc_auth_steps_latency[svc_idx][as][status] =
-					gmonitoring_register_histogram_metric(
+					monitoring__register_histogram(
 						"libntirpc__gss_svc_auth_steps_latency",
-						GMONITORING_INIT_METADATA(
+						METRIC_METADATA(
 							"Distribution of time taken by gss service-auth steps to complete",
-							GMONITORING_UNIT_MICROSECOND),
+							METRIC_UNIT_MICROSECOND),
 						labels,
 						ARRAY_SIZE(labels),
-						gmonitoring_get_exp2_histogram_buckets_compact());
+						monitoring__buckets_exp2_compact());
 			}
 		}
 	}
@@ -274,18 +294,18 @@ static void register_gss_svc_auth_ops_latency_metric(void) {
 
 		for (i = 0; i < SVC_AUTH_OPS_COUNT; i++) {
 			const metric_label_t labels[] = {
-				GMONITORING_INIT_LABEL("svc", svc_str),
-				GMONITORING_INIT_LABEL("op", get_svc_auth_op_string(i))
+				METRIC_LABEL("svc", svc_str),
+				METRIC_LABEL("op", get_svc_auth_op_string(i))
 			};
 			gss_svc_auth_ops_latency[svc_idx][i] =
-				gmonitoring_register_histogram_metric(
+				monitoring__register_histogram(
 					"libntirpc__gss_svc_auth_ops_latency",
-					GMONITORING_INIT_METADATA(
+					METRIC_METADATA(
 						"Distribution of time taken by gss service-auth ops to complete",
-						GMONITORING_UNIT_MICROSECOND),
+						METRIC_UNIT_MICROSECOND),
 					labels,
 					ARRAY_SIZE(labels),
-					gmonitoring_get_exp2_histogram_buckets_compact());
+					monitoring__buckets_exp2_compact());
 		}
 	}
 }
@@ -297,7 +317,7 @@ void metrics_libntirpc_observe_svc_auth_request_latency(int sec_flavor,
 	assert(sf_idx >= 0);
 	const int as_idx = get_auth_stat_idx_in_metrics_array(auth_status);
 	assert(as_idx >= 0);
-	gmonitoring_observe_histogram_metric_value(
+	monitoring__histogram_observe(
 		svc_auth_request_latency[sf_idx][as_idx], timespec_us(latency));
 }
 
@@ -309,7 +329,7 @@ void metrics_libntirpc_observe_gss_svc_auth_step_latency(
 	assert(svc_idx >= 0);
 	const generic_op_status_t step_status = step_succeeded ?
 		GENERIC_SUCCESS_STATUS : GENERIC_FAILURE_STATUS;
-	gmonitoring_observe_histogram_metric_value(
+	monitoring__histogram_observe(
 		gss_svc_auth_steps_latency[svc_idx][step][step_status],
 		timespec_us(latency));
 }
@@ -319,21 +339,21 @@ void metrics_libntirpc_observe_gss_svc_auth_op_latency(svc_auth_op_t op,
 {
 	const int svc_idx = get_gss_svc_idx_in_metrics_array(svc);
 	assert(svc_idx >= 0);
-	gmonitoring_observe_histogram_metric_value(
+	monitoring__histogram_observe(
 		gss_svc_auth_ops_latency[svc_idx][op], timespec_us(latency));
 }
 
 void metrics_libntirpc_update_tcp_connection_count(int connection_count)
 {
-	gmonitoring_set_gauge_metric_value(concurrent_tcp_metric, connection_count);
+	monitoring__gauge_set(concurrent_tcp_metric, connection_count);
 }
 
 void metrics_libntirpc_init(void){
 	const metric_label_t empty_labels[] = {};
 	assert(initialized == false);
-	concurrent_tcp_metric = gmonitoring_register_gauge_metric(
+	concurrent_tcp_metric = monitoring__register_gauge(
 			"libntirpc__tcp_connections_count",
-			GMONITORING_INIT_METADATA("TCP connections count", GMONITORING_UNIT_NONE), empty_labels,
+			METRIC_METADATA("TCP connections count", METRIC_UNIT_NONE), empty_labels,
 			ARRAY_SIZE(empty_labels));
 
 	register_svc_auth_request_latency_metric();

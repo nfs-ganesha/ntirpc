@@ -20,6 +20,7 @@
 #cmakedefine TIRPC_EPOLL 1
 #cmakedefine USE_RPC_RDMA 1
 #cmakedefine USE_LTTNG_NTIRPC 1
+#cmakedefine USE_MONITORING 1
 
 /* Package stuff */
 #define PACKAGE "libntirpc"
