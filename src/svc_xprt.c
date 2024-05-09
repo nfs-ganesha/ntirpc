@@ -39,7 +39,6 @@
 #include "rpc_com.h"
 #include "svc_internal.h"
 #include "svc_xprt.h"
-#include "gmonitoring.h"
 #include "metrics_libntirpc.h"
 
 /**
