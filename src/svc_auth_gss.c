@@ -326,6 +326,30 @@ svcauth_gss_release_cred(void)
 	return (true);
 }
 
+static void
+observe_gss_auth_op_latency(svc_auth_op_t op, rpc_gss_svc_t gss_svc,
+	const struct timespec *op_start)
+{
+	struct timespec op_end, latency;
+
+	clock_gettime(CLOCK_MONOTONIC, &op_end);
+	timespecsub(&op_end, op_start, &latency);
+	metrics_libntirpc_observe_gss_svc_auth_op_latency(op, gss_svc,
+		&latency);
+}
+
+static void
+observe_gss_auth_step_latency(gss_svc_auth_step_t step, rpc_gss_svc_t gss_svc,
+	bool step_succeeded, const struct timespec *step_start)
+{
+	struct timespec step_end, latency;
+
+	clock_gettime(CLOCK_MONOTONIC, &step_end);
+	timespecsub(&step_end, step_start, &latency);
+	metrics_libntirpc_observe_gss_svc_auth_step_latency(step, gss_svc,
+		step_succeeded, &latency);
+}
+
 static bool
 svcauth_gss_accept_sec_context(struct svc_req *req,
 			       struct svc_rpc_gss_data *gd,
@@ -386,13 +410,12 @@ svcauth_gss_accept_sec_context(struct svc_req *req,
 	/* ANDROS: change for debugging linux kernel version...
 	   gr->gr_win = 0x00000005;
 	 */
-	gr->gr_win = sizeof(gd->seqmask) * 8;
+	gr->gr_win = SVC_GSS_SEQ_WIN;
 
 	/* Save client info. */
 	gd->sec.mech = mech;
 	gd->sec.qop = GSS_C_QOP_DEFAULT;
 	gd->sec.svc = gc->gc_svc;
-	gd->win = gr->gr_win;
 
 	if (time_rec == GSS_C_INDEFINITE) time_rec = INDEF_EXPIRE;
 	if (time_rec > 10) time_rec -= 5;
