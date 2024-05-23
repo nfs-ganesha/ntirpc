@@ -109,9 +109,12 @@ rpc_rdma_internals_join(void)
 		pthread_join(rpc_rdma_state.cm_thread, NULL);
 		rpc_rdma_state.cm_thread = 0;
 	}
-	if (rpc_rdma_state.cq_thread) {
-		pthread_join(rpc_rdma_state.cq_thread, NULL);
-		rpc_rdma_state.cq_thread = 0;
+
+	for (int i = 0; i < NUM_CQ_EPOLL_THREADS; i++) {
+		if (rpc_rdma_state.cq_thread_ids[i]) {
+			pthread_join(rpc_rdma_state.cq_thread_ids[i], NULL);
+			rpc_rdma_state.cq_thread_ids[i] = 0;
+		}
 	}
 	if (rpc_rdma_state.stats_thread) {
 		pthread_join(rpc_rdma_state.stats_thread, NULL);
@@ -364,6 +367,62 @@ rpc_rdma_thread_create(pthread_t *thrid, size_t stacksize,
 	return pthread_create(thrid, &attr, routine, arg);
 }
 
+/*
+ * Create thread pool for handling Completion Queue fds
+ * if not already created.
+ */
+static int
+rpc_rdma_thread_create_epoll_cq(void *(*routine)(void *))
+{
+	int rc = 0;
+	int epollfd = 0;
+	pthread_t thrid;
+
+	/* all calls set a thrid in rpc_rdma_state, but unlikely conflict */
+	mutex_lock(&rpc_rdma_state.lock);
+
+	/*
+	 * Note that on error, we leabe behind the already created
+	 * threads. This is ok as when we get back to this function
+	 * again, we will continue from where we left off.
+	 */
+	while (rpc_rdma_state.cq_thread_count < NUM_CQ_EPOLL_THREADS) {
+		epollfd = epoll_create(EPOLL_SIZE);
+		if (epollfd == -1) {
+			rc = errno;
+			__warnx(TIRPC_DEBUG_FLAG_ERROR,
+				"%s() epoll_create failed: %s (%d)",
+				__func__, strerror(rc), rc);
+			break;
+		}
+
+		rpc_rdma_state.cq_epollfd[rpc_rdma_state.cq_thread_count] = epollfd;
+
+		rc = rpc_rdma_thread_create(&thrid, WORKER_STACK_SIZE,
+			routine,
+			(void*) (&rpc_rdma_state.cq_epollfd[rpc_rdma_state.cq_thread_count]));
+		if (rc) {
+			__warnx(TIRPC_DEBUG_FLAG_ERROR,
+				"%s() could not create thread: %s (%d)",
+				__func__, strerror(rc), rc);
+			break;
+		}
+
+		rpc_rdma_state.cq_thread_ids[rpc_rdma_state.cq_thread_count] = thrid;
+
+		__warnx(TIRPC_DEBUG_FLAG_EVENT,
+			"%s() thread %lx spawned for epoll %d",
+			__func__,
+			(unsigned long)thrid,
+			epollfd);
+
+		rpc_rdma_state.cq_thread_count++;
+	}
+
+	mutex_unlock(&rpc_rdma_state.lock);
+	return rc;
+}
+
 static int
 rpc_rdma_thread_create_epoll(pthread_t *thrid, void *(*routine)(void *),
 			      void *arg, int *epollfd)
@@ -487,12 +546,20 @@ rpc_rdma_fd_add(RDMAXPRT *rdma_xprt, int fd, int epollfd)
 		return rc;
 	}
 
+	__warnx(TIRPC_DEBUG_FLAG_EVENT,
+		"%p:rpc_rdma_fd_add fd:%d epollfd:%d",
+		pthread_self(), fd, epollfd);
+
 	return 0;
 }
 
 int
 rpc_rdma_fd_del(int fd, int epollfd)
 {
+	__warnx(TIRPC_DEBUG_FLAG_EVENT,
+		"%p:rpc_rdma_fd_del fd:%d epollfd:%d",
+		pthread_self(), fd, epollfd);
+
 	int rc = epoll_ctl(epollfd, EPOLL_CTL_DEL, fd, NULL);
 
 	/* Let epoll deal with multiple deletes of the same fd */
@@ -868,12 +935,16 @@ rpc_rdma_cq_thread(void *arg)
 	int i;
 	int n;
 	int rc;
+	int epollfd = *((int *) arg);
 
-	__warnx(TIRPC_DEBUG_FLAG_ERROR, "Starting rpc_rdma_cq_thread");
+	__warnx(TIRPC_DEBUG_FLAG_EVENT,
+		"%p, Starting rpc_rdma_cq_thread epollfd:%d",
+		pthread_self(), epollfd);
+
 	rcu_register_thread();
 
 	while (rpc_rdma_state.run_count > 0) {
-		n = epoll_wait(rpc_rdma_state.cq_epollfd,
+		n = epoll_wait(epollfd,
 				epoll_events, EPOLL_EVENTS, EPOLL_WAIT_MS);
 		if (n == 0)
 			continue;
@@ -987,8 +1058,10 @@ rpc_rdma_cm_event_handler(RDMAXPRT *ep_rdma_xprt, struct rdma_cm_event *event)
 
 		rdma_xprt->state = RDMAXS_CONNECTED;
 
-		rc = rpc_rdma_fd_add(rdma_xprt, rdma_xprt->comp_channel->fd,
-					rpc_rdma_state.cq_epollfd);
+		int cq_fd = rdma_xprt->comp_channel->fd;
+		int cq_thread_index = cq_fd % NUM_CQ_EPOLL_THREADS;
+		rc = rpc_rdma_fd_add(rdma_xprt, cq_fd,
+				     rpc_rdma_state.cq_epollfd[cq_thread_index]);
 		if (rc) {
 			__warnx(TIRPC_DEBUG_FLAG_ERROR,
 				"%s:%u ERROR (return)",
@@ -1354,9 +1427,11 @@ rpc_rdma_destroy_stuff(RDMAXPRT *rdma_xprt)
 	}
 
 	if (rdma_xprt->comp_channel) {
-		if (((RDMAXPRT *)rdma_xprt)->state == RDMAXS_CONNECTED) {
-			rpc_rdma_fd_del(((RDMAXPRT *)rdma_xprt)->comp_channel->fd,
-			    rpc_rdma_state.cq_epollfd);
+		if (rdma_xprt->state == RDMAXS_CONNECTED) {
+			int cq_fd = ((RDMAXPRT *)rdma_xprt)->comp_channel->fd;
+			int cq_thread_index = cq_fd % NUM_CQ_EPOLL_THREADS;
+			rpc_rdma_fd_del(cq_fd,
+					rpc_rdma_state.cq_epollfd[cq_thread_index]);
 		}
 
 		ibv_destroy_comp_channel(rdma_xprt->comp_channel);
@@ -1645,8 +1720,7 @@ rpc_rdma_setup_stuff(RDMAXPRT *rdma_xprt)
 	/* Located in this function for convenience, called by both
 	 * client and server. Each is only done once for all connections.
 	 */
-	rc = rpc_rdma_thread_create_epoll(&rpc_rdma_state.cq_thread,
-		rpc_rdma_cq_thread, rdma_xprt, &rpc_rdma_state.cq_epollfd);
+	rc = rpc_rdma_thread_create_epoll_cq(rpc_rdma_cq_thread);
 	if (rc) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s:%u ERROR (return)",
@@ -2026,8 +2100,8 @@ rpc_rdma_accept_timedwait(RDMAXPRT *l_rdma_xprt, struct timespec *abstime)
 {
 	struct rdma_cm_id *cm_id;
 
-	__warnx(TIRPC_DEBUG_FLAG_ERROR,
-		"%s() %p[%u] listening (after bind_server)?",
+	__warnx(TIRPC_DEBUG_FLAG_EVENT,
+		"%s() %p[%u] listening (after bind_server)",
 		__func__, l_rdma_xprt, l_rdma_xprt->state);
 
 	if (!l_rdma_xprt || l_rdma_xprt->state != RDMAXS_LISTENING) {

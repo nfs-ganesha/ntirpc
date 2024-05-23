@@ -47,6 +47,19 @@
 
 #include "rpc_dplx_internal.h"
 
+/*
+ * Number of epoll threads for RDMA completion queue event channel fds.
+ * For each RDMA session, a single completion queue even channel is
+ * used for both send queue as well as receive queue. Each connection
+ * (since only a single fd is used by each connection) is assined to
+ * one of the NUM_CQ_EPOLL_THREADS epoll threads.
+ *
+ * 8 is sufficient to maximized performance for IO bound
+ * workload. Will tune this in future based on performance
+ * testing.
+ */
+#define NUM_CQ_EPOLL_THREADS 8
+
 typedef union sockaddr_union {
 	struct sockaddr sa;
 	struct sockaddr_in sa_in;
@@ -243,11 +256,16 @@ struct rpc_rdma_state {
 	struct connection_requests c_r;		/* never freed??? */
 
 	pthread_t cm_thread;		/**< Thread id for connection manager */
-	pthread_t cq_thread;		/**< Thread id for completion queue */
+
+	uint16_t cq_thread_count; /* number of active cq epoll threads */
+
+	/* Thread ids for completion queue */
+	pthread_t cq_thread_ids[NUM_CQ_EPOLL_THREADS];
+
 	pthread_t stats_thread;
 
 	int cm_epollfd;
-	int cq_epollfd;
+	int cq_epollfd[NUM_CQ_EPOLL_THREADS];
 	int stats_epollfd;
 
 	int32_t run_count;

@@ -139,10 +139,10 @@ svc_rdma_rendezvous(SVCXPRT *xprt)
 	 */
 	rdma_xprt->sm_dr.xprt.xp_fd = rdma_xprt->event_channel->fd;
 
-	if (svc_rdma_add_xprt_fd(xprt)) {
+	if (svc_rdma_add_xprt_fd(&rdma_xprt->sm_dr.xprt)) {
 		__warnx(TIRPC_DEBUG_FLAG_WARN,
 			"%s:%u svc_rdma_add_xprt failed (xprt %p)",
-			__func__, __LINE__, xprt);
+			__func__, __LINE__, &rdma_xprt->sm_dr.xprt);
 		SVC_DESTROY(&rdma_xprt->sm_dr.xprt);
 		return (XPRT_DESTROYED);
 	}

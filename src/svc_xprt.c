@@ -153,6 +153,7 @@ svc_xprt_lookup(int fd, svc_xprt_setup_t setup)
 		return (NULL);
 
 	sk.xprt.xp_fd = fd;
+	sk.xprt.xp_rdma = false;
 	t = rbtx_partition_of_scalar(&svc_xprt_fd.xt, fd);
 
 	rwlock_rdlock(&t->lock);
@@ -258,6 +259,10 @@ svc_xprt_clear(SVCXPRT *xprt)
 #else
 			atomic_dec_uint32_t(&svc_xprt_fd.connections);
 #endif
+
+		__warnx(TIRPC_DEBUG_FLAG_SVC_XPRT,
+			"Clearing xprts at %p: size %d",
+			xprt, t->t.size);
 
 		uint16_t xp_flags = atomic_postclear_uint16_t_bits(
 			&xprt->xp_flags, SVC_XPRT_TREE_LOCKED);

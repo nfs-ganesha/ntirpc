@@ -1043,8 +1043,8 @@ xdr_rdma_add_outbufs_hdr(RDMAXPRT *rdma_xprt)
 	int hdr_qdepth = RDMA_HDR_CHUNKS;
 	uint32_t buffer_total = rdma_xprt->sm_dr.send_hdr_sz * hdr_qdepth;
 
-	__warnx(TIRPC_DEBUG_FLAG_ERROR,
-		"%s() buffer_total  %llu, sendsz %llu sq %llu rdma_xprt %p pagesz %llu",
+	__warnx(TIRPC_DEBUG_FLAG_EVENT,
+		"%s() buffer_total %llu, sendsz %llu sq %llu rdma_xprt %p pagesz %llu",
 		__func__, buffer_total, rdma_xprt->sm_dr.send_hdr_sz, hdr_qdepth,
 		rdma_xprt, rdma_xprt->sm_dr.pagesz);
 
@@ -1053,8 +1053,8 @@ xdr_rdma_add_outbufs_hdr(RDMAXPRT *rdma_xprt)
 	assert(buffer_aligned);
 	memset(buffer_aligned, 0, buffer_total);
 
-	__warnx(TIRPC_DEBUG_FLAG_ERROR,
-		"%s() buffer_aligned at %p proptection domain %p rdma_xprt %p",
+	__warnx(TIRPC_DEBUG_FLAG_EVENT,
+		"%s() buffer_aligned at %p protection domain %p rdma_xprt %p",
 		__func__, buffer_aligned, rdma_xprt->pd->pd, rdma_xprt);
 
 	struct ibv_mr *mr = xdr_rdma_reg_mr(rdma_xprt, buffer_aligned, buffer_total);
@@ -1077,8 +1077,8 @@ xdr_rdma_add_outbufs_data(RDMAXPRT *rdma_xprt)
 	int data_qdepth = RDMA_DATA_CHUNKS;
 	uint32_t buffer_total = rdma_xprt->sm_dr.sendsz * data_qdepth;
 
-	__warnx(TIRPC_DEBUG_FLAG_ERROR,
-		"%s() buffer_total  %llu, sendsz %llu sq %llu rdma_xprt %p pagesz %llu",
+	__warnx(TIRPC_DEBUG_FLAG_EVENT,
+		"%s() buffer_total %llu, sendsz %llu sq %llu rdma_xprt %p pagesz %llu",
 		__func__, buffer_total, rdma_xprt->sm_dr.sendsz, data_qdepth,
 		rdma_xprt, rdma_xprt->sm_dr.pagesz);
 
@@ -1087,8 +1087,8 @@ xdr_rdma_add_outbufs_data(RDMAXPRT *rdma_xprt)
 	assert(buffer_aligned);
 	memset(buffer_aligned, 0, buffer_total);
 
-	__warnx(TIRPC_DEBUG_FLAG_ERROR,
-		"%s() buffer_aligned at %p proptection domain %p rdma_xprt %p",
+	__warnx(TIRPC_DEBUG_FLAG_EVENT,
+		"%s() buffer_aligned at %p protection domain %p rdma_xprt %p",
 		__func__, buffer_aligned, rdma_xprt->pd->pd, rdma_xprt);
 
 	struct ibv_mr *mr = xdr_rdma_reg_mr(rdma_xprt, buffer_aligned, buffer_total);
@@ -1111,8 +1111,8 @@ xdr_rdma_add_inbufs_hdr(RDMAXPRT *rdma_xprt)
 	int hdr_qdepth = RDMA_HDR_CHUNKS;
 	uint32_t buffer_total = rdma_xprt->sm_dr.recv_hdr_sz * hdr_qdepth;
 
-	__warnx(TIRPC_DEBUG_FLAG_ERROR,
-		"%s() buffer_total  %llu, recvsz %llu rq %llu rdma_xprt %p pagesz %llu",
+	__warnx(TIRPC_DEBUG_FLAG_EVENT,
+		"%s() buffer_total %llu, recvsz %llu rq %llu rdma_xprt %p pagesz %llu",
 		__func__, buffer_total, rdma_xprt->sm_dr.recv_hdr_sz, hdr_qdepth,
 		rdma_xprt, rdma_xprt->sm_dr.pagesz);
 
@@ -1121,8 +1121,8 @@ xdr_rdma_add_inbufs_hdr(RDMAXPRT *rdma_xprt)
 	assert(buffer_aligned);
 	memset(buffer_aligned, 0, buffer_total);
 
-	__warnx(TIRPC_DEBUG_FLAG_ERROR,
-		"%s() buffer_aligned at %p proptection domain %p rdma_xprt %p",
+	__warnx(TIRPC_DEBUG_FLAG_EVENT,
+		"%s() buffer_aligned at %p protection domain %p rdma_xprt %p",
 		__func__, buffer_aligned, rdma_xprt->pd->pd, rdma_xprt);
 
 	struct ibv_mr *mr = xdr_rdma_reg_mr(rdma_xprt, buffer_aligned, buffer_total);
@@ -1145,8 +1145,8 @@ xdr_rdma_add_inbufs_data(RDMAXPRT *rdma_xprt)
 	int data_qdepth = RDMA_DATA_CHUNKS;
 	uint32_t buffer_total = rdma_xprt->sm_dr.recvsz * data_qdepth;
 
-	__warnx(TIRPC_DEBUG_FLAG_ERROR,
-		"%s() buffer_total  %llu, recvsz %llu rq %llu rdma_xprt %p pagesz %llu",
+	__warnx(TIRPC_DEBUG_FLAG_EVENT,
+		"%s() buffer_total %llu, recvsz %llu rq %llu rdma_xprt %p pagesz %llu",
 		__func__, buffer_total, rdma_xprt->sm_dr.recvsz, data_qdepth,
 		rdma_xprt, rdma_xprt->sm_dr.pagesz);
 
@@ -1155,8 +1155,8 @@ xdr_rdma_add_inbufs_data(RDMAXPRT *rdma_xprt)
 	assert(buffer_aligned);
 	memset(buffer_aligned, 0, buffer_total);
 
-	__warnx(TIRPC_DEBUG_FLAG_ERROR,
-		"%s() buffer_aligned at %p proptection domain %p rdma_xprt %p",
+	__warnx(TIRPC_DEBUG_FLAG_EVENT,
+		"%s() buffer_aligned at %p protection domain %p rdma_xprt %p",
 		__func__, buffer_aligned, rdma_xprt->pd->pd, rdma_xprt);
 
 	struct ibv_mr *mr = xdr_rdma_reg_mr(rdma_xprt, buffer_aligned, buffer_total);
@@ -1274,7 +1274,7 @@ xdr_rdma_create(RDMAXPRT *rdma_xprt)
 	 * we could have max cbcs required will be callq_size * 2 */
 	int callq_size = MAX_RECV_OUTSTANDING;
 
-	__warnx(TIRPC_DEBUG_FLAG_EVENT, "callq size %d", callq_size);
+	__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA, "callq size %d", callq_size);
 
 	poolq_head_setup(&rdma_xprt->cbclist);
 

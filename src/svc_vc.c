@@ -539,6 +539,12 @@ svc_vc_rendezvous(SVCXPRT *xprt)
 		return (XPRT_DESTROYED);
 	}
 
+	__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
+		"New client connected "
+		"xprt %p, fd %d, port %d",
+		newxprt, newxprt->xp_fd,
+		svc_get_port(newxprt->xp_local.nb.buf));
+
 	/* We're not using a ref for the hook anymore, since epoll doesn't store
 	 * the transport pointer.  Drop the extra ref here. */
 	SVC_RELEASE(newxprt, SVC_RELEASE_FLAG_NONE);
