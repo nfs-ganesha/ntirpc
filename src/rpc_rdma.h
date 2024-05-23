@@ -256,14 +256,14 @@ struct rpc_rdma_state {
 
 	struct connection_requests c_r;		/* never freed??? */
 
-	pthread_t cm_thread;		/**< Thread id for connection manager */
+	pthread_t cm_thread_id;		/**< Thread id for connection manager */
 
 	uint16_t cq_thread_count; /* number of active cq epoll threads */
 
 	/* Thread ids for completion queue */
 	pthread_t cq_thread_ids[NUM_CQ_EPOLL_THREADS];
 
-	pthread_t stats_thread;
+	pthread_t stats_thread_id;
 
 	int cm_epollfd;
 	int cq_epollfd[NUM_CQ_EPOLL_THREADS];

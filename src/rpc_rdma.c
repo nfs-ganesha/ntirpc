@@ -110,7 +110,8 @@ rpc_rdma_internals_join(void)
 		rpc_rdma_state.cm_thread = 0;
 	}
 
-	for (int i = 0; i < NUM_CQ_EPOLL_THREADS; i++) {
+	int i = 0;
+	for (i = 0; i < NUM_CQ_EPOLL_THREADS; i++) {
 		if (rpc_rdma_state.cq_thread_ids[i]) {
 			pthread_join(rpc_rdma_state.cq_thread_ids[i], NULL);
 			rpc_rdma_state.cq_thread_ids[i] = 0;
@@ -951,7 +952,9 @@ rpc_rdma_cq_thread(void *arg)
 		"%p, Starting rpc_rdma_cq_thread epollfd:%d",
 		pthread_self(), epollfd);
 
-	__warnx(TIRPC_DEBUG_FLAG_ERROR, "Starting rpc_rdma_cq_thread");
+	__warnx(TIRPC_DEBUG_FLAG_EVENT,
+		"%p, Starting rpc_rdma_cq_thread epollfd:%d",
+		pthread_self(), epollfd);
 
 	rcu_register_thread();
 
@@ -1246,8 +1249,10 @@ rpc_rdma_destroy_stuff(RDMAXPRT *rdma_xprt)
 
 	if (rdma_xprt->comp_channel) {
 		if (rdma_xprt->state == RDMAXS_CONNECTED) {
-			rpc_rdma_fd_del(((RDMAXPRT *)rdma_xprt)->comp_channel->fd,
-			    rpc_rdma_state.cq_epollfd);
+			int cq_fd = ((RDMAXPRT *)rdma_xprt)->comp_channel->fd;
+			int cq_thread_index = cq_fd % NUM_CQ_EPOLL_THREADS;
+			rpc_rdma_fd_del(cq_fd,
+					rpc_rdma_state.cq_epollfd[cq_thread_index]);
 		}
 
 		ibv_destroy_comp_channel(rdma_xprt->comp_channel);
