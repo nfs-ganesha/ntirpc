@@ -168,15 +168,15 @@ authgss_ctx_hash_get(struct rpc_gss_cred *gc)
 	struct authgss_x_part *axp;
 	struct rbtree_x_part *t;
 
-	/**
-	 * If auth-gss is disabled, we need to stop requests from using cached
-	 * gss-contexts.
-	 */
-	if (!svcauth_gss_enabled) {
-		__warnx(TIRPC_DEBUG_FLAG_RPCSEC_GSS,
-			"%s: auth_gss disabled: GET cached context skipped", __func__);
-		return NULL;
-	}
+        /**
+         * If auth-gss is disabled, we need to stop requests from using cached
+         * gss-contexts.
+         */
+        if (!svcauth_gss_enabled) {
+                __warnx(TIRPC_DEBUG_FLAG_RPCSEC_GSS,
+                        "%s: auth_gss disabled: GET cached context skipped", __func__);
+                return NULL;
+        }
 
 	authgss_hash_init();
 
@@ -221,15 +221,15 @@ authgss_ctx_hash_set(struct svc_rpc_gss_data *gd)
 	gss_union_ctx_id_desc *gss_ctx;
 	bool rslt;
 
-	/**
-	 * If auth-gss is disabled, we need to stop requests from writing possibly
-	 * older gss-contexts to the cache.
-	 */
-	if (!svcauth_gss_enabled) {
-		__warnx(TIRPC_DEBUG_FLAG_RPCSEC_GSS,
-			"%s: auth_gss disabled: SET cached context skipped", __func__);
-		return false;
-	}
+        /**
+         * If auth-gss is disabled, we need to stop requests from writing possibly
+         * older gss-contexts to the cache.
+         */
+        if (!svcauth_gss_enabled) {
+                __warnx(TIRPC_DEBUG_FLAG_RPCSEC_GSS,
+                        "%s: auth_gss disabled: SET cached context skipped", __func__);
+                return false;
+        }
 
 	authgss_hash_init();
 
