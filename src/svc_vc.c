@@ -718,6 +718,10 @@ svc_vc_stat(SVCXPRT *xprt)
 	return (XPRT_IDLE);
 }
 
+static bool is_rpc_address_initialized(struct rpc_address* address) {
+	return address->ss.ss_family != 0;
+}
+
 static enum xprt_stat
 svc_vc_recv(SVCXPRT *xprt)
 {
@@ -855,7 +859,8 @@ again:
 				return SVC_STAT(xprt);
 			}
 
-			if (s.ver_cmd == PP2_VERSIOB2_CMD_PROXY) {
+			if (s.ver_cmd == PP2_VERSIOB2_CMD_PROXY &&
+			    !is_rpc_address_initialized(&xprt->xp_proxy)) {
 				if (s.fam == PP2_TRANS_STREAM_FAM_INET) {
 					struct sockaddr_in *ss4;
 
@@ -901,6 +906,20 @@ again:
 				__warnx(TIRPC_DEBUG_FLAG_EVENT,
 					"%s: %p fd %d proxy ignored for local",
 					__func__, xprt, xprt->xp_fd);
+			} else if (is_rpc_address_initialized(
+				&xprt->xp_proxy)) {
+				/* We don't allow more than one proxy protocol
+				  packet. Allowing it will cause a security
+				  vulnerability where at any point the client
+				  could sent a PP packet and change its IP to
+				  circumvent any IP based access rules */
+				__warnx(TIRPC_DEBUG_FLAG_WARN,
+					"%s: %p fd %d got more than one PP"
+					"packet. This is not allowed - "
+					"terminating",
+					__func__, xprt, xprt->xp_fd);
+				SVC_DESTROY(xprt);
+				return SVC_STAT(xprt);
 			} else {
 				__warnx(TIRPC_DEBUG_FLAG_ERROR,
 					"%s: %p fd %d invalid proxy command = %0x2 (will set dead)",
