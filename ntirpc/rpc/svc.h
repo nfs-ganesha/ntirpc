@@ -526,10 +526,10 @@ static inline void svc_destroy_it(SVCXPRT *xprt,
 		__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
 			"%s: Connection already closed, hence fd %d closed",
 			 __func__, xprt->xp_fd);
-		xprt->xp_fd = RPC_ANYFD;
 		if (xprt->xp_fd_send != RPC_ANYFD)
 			(void)close(xprt->xp_fd_send);
-		xprt->xp_fd_send = RPC_ANYFD;
+		/* xprt->xp_fd_send and xprt->xp_fd can be set to RPC_ANYFD only
+		 * after xp_free_user_data is called */
 	}
 
 	svc_release_it(xprt, SVC_RELEASE_FLAG_NONE, tag, line);

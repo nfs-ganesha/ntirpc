@@ -577,12 +577,10 @@ svc_vc_destroy_task(struct work_pool_entry *wpe)
 		__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
 			"%s: fd %d closed",
 			 __func__, rec->xprt.xp_fd);
-		/* Mark xprt_fd for reset */
+		/* Mark xprt_fd for reset after calling xp_free_user_data */
 		reset_xprt_fd = true;
-		rec->xprt.xp_fd = RPC_ANYFD;
 		if (rec->xprt.xp_fd_send != RPC_ANYFD)
 			(void)close(rec->xprt.xp_fd_send);
-		rec->xprt.xp_fd_send = RPC_ANYFD;
 	}
 
 	if (rec->xprt.xp_ops->xp_free_user_data)
@@ -591,6 +589,7 @@ svc_vc_destroy_task(struct work_pool_entry *wpe)
 	/* Reset xprt's FD after the xp_free_user_data call */
 	if (reset_xprt_fd) {
 		rec->xprt.xp_fd = RPC_ANYFD;
+		rec->xprt.xp_fd_send = RPC_ANYFD;
 	}
 
 	if (rec->xprt.xp_tp)
