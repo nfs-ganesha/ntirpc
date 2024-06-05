@@ -207,9 +207,6 @@ svc_rdma_decode(struct svc_req *req)
 		__func__, xdrs->x_data, req, req->data_chunk);
 
 	xdrs->x_op = XDR_DECODE;
-	/* No need, already positioned to beginning ...
-	XDR_SETPOS(xdrs, 0);
-	 */
 	rpc_msg_init(&req->rq_msg);
 
 	if (!xdr_dplx_decode(xdrs, &req->rq_msg)) {
@@ -287,6 +284,8 @@ svc_rdma_unlink(SVCXPRT *xprt, u_int flags, const char *tag, const int line)
 
 	/* schedule task to cleanup pending cbcs and release xprt refs */
 	REC_XPRT(xprt)->ioq.ioq_wpe.fun = rdma_cleanup_cbcs_task;
+
+	/* Take ref for task */
 	SVC_REF(xprt, SVC_REF_FLAG_NONE);
 	work_pool_submit(&svc_work_pool, &(REC_XPRT(xprt)->ioq.ioq_wpe));
 }

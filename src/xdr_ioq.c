@@ -289,7 +289,9 @@ xdr_rdma_ioq_uv_recycle(struct poolq_head *ioqh, struct poolq_entry *have)
 void
 xdr_rdma_ioq_uv_release(struct xdr_ioq_uv *uv)
 {
-	uv->u.uio_references = 1;	/* keeping one */
+	/* Reset vectors since we use it to UIO_REFER */
+	uv->u = uv->rdma_u;
+	uv->v = uv->rdma_v;
 	xdr_rdma_ioq_uv_recycle(uv->u.uio_p1, &uv->uvq);
 }
 
@@ -303,8 +305,8 @@ xdr_rdma_ioq_release(struct poolq_head *ioqh, bool xioq_recycle,
 	while (have) {
 		assert(xioq->rdma_ioq);
 
-		__warnx(TIRPC_DEBUG_FLAG_XDR, "xdr_rdma_ioq_release ioqh %p %d "
-		    "xioq %p have %p",
+		__warnx(TIRPC_DEBUG_FLAG_XDR, "%s ioqh %p %d "
+		    "xioq %p have %p", __func__,
 		    ioqh, ioqh->qcount, xioq, have);
 
 		pthread_mutex_lock(&ioqh->qmutex);
@@ -349,8 +351,8 @@ xdr_rdma_buf_pool_destroy(struct poolq_head *ioqh)
 			struct poolq_entry *next = TAILQ_NEXT(have, q);
 
 			__warnx(TIRPC_DEBUG_FLAG_XDR,
-			    "xdr_rdma_ioq_release ioqh %p %d have %p",
-			    ioqh, ioqh->qcount, have);
+			    "%s ioqh %p %d have %p",
+			    __func__, ioqh, ioqh->qcount, have);
 
 			TAILQ_REMOVE(&ioqh->qh, have, q);
 			(ioqh->qcount)--;
@@ -685,13 +687,15 @@ xdr_ioq_getbytes_rdma(XDR *xdrs, char *addr, u_int len)
 {
 	struct xdr_ioq_uv *uv;
 	ssize_t delta;
+	int pcount = 0;
 
 	struct xdr_ioq *xioq = XIOQ(xdrs);
 	XDR orig_xdr;
 	int restore_xdr = 0;
 
-	__warnx(TIRPC_DEBUG_FLAG_XDR, "%s: xdata %p xioq %p rdma %d",
-	    __func__, xdrs->x_data, xioq, xioq->rdma_ioq);
+	__warnx(TIRPC_DEBUG_FLAG_XDR, "enter %s: xdata %p xioq %p rdma %d len %u "
+	    "pcount %d qcount %d", __func__, xdrs->x_data, xioq, xioq->rdma_ioq,
+	    len, XIOQ(xdrs)->ioq_uv.pcount, XIOQ(xdrs)->ioq_uv.uvqh.qcount);
 
 	/* Check if we are getting rdma_write bytes, we could have some
 	 * header part to get next compound, so restore hdr xdr at end */
@@ -734,15 +738,20 @@ xdr_ioq_getbytes_rdma(XDR *xdrs, char *addr, u_int len)
 		len -= delta;
 	}
 
+	pcount = XIOQ(xdrs)->ioq_uv.pcount;
+
 	if (restore_xdr) {
 		__warnx(TIRPC_DEBUG_FLAG_XDR, "%s: rdma_write restore xdr hdr",
 		    __func__);
 		memcpy(xdrs, &orig_xdr, sizeof(XDR));
+		XIOQ(xdrs)->ioq_uv.pcount = pcount;
 	}
-	__warnx(TIRPC_DEBUG_FLAG_XDR, "%s: xdata %p xioq %p rdma %d",
-	    __func__, xdrs->x_data, xioq, xioq->rdma_ioq);
 
-	/* assert(len == 0); */
+	__warnx(TIRPC_DEBUG_FLAG_XDR, "exit %s: xdata %p xioq %p rdma %d len %u "
+	    "pcount %d qcount %d", __func__, xdrs->x_data, xioq, xioq->rdma_ioq,
+	    len, XIOQ(xdrs)->ioq_uv.pcount, XIOQ(xdrs)->ioq_uv.uvqh.qcount);
+
+	assert(len == 0);
 	return (true);
 }
 

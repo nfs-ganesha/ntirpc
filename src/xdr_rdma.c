@@ -192,10 +192,17 @@ struct rdma_msg {
 static void
 xdr_rdma_callback_signal(struct rpc_rdma_cbc *cbc, RDMAXPRT *rdma_xprt)
 {
-	pthread_mutex_lock(&cbc->cb_done_mutex);
-	cbc_release_it(cbc);
-	pthread_cond_signal(&cbc->cb_done);
-	pthread_mutex_unlock(&cbc->cb_done_mutex);
+	int32_t read_waits = atomic_dec_int32_t(&cbc->read_waits);
+
+	__warnx(TIRPC_DEBUG_FLAG_XDR, "%s xprt %p cbc %p cbc read_waits %d "
+	    "read_waits %d",
+	    __func__, rdma_xprt, cbc, cbc->read_waits, read_waits);
+
+	if (!read_waits) {
+		pthread_mutex_lock(&cbc->cb_done_mutex);
+		pthread_cond_signal(&cbc->cb_done);
+		pthread_mutex_unlock(&cbc->cb_done_mutex);
+	}
 }
 
 static int
@@ -215,8 +222,6 @@ xdr_rdma_respond_callback_send(struct rpc_rdma_cbc *cbc, RDMAXPRT *rdma_xprt)
 	}
 
 	cbc_release_it(cbc);
-
-	SVC_RELEASE(&rdma_xprt->sm_dr.xprt, SVC_RELEASE_FLAG_NONE);
 
 	return ret;
 }
@@ -240,7 +245,6 @@ xdr_rdma_destroy_callback_send(struct rpc_rdma_cbc *cbc, RDMAXPRT *rdma_xprt)
 	cbc_release_it(cbc);
 
 	SVC_DESTROY(&rdma_xprt->sm_dr.xprt);
-	SVC_RELEASE(&rdma_xprt->sm_dr.xprt, SVC_RELEASE_FLAG_NONE);
 
 	return ret;
 }
@@ -263,6 +267,8 @@ xdr_rdma_respond_callback(struct rpc_rdma_cbc *cbc, RDMAXPRT *rdma_xprt)
 
 	xdr_rdma_callback_signal(cbc, rdma_xprt);
 
+	cbc_release_it(cbc);
+
 	return ret;
 }
 
@@ -282,6 +288,8 @@ xdr_rdma_destroy_callback(struct rpc_rdma_cbc *cbc, RDMAXPRT *rdma_xprt)
 	}
 
 	xdr_rdma_callback_signal(cbc, rdma_xprt);
+
+	cbc_release_it(cbc);
 
 	SVC_DESTROY(&rdma_xprt->sm_dr.xprt);
 
@@ -310,7 +318,6 @@ xdr_rdma_destroy_callback_recv(struct rpc_rdma_cbc *cbc, RDMAXPRT *rdma_xprt)
 	cbc_release_it(cbc);
 
 	SVC_DESTROY(&rdma_xprt->sm_dr.xprt);
-	SVC_RELEASE(&rdma_xprt->sm_dr.xprt, SVC_RELEASE_FLAG_NONE);
 
 	return ret;
 }
@@ -346,8 +353,6 @@ err:
 
 	/* Release senital ref */
 	cbc_release_it(cbc);
-
-	SVC_RELEASE(&rdma_xprt->sm_dr.xprt, SVC_RELEASE_FLAG_NONE);
 
 	return ret;
 }
@@ -481,7 +486,6 @@ xdr_rdma_post_recv_cb(RDMAXPRT *rdma_xprt, struct rpc_rdma_cbc *cbc, int sge)
 		cbc_release_it(cbc);
 
 		SVC_DESTROY(&rdma_xprt->sm_dr.xprt);
-		SVC_RELEASE(&rdma_xprt->sm_dr.xprt, SVC_RELEASE_FLAG_NONE);
 	}
 
 	return ret;
@@ -631,6 +635,11 @@ xdr_rdma_wait_cb_done_locked(struct rpc_rdma_cbc *cbc)
 	struct timespec ts;
 	ts.tv_sec = time(NULL) + RDMA_CB_TIMEOUT_SEC;
 	ts.tv_nsec = 0;
+	RDMAXPRT *rdma_xprt = x_rdma_xprt(cbc->recvq.xdrs);
+
+	if (rdma_xprt->sm_dr.xprt.xp_flags & SVC_XPRT_FLAG_DESTROYED)
+		return -1;
+
 	/* cond_wait should atomically release cb_done_mutex */
 	return pthread_cond_timedwait(&cbc->cb_done,
 		    &cbc->cb_done_mutex, &ts);
@@ -647,7 +656,7 @@ xdr_rdma_wait_cb_done_locked(struct rpc_rdma_cbc *cbc)
  * @return 0 on success, the value of errno on error
  */
 static inline int
-xdr_rdma_post_send_cb(RDMAXPRT *rdma_xprt, struct rpc_rdma_cbc *cbc, int sge)
+xdr_rdma_async_send_cb(RDMAXPRT *rdma_xprt, struct rpc_rdma_cbc *cbc, int sge)
 {
 	int ret;
 
@@ -656,9 +665,7 @@ xdr_rdma_post_send_cb(RDMAXPRT *rdma_xprt, struct rpc_rdma_cbc *cbc, int sge)
 	cbc->callback_arg = NULL;
 	cbc->call_inline = 1;
 
-	cbc_ref_it(cbc);
-
-	SVC_REF(&rdma_xprt->sm_dr.xprt, SVC_REF_FLAG_NONE);
+	cbc_ref_it(cbc, rdma_xprt);
 
 	ret = xdr_rdma_post_send_n(rdma_xprt, cbc, sge, NULL, IBV_WR_SEND);
 
@@ -666,10 +673,10 @@ xdr_rdma_post_send_cb(RDMAXPRT *rdma_xprt, struct rpc_rdma_cbc *cbc, int sge)
 		/* Assuming there won't be callback */
 		__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s: failed ret %d err %d "
 			" rdma_xprt %p cbc %p", __func__, ret, errno, rdma_xprt, cbc);
+
 		cbc_release_it(cbc);
 
 		SVC_DESTROY(&rdma_xprt->sm_dr.xprt);
-		SVC_RELEASE(&rdma_xprt->sm_dr.xprt, SVC_RELEASE_FLAG_NONE);
 	}
 
 	return ret;
@@ -686,11 +693,12 @@ xdr_rdma_wait_read_cb(RDMAXPRT *rdma_xprt, struct rpc_rdma_cbc *cbc, int sge,
 	cbc->callback_arg = NULL;
 	cbc->call_inline = 1;
 
-	pthread_mutex_lock(&cbc->cb_done_mutex);
+	cbc_ref_it(cbc, rdma_xprt);
+	int32_t read_waits = atomic_inc_int32_t(&cbc->read_waits);
 
-	cbc_ref_it(cbc);
-
-	SVC_REF(&rdma_xprt->sm_dr.xprt, SVC_REF_FLAG_NONE);
+	__warnx(TIRPC_DEBUG_FLAG_XDR, "%s xprt %p cbc %p cbc read_waits %d "
+	    "read_waits %d",
+	    __func__, rdma_xprt, cbc, cbc->read_waits, read_waits);
 
 	ret = xdr_rdma_post_send_n(rdma_xprt, cbc, sge, rs, IBV_WR_RDMA_READ);
 
@@ -698,31 +706,16 @@ xdr_rdma_wait_read_cb(RDMAXPRT *rdma_xprt, struct rpc_rdma_cbc *cbc, int sge,
 		/* Assuming there won't be callback */
 		__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s: failed ret %d err %d "
 			" rdma_xprt %p cbc %p", __func__, ret, errno, rdma_xprt, cbc);
-	} else {
-		ret = xdr_rdma_wait_cb_done_locked(cbc);
 
-		if (ret == ETIMEDOUT) {
-			__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s: Failed to "
-			    "get callback cbc %p "
-			    "refs %d", __func__, cbc, cbc->refcnt);
-		}
-	}
-
-	if (ret) {
 		cbc_release_it(cbc);
 		SVC_DESTROY(&rdma_xprt->sm_dr.xprt);
 	}
-
-	/* Release here since we wait for callback */
-	SVC_RELEASE(&rdma_xprt->sm_dr.xprt, SVC_RELEASE_FLAG_NONE);
-
-	pthread_mutex_unlock(&cbc->cb_done_mutex);
 
 	return ret;
 }
 
 static int
-xdr_rdma_wait_write_cb(RDMAXPRT *rdma_xprt, struct rpc_rdma_cbc *cbc, int sge,
+xdr_rdma_async_write_cb(RDMAXPRT *rdma_xprt, struct rpc_rdma_cbc *cbc, int sge,
 		      struct xdr_rdma_segment *rs)
 {
 	int ret;
@@ -732,9 +725,7 @@ xdr_rdma_wait_write_cb(RDMAXPRT *rdma_xprt, struct rpc_rdma_cbc *cbc, int sge,
 	cbc->callback_arg = NULL;
 	cbc->call_inline = 1;
 
-	cbc_ref_it(cbc);
-
-	SVC_REF(&rdma_xprt->sm_dr.xprt, SVC_REF_FLAG_NONE);
+	cbc_ref_it(cbc, rdma_xprt);
 
 	ret = xdr_rdma_post_send_n(rdma_xprt, cbc, sge, rs, IBV_WR_RDMA_WRITE);
 
@@ -742,10 +733,10 @@ xdr_rdma_wait_write_cb(RDMAXPRT *rdma_xprt, struct rpc_rdma_cbc *cbc, int sge,
 		/* Assuming there won't be callback */
 		__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s: failed ret %d err %d "
 			" rdma_xprt %p cbc %p", __func__, ret, errno, rdma_xprt, cbc);
+
 		cbc_release_it(cbc);
 
 		SVC_DESTROY(&rdma_xprt->sm_dr.xprt);
-		SVC_RELEASE(&rdma_xprt->sm_dr.xprt, SVC_RELEASE_FLAG_NONE);
 	}
 
 	return ret;
@@ -912,6 +903,8 @@ xdr_rdma_callq(RDMAXPRT *rdma_xprt)
 		cbc->freeq.ioq_uv.uvqh.qcount, &rdma_xprt->sm_dr.ioq,
 		rdma_xprt->sm_dr.ioq.ioq_uv.uvqh.qcount, rdma_xprt);
 
+	pthread_mutex_lock(&rdma_xprt->cbclist.qmutex);
+
 	cbc->call_inline = 0;
 	cbc->data_chunk_uv = NULL;
 	cbc->refcnt = 1; // Senital ref
@@ -919,7 +912,6 @@ xdr_rdma_callq(RDMAXPRT *rdma_xprt)
 	cbc->non_registered_buf = NULL;
 	cbc->non_registered_buf_len = 0;
 
-	pthread_mutex_lock(&rdma_xprt->cbclist.qmutex);
 	TAILQ_INSERT_TAIL(&rdma_xprt->cbclist.qh, &cbc->cbc_list, q);
 	rdma_xprt->cbclist.qcount++;
 	pthread_mutex_unlock(&rdma_xprt->cbclist.qmutex);
@@ -1020,7 +1012,7 @@ xdr_rdma_update_extra_bufs(RDMAXPRT *rdma_xprt, struct ibv_mr *mr, uint32_t buff
 	rdma_xprt->extra_bufs_count++;
 	rdma_xprt->extra_bufs.qcount++;
 
-	__warnx(TIRPC_DEBUG_FLAG_ERROR,
+	__warnx(TIRPC_DEBUG_FLAG_EVENT,
 		"%s() extra bufs count %u io_buf %p rdma_xprt %p",
 		__func__, rdma_xprt->extra_bufs_count, io_buf, rdma_xprt);
 
@@ -1040,7 +1032,7 @@ void
 xdr_rdma_add_outbufs_hdr(RDMAXPRT *rdma_xprt)
 {
 	uint8_t *b;
-	int hdr_qdepth = RDMA_HDR_CHUNKS;
+	int hdr_qdepth = RDMA_HDR_CHUNKS(rdma_xprt->xa);
 	uint32_t buffer_total = rdma_xprt->sm_dr.send_hdr_sz * hdr_qdepth;
 
 	__warnx(TIRPC_DEBUG_FLAG_EVENT,
@@ -1054,7 +1046,7 @@ xdr_rdma_add_outbufs_hdr(RDMAXPRT *rdma_xprt)
 	memset(buffer_aligned, 0, buffer_total);
 
 	__warnx(TIRPC_DEBUG_FLAG_EVENT,
-		"%s() buffer_aligned at %p protection domain %p rdma_xprt %p",
+		"%s() buffer_aligned at %p proptection domain %p rdma_xprt %p",
 		__func__, buffer_aligned, rdma_xprt->pd->pd, rdma_xprt);
 
 	struct ibv_mr *mr = xdr_rdma_reg_mr(rdma_xprt, buffer_aligned, buffer_total);
@@ -1108,7 +1100,7 @@ void
 xdr_rdma_add_inbufs_hdr(RDMAXPRT *rdma_xprt)
 {
 	uint8_t *b;
-	int hdr_qdepth = RDMA_HDR_CHUNKS;
+	int hdr_qdepth = RDMA_HDR_CHUNKS(rdma_xprt->xa);
 	uint32_t buffer_total = rdma_xprt->sm_dr.recv_hdr_sz * hdr_qdepth;
 
 	__warnx(TIRPC_DEBUG_FLAG_EVENT,
@@ -1182,7 +1174,7 @@ xdr_rdma_create(RDMAXPRT *rdma_xprt)
 {
 	uint8_t *b;
 	int data_qdepth = RDMA_DATA_CHUNKS;
-	int hdr_qdepth = RDMA_HDR_CHUNKS;
+	int hdr_qdepth = RDMA_HDR_CHUNKS(rdma_xprt->xa);
 
 	if (!rdma_xprt->pd || !rdma_xprt->pd->pd) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
@@ -1201,7 +1193,7 @@ xdr_rdma_create(RDMAXPRT *rdma_xprt)
 	 * more than one buffer can be chained to one ioq_uv head,
 	 * but never need more ioq_uv heads than buffers.
 	 */
-	size_t total_hdr_sz = RDMA_HDR_CHUNK_SZ * (RDMA_HDR_CHUNKS * 2);
+	size_t total_hdr_sz = RDMA_HDR_CHUNK_SZ * (RDMA_HDR_CHUNKS(rdma_xprt->xa) * 2);
 	size_t tirpc_buff_total = rdma_xprt->sm_dr.recvsz * data_qdepth
 				  + rdma_xprt->sm_dr.sendsz * data_qdepth;
 
@@ -1272,7 +1264,7 @@ xdr_rdma_create(RDMAXPRT *rdma_xprt)
 	/* Keep enough cbc available to serve cbc allocation.
 	 * We allocate MAX_CBC_OUTSTANDING * 2 cbcs.
 	 * we could have max cbcs required will be callq_size * 2 */
-	int callq_size = MAX_RECV_OUTSTANDING;
+	int callq_size = MAX_RECV_OUTSTANDING(rdma_xprt->xa);
 
 	__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA, "callq size %d", callq_size);
 
@@ -1369,8 +1361,10 @@ xdr_rdma_svc_recv(struct rpc_rdma_cbc *cbc, u_int32_t xid)
 {
 	RDMAXPRT *rdma_xprt;
 	struct rdma_msg *cmsg;
-	uint32_t l;
-	bool ret = true;
+	uint32_t l, offset = 0;
+	bool status = true;
+	struct xdr_ioq_uv *read_chunk_uv = NULL, *data_chunk_uv = NULL;
+	struct xdr_ioq_uv *chunk_uv = NULL;
 
 
 	if (!cbc) {
@@ -1419,7 +1413,7 @@ xdr_rdma_svc_recv(struct rpc_rdma_cbc *cbc, u_int32_t xid)
 			__func__, ntohl(cmsg->rdma_vers));
 		xdr_rdma_encode_error(cbc->call_uv, RDMA_ERR_VERS);
 		cbc->have = TAILQ_FIRST(&cbc->recvq.ioq_uv.uvqh.qh);
-		xdr_rdma_post_send_cb(rdma_xprt, cbc, 1);
+		xdr_rdma_async_send_cb(rdma_xprt, cbc, 1);
 		return (false);
 	}
 
@@ -1433,7 +1427,7 @@ xdr_rdma_svc_recv(struct rpc_rdma_cbc *cbc, u_int32_t xid)
 			__func__, ntohl(cmsg->rdma_type));
 		xdr_rdma_encode_error(cbc->call_uv, RDMA_ERR_BADHEADER);
 		cbc->have = TAILQ_FIRST(&cbc->recvq.ioq_uv.uvqh.qh);
-		xdr_rdma_post_send_cb(rdma_xprt, cbc, 1);
+		xdr_rdma_async_send_cb(rdma_xprt, cbc, 1);
 		return (false);
 	}
 
@@ -1476,7 +1470,7 @@ xdr_rdma_svc_recv(struct rpc_rdma_cbc *cbc, u_int32_t xid)
 
 	/* Allocate data buffer for read/readdir */
 	if (data_chunk) {
-		struct xdr_ioq_uv *data_chunk_uv = IOQ_(xdr_rdma_ioq_uv_fetch(&cbc->dataq,
+		data_chunk_uv = IOQ_(xdr_rdma_ioq_uv_fetch(&cbc->dataq,
 		    &rdma_xprt->outbufs_data.uvqh,
 		    "sreply data_chunk_L", 1, IOQ_FLAG_NONE));
 
@@ -1488,12 +1482,13 @@ xdr_rdma_svc_recv(struct rpc_rdma_cbc *cbc, u_int32_t xid)
 		    rdma_xprt->sm_dr.sendsz;
 
 		cbc->data_chunk_uv = data_chunk_uv;
+
 		__warnx(TIRPC_DEBUG_FLAG_XDR, "data_chunk_uv data %p cbc %p",
 		    data_chunk_uv, cbc);
 	} else {
 		/* For read/readdir without reply/write list, we should not need
 		 * big buffer */
-		struct xdr_ioq_uv *data_chunk_uv = IOQ_(xdr_rdma_ioq_uv_fetch(&cbc->dataq,
+		data_chunk_uv = IOQ_(xdr_rdma_ioq_uv_fetch(&cbc->dataq,
 		    &rdma_xprt->outbufs_hdr.uvqh,
 		    "sreply data_chunk_S", 1, IOQ_FLAG_NONE));
 
@@ -1505,6 +1500,7 @@ xdr_rdma_svc_recv(struct rpc_rdma_cbc *cbc, u_int32_t xid)
 		    rdma_xprt->sm_dr.send_hdr_sz;
 
 		cbc->data_chunk_uv = data_chunk_uv;
+
 		__warnx(TIRPC_DEBUG_FLAG_XDR, "data_chunk_uv hdr %p cbc %p",
 		    data_chunk_uv, cbc);
 	}
@@ -1532,27 +1528,53 @@ xdr_rdma_svc_recv(struct rpc_rdma_cbc *cbc, u_int32_t xid)
 
 	assert(cbc->recvq.ioq_uv.uvqh.qcount == 0);
 
-	while (rl(cbc->read_chunk)->present && ret) {
+	cbc->read_waits = 0;
+
+	while (rl(cbc->read_chunk)->present && status) {
 		l = ntohl(rl(cbc->read_chunk)->target.length);
 
 		__warnx(TIRPC_DEBUG_FLAG_XDR,
-			"%s() length %u",
-			__func__, l);
+			"%s() offset %u length %u",
+			__func__, offset, l);
 
-		assert(l <= rdma_xprt->sm_dr.recvsz);
+		if (!read_chunk_uv) {
+			read_chunk_uv = IOQ_(xdr_rdma_ioq_uv_fetch(&cbc->dataq,
+			    &rdma_xprt->inbufs_data.uvqh,
+			    "sreply rdma_read", 1, IOQ_FLAG_NONE));
 
-		struct xdr_ioq_uv *data_chunk_uv = IOQ_(xdr_rdma_ioq_uv_fetch(&cbc->recvq,
-		    &rdma_xprt->inbufs_data.uvqh,
+			/* entry was already added directly to the queue */
+			read_chunk_uv->v.vio_head = read_chunk_uv->v.vio_tail =
+			    read_chunk_uv->v.vio_base;
+
+			/* tail adjusted below */
+			read_chunk_uv->v.vio_wrap = (char *)read_chunk_uv->v.vio_base +
+			    rdma_xprt->sm_dr.recvsz;
+
+			read_chunk_uv->v.vio_tail = (char *)read_chunk_uv->v.vio_head +
+			    rdma_xprt->sm_dr.recvsz;
+		}
+
+		chunk_uv = IOQ_(xdr_rdma_ioq_uv_fetch(&cbc->recvq,
+		    &rdma_xprt->inbufs_hdr.uvqh,
 		    "sreply rdma_read", 1, IOQ_FLAG_NONE));
 
 		/* entry was already added directly to the queue */
 		data_chunk_uv->v.vio_head = data_chunk_uv->v.vio_tail =
 		    data_chunk_uv->v.vio_base;
 
-		/* tail adjusted below */
-		data_chunk_uv->v.vio_wrap = (char *)data_chunk_uv->v.vio_base + l;
+		if (offset < rdma_xprt->sm_dr.recvsz) {
+			/* entry was already added directly to the queue */
+			chunk_uv->v.vio_head = chunk_uv->v.vio_tail =
+			    chunk_uv->v.vio_base = read_chunk_uv->v.vio_head + offset;
 
-		data_chunk_uv->v.vio_tail = (char *)data_chunk_uv->v.vio_head + l;
+			/* Point mr to read_chunk_uv */
+			chunk_uv->u.uio_p2 = read_chunk_uv->u.uio_p2;
+		}
+
+		/* tail adjusted below */
+		chunk_uv->v.vio_wrap = (char *)chunk_uv->v.vio_base + l;
+
+		chunk_uv->v.vio_tail = (char *)chunk_uv->v.vio_head + l;
 
 		cbc->have = TAILQ_FIRST(&cbc->recvq.ioq_uv.uvqh.qh);
 
@@ -1561,7 +1583,7 @@ xdr_rdma_svc_recv(struct rpc_rdma_cbc *cbc, u_int32_t xid)
 			__warnx(TIRPC_DEBUG_FLAG_ERROR,
 				"%s: rdma_read failed rdma_xprt %p cbc %p",
 				__func__, rdma_xprt, cbc);
-			ret = false;
+			status = false;
 		}
 
 		pthread_mutex_lock(&cbc->recvq.ioq_uv.uvqh.qmutex);
@@ -1576,6 +1598,26 @@ xdr_rdma_svc_recv(struct rpc_rdma_cbc *cbc, u_int32_t xid)
 
 		cbc->read_chunk = (char *)cbc->read_chunk
 						+ sizeof(struct xdr_read_list);
+
+		/* Move offset by length */
+		offset = offset + l;
+	}
+
+	if (status == true) {
+		pthread_mutex_lock(&cbc->cb_done_mutex);
+		if (atomic_fetch_int32_t(&cbc->read_waits)) {
+			/* Wait for all rdma_read callbacks to complete */
+			int rc = xdr_rdma_wait_cb_done_locked(cbc);
+
+			if (rc) {
+				__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s: Failed to "
+				    "get callback cbc %p cbc read_waits %d err %d",
+				    __func__, cbc, cbc->refcnt, cbc->read_waits,
+				    rc);
+				status = false;
+			}
+		}
+		pthread_mutex_unlock(&cbc->cb_done_mutex);
 	}
 
 	pthread_mutex_lock(&cbc->recvq.ioq_uv.uvqh.qmutex);
@@ -1603,7 +1645,7 @@ xdr_rdma_svc_recv(struct rpc_rdma_cbc *cbc, u_int32_t xid)
                 cbc->sendq.ioq_uv.uvqh.qcount, &cbc->freeq,
 		cbc->freeq.ioq_uv.uvqh.qcount, rdma_xprt);
 
-	return ret;
+	return status;
 }
 
 /** xdr_rdma_svc_reply
@@ -1841,7 +1883,7 @@ xdr_rdma_clnt_flushout(struct rpc_rdma_cbc *cbc)
 	rpcrdma_dump_msg(hold_uv, "clntcall", msg->rm_xid);
 
 	/* actual send, callback will take care of cleanup */
-	xdr_rdma_post_send_cb(rdma_xprt, cbc, 2);
+	xdr_rdma_async_send_cb(rdma_xprt, cbc, 2);
 	return (true);
 }
 
@@ -1963,7 +2005,7 @@ xdr_rdma_svc_flushout(struct rpc_rdma_cbc *cbc, bool rdma_buf_used)
 	rmsg = m_(rdma_head_uv->v.vio_head);
 	rmsg->rdma_xid = cmsg->rdma_xid;
 	rmsg->rdma_vers = cmsg->rdma_vers;
-	rmsg->rdma_credit = htonl(MIN(rdma_xprt->xa->credits, MAX_RECV_OUTSTANDING));
+	rmsg->rdma_credit = htonl(rdma_xprt->xa->credits);
 
 	/* no read, write chunks. */
 	rmsg->rdma_body.rdma_msg.rdma_reads = 0; /* htonl(0); */
@@ -2127,7 +2169,7 @@ xdr_rdma_svc_flushout(struct rpc_rdma_cbc *cbc, bool rdma_buf_used)
 				rdma_buf_len = rdma_buf_len - write_len;
 			}
 
-			if (xdr_rdma_wait_write_cb(rdma_xprt, cbc, 1, w_seg)) {
+			if (xdr_rdma_async_write_cb(rdma_xprt, cbc, 1, w_seg)) {
 				__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s rdma_write failed rdma_xprt %p "
 				    "cbc %p", __func__, rdma_xprt, cbc);
 				ret = false;
@@ -2191,16 +2233,17 @@ xdr_rdma_svc_flushout(struct rpc_rdma_cbc *cbc, bool rdma_buf_used)
 
 	/* recvq = request_header buf + rdma_read bufs */
 	/* sendq = response_header_buf + rdma_write_bufs */
-	/* dataq = protocol_buf */
+	/* dataq = protocol_buf and rdma_read buf */
 
-	assert(cbc->dataq.ioq_uv.uvqh.qcount == 1);
+	assert((cbc->dataq.ioq_uv.uvqh.qcount > 0) &&
+	    (cbc->dataq.ioq_uv.uvqh.qcount <= 2));
 
 	__warnx(TIRPC_DEBUG_FLAG_XDR, "%s() sendq %d recvq %d", __func__,
 		cbc->sendq.ioq_uv.uvqh.qcount, cbc->recvq.ioq_uv.uvqh.qcount);
 
 	cbc->have = TAILQ_FIRST(&cbc->sendq.ioq_uv.uvqh.qh);
 
-	if (xdr_rdma_post_send_cb(rdma_xprt, cbc,
+	if (xdr_rdma_async_send_cb(rdma_xprt, cbc,
 				  cbc->sendq.ioq_uv.uvqh.qcount)) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s rdma_send failed rdma_xprt %p "
 		    "cbc %p", __func__, rdma_xprt, cbc);
