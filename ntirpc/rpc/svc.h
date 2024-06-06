@@ -512,24 +512,12 @@ static inline void svc_destroy_it(SVCXPRT *xprt,
 		(*(xprt)->xp_ops->xp_unref_user_data)(xprt);
 	}
 
-	/* Check if the connection was already set as dead or closed,
-	 * If set, let's cleanup and close the FDs, so that FIN-ACK
+	/* Let's shutdown the sockets so that FIN-ACK
 	 * could be sent to the client immediately */
-	flags = atomic_postclear_uint16_t_bits(&xprt->xp_flags,
-					       SVC_XPRT_FLAG_CLOSE);
-
-	if ((flags & SVC_XPRT_FLAG_CLOSE)
-	    && xprt->xp_fd != RPC_ANYFD) {
-		XPRT_TRACE(xprt, "WARNING! Connection already closed!",
-				  tag, line);
-		(void)close(xprt->xp_fd);
-		__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
-			"%s: Connection already closed, hence fd %d closed",
-			 __func__, xprt->xp_fd);
+	if (xprt->xp_fd != RPC_ANYFD) {
+		(void)shutdown(xprt->xp_fd, SHUT_RDWR);
 		if (xprt->xp_fd_send != RPC_ANYFD)
-			(void)close(xprt->xp_fd_send);
-		/* xprt->xp_fd_send and xprt->xp_fd can be set to RPC_ANYFD only
-		 * after xp_free_user_data is called */
+			(void)shutdown(xprt->xp_fd_send, SHUT_RDWR);
 	}
 
 	svc_release_it(xprt, SVC_RELEASE_FLAG_NONE, tag, line);

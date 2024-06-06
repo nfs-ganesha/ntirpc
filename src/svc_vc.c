@@ -552,7 +552,7 @@ svc_vc_destroy_task(struct work_pool_entry *wpe)
 	struct rpc_dplx_rec *rec =
 			opr_containerof(wpe, struct rpc_dplx_rec, ioq.ioq_wpe);
 	uint16_t xp_flags;
-	bool reset_xprt_fd = false;
+	bool close_fd = false;
 
 	const int32_t xp_refcnt = atomic_fetch_int32_t(&rec->xprt.xp_refcnt);
 	__warnx(TIRPC_DEBUG_FLAG_REFCNT,
@@ -572,24 +572,35 @@ svc_vc_destroy_task(struct work_pool_entry *wpe)
 
 	xp_flags = atomic_postclear_uint16_t_bits(&rec->xprt.xp_flags,
 						  SVC_XPRT_FLAG_CLOSE);
-	if ((xp_flags & SVC_XPRT_FLAG_CLOSE) && rec->xprt.xp_fd != RPC_ANYFD) {
-		(void)close(rec->xprt.xp_fd);
+	close_fd = ((xp_flags & SVC_XPRT_FLAG_CLOSE) &&
+		rec->xprt.xp_fd != RPC_ANYFD);
+	if (close_fd) {
+		/* Shutting down without releasing the fd, since
+		 * xp_free_user_data() might be using it */
+		(void)shutdown(rec->xprt.xp_fd, SHUT_RDWR);
 		__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
-			"%s: fd %d closed",
+			"%s: fd %d shutdown",
 			 __func__, rec->xprt.xp_fd);
-		/* Mark xprt_fd for reset after calling xp_free_user_data */
-		reset_xprt_fd = true;
 		if (rec->xprt.xp_fd_send != RPC_ANYFD)
-			(void)close(rec->xprt.xp_fd_send);
+			(void)shutdown(rec->xprt.xp_fd_send, SHUT_RDWR);
 	}
 
 	if (rec->xprt.xp_ops->xp_free_user_data)
 		rec->xprt.xp_ops->xp_free_user_data(&rec->xprt);
 
-	/* Reset xprt's FD after the xp_free_user_data call */
-	if (reset_xprt_fd) {
+	/* Close and reset xprt's FD after the xp_free_user_data call.
+	 * It's safe to release the FD at this point (by calling close), since
+	 * there are no references left to this XPRT. */
+	if (close_fd) {
+		__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
+			"%s: fd %d close",
+			 __func__, rec->xprt.xp_fd);
+		(void)close(rec->xprt.xp_fd);
 		rec->xprt.xp_fd = RPC_ANYFD;
-		rec->xprt.xp_fd_send = RPC_ANYFD;
+		if (rec->xprt.xp_fd_send != RPC_ANYFD) {
+			(void)close(rec->xprt.xp_fd_send);
+			rec->xprt.xp_fd_send = RPC_ANYFD;
+		}
 	}
 
 	if (rec->xprt.xp_tp)
