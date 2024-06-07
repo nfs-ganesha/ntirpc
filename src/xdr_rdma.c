@@ -1106,7 +1106,7 @@ xdr_rdma_add_outbufs_hdr(RDMAXPRT *rdma_xprt)
 	memset(buffer_aligned, 0, buffer_total);
 
 	__warnx(TIRPC_DEBUG_FLAG_EVENT,
-		"%s() buffer_aligned at %p proptection domain %p rdma_xprt %p",
+		"%s() buffer_aligned at %p protection domain %p rdma_xprt %p",
 		__func__, buffer_aligned, rdma_xprt->pd->pd, rdma_xprt);
 
 	struct ibv_mr *mr = xdr_rdma_reg_mr(rdma_xprt, buffer_aligned, buffer_total);
