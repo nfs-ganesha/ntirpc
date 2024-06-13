@@ -192,6 +192,136 @@ xdr_ioq_uv_recycle(struct poolq_head *ioqh, struct poolq_entry *have)
 }
 
 #ifdef USE_RPC_RDMA
+
+static struct rpc_io_bufs *
+get_parent_chunk(struct poolq_entry *have)
+{
+	struct xdr_ioq_uv *uv = IOQ_(have);
+	return uv->u.uio_u1;
+}
+
+static int
+chunk_ref_locked(struct poolq_entry *have)
+{
+	struct rpc_io_bufs *io_buf = get_parent_chunk(have);
+	RDMAXPRT *rdma_xprt = (RDMAXPRT *)io_buf->ctx;
+
+	if ((io_buf != rdma_xprt->first_io_buf) &&
+	    ((io_buf->type == IO_INBUF_DATA) ||
+	    (io_buf->type == IO_OUTBUF_DATA))) {
+		atomic_inc_uint64_t(&rdma_xprt->total_extra_buf_allocations);
+		clock_gettime(CLOCK_MONOTONIC_FAST,
+		    &rdma_xprt->last_extra_buf_allocation_time);
+	}
+
+	return atomic_inc_uint32_t(&io_buf->refs);
+}
+
+static void
+do_shrink(RDMAXPRT *rdma_xprt, struct rpc_io_bufs *io_buf)
+{
+	struct poolq_head *ioqh = NULL;
+
+	switch (io_buf->type) {
+		case IO_INBUF_HDR:
+			break;
+		case IO_INBUF_DATA:
+			ioqh = &rdma_xprt->inbufs_data.uvqh;
+			break;
+		case IO_OUTBUF_HDR:
+			break;
+		case IO_OUTBUF_DATA:
+			ioqh = &rdma_xprt->outbufs_data.uvqh;
+			break;
+		default:
+			assert(io_buf->type == IO_BUF_ALL);
+	}
+
+	assert(ioqh);
+
+	__warnx(TIRPC_DEBUG_FLAG_EVENT, "%s: Start shrinking xprt %p "
+	    "io_buf %p refs %d ioqh %p count %d",
+	    __func__, rdma_xprt, io_buf, io_buf->refs, ioqh,
+	    ioqh->qcount);
+
+	xdr_rdma_buf_pool_destroy_locked(ioqh, io_buf);
+}
+
+#define NSEC_IN_SEC (1000ULL*1000ULL*1000ULL)
+#define SHRINK_WAIT_TIME_NS (NSEC_IN_SEC * 60ULL)
+
+static struct rpc_io_bufs *
+get_lru_chunk(RDMAXPRT *rdma_xprt)
+{
+	struct timespec ts_end, ts_start;
+	uint64_t diff_ns = 0;
+	struct rpc_io_bufs *io_buf = NULL;
+
+	clock_gettime(CLOCK_MONOTONIC_FAST, &ts_end);
+	ts_start = rdma_xprt->last_extra_buf_allocation_time;
+
+	if (ts_end.tv_sec > ts_start.tv_sec)
+		diff_ns = timespec_diff(&ts_start, &ts_end);
+
+	if (diff_ns >= SHRINK_WAIT_TIME_NS) {
+		pthread_mutex_lock(&rdma_xprt->io_bufs.qmutex);
+		struct poolq_entry *have = TAILQ_FIRST(&rdma_xprt->io_bufs.qh);
+		while (have) {
+			io_buf = opr_containerof(have, struct rpc_io_bufs, q);
+
+			/* We are with ioqh_lock so no other thread can allocated
+			 * from thi ioqh and get io_buf ref */
+			if ((io_buf != rdma_xprt->first_io_buf) &&
+			    (io_buf->refs == 0) && ((io_buf->type == IO_INBUF_DATA) ||
+			    (io_buf->type == IO_OUTBUF_DATA)))
+				break;
+			struct poolq_entry *next = TAILQ_NEXT(have, q);
+			have = next;
+			io_buf = NULL;
+		}
+		if (io_buf) {
+			TAILQ_REMOVE(&rdma_xprt->io_bufs.qh, &io_buf->q, q);
+			rdma_xprt->io_bufs_count--;
+			rdma_xprt->io_bufs.qcount--;
+
+			__warnx(TIRPC_DEBUG_FLAG_EVENT, "%s: xprt %p shrink io_buf %p"
+			    "refs %d io_bufs count %d %d",
+			    __func__, rdma_xprt, io_buf, io_buf->refs,
+			    rdma_xprt->io_bufs_count, rdma_xprt->io_bufs.qcount);
+		}
+		pthread_mutex_unlock(&rdma_xprt->io_bufs.qmutex);
+	}
+
+	return io_buf;
+}
+
+static int
+chunk_unref_locked(struct poolq_entry *have)
+{
+	struct rpc_io_bufs *io_buf = get_parent_chunk(have);
+	uint32_t refs = atomic_dec_uint32_t(&io_buf->refs);
+	RDMAXPRT *rdma_xprt = (RDMAXPRT *)io_buf->ctx;
+
+	if ((io_buf != rdma_xprt->first_io_buf) &&
+	    ((io_buf->type == IO_INBUF_DATA) ||
+	    (io_buf->type == IO_OUTBUF_DATA)))
+		atomic_dec_uint64_t(&rdma_xprt->total_extra_buf_allocations);
+
+	io_buf = get_lru_chunk(rdma_xprt);
+	if (io_buf) {
+		do_shrink(rdma_xprt, io_buf);
+	}
+	return refs;
+}
+
+static bool
+parent_chunk(struct poolq_entry *have,
+    struct rpc_io_bufs *check_buf)
+{
+	struct rpc_io_bufs *io_buf = get_parent_chunk(have);
+	return (io_buf == check_buf);
+}
+
 struct poolq_entry *
 xdr_rdma_ioq_uv_fetch(struct xdr_ioq *xioq, struct poolq_head *ioqh,
 		 char *comment, u_int count, u_int ioq_flags)
@@ -199,9 +329,9 @@ xdr_rdma_ioq_uv_fetch(struct xdr_ioq *xioq, struct poolq_head *ioqh,
 	struct poolq_entry *have = NULL;
 	RDMAXPRT *rdma_xprt = NULL;
 
-	if (xioq->rdma_ioq) {
-		rdma_xprt = xioq->xdrs[0].x_lib[1];
-	}
+	assert(xioq->rdma_ioq);
+
+	rdma_xprt = xioq->xdrs[0].x_lib[1];
 
 	__warnx(TIRPC_DEBUG_FLAG_XDR,
 		"%s() %u %s rdma_xprt %p",
@@ -218,6 +348,8 @@ xdr_rdma_ioq_uv_fetch(struct xdr_ioq *xioq, struct poolq_head *ioqh,
 			ioqh, ioqh->qcount, have);
 		if (have) {
 			TAILQ_REMOVE(&ioqh->qh, have, q);
+			if (ioqh != &rdma_xprt->cbqh)
+				chunk_ref_locked(have);
 
 			/* added directly to the queue.
 			 * this lock is needed for context header queues,
@@ -286,13 +418,37 @@ xdr_rdma_ioq_uv_recycle(struct poolq_head *ioqh, struct poolq_entry *have)
 	pthread_mutex_unlock(&ioqh->qmutex);
 }
 
+static inline void
+xdr_rdma_ioq_uv_recycle_io_buf(struct poolq_head *ioqh,
+    struct poolq_entry *have)
+{
+	pthread_mutex_lock(&ioqh->qmutex);
+
+	__warnx(TIRPC_DEBUG_FLAG_XDR, "%s() ioq_track Reccycle ioqh %p %d have %p",
+		__func__, ioqh, ioqh->qcount, have);
+
+	struct rpc_io_bufs *io_buf = get_parent_chunk(have);
+	RDMAXPRT *rdma_xprt = (RDMAXPRT *)io_buf->ctx;
+
+	if (io_buf == rdma_xprt->first_io_buf)
+		TAILQ_INSERT_HEAD(&ioqh->qh, have, q);
+	else
+		TAILQ_INSERT_TAIL(&ioqh->qh, have, q);
+	ioqh->qcount++;
+
+	if (ioqh != &rdma_xprt->cbqh)
+		chunk_unref_locked(have);
+
+	pthread_mutex_unlock(&ioqh->qmutex);
+}
+
 void
 xdr_rdma_ioq_uv_release(struct xdr_ioq_uv *uv)
 {
 	/* Reset vectors since we use it to UIO_REFER */
 	uv->u = uv->rdma_u;
 	uv->v = uv->rdma_v;
-	xdr_rdma_ioq_uv_recycle(uv->u.uio_p1, &uv->uvq);
+	xdr_rdma_ioq_uv_recycle_io_buf(uv->u.uio_p1, &uv->uvq);
 }
 
 void
@@ -337,12 +493,22 @@ xdr_rdma_ioq_uv_destroy(struct xdr_ioq_uv *uv)
 }
 
 void
-xdr_rdma_buf_pool_destroy(struct poolq_head *ioqh)
+xdr_rdma_buf_pool_destroy(struct poolq_head *ioqh,
+    struct rpc_io_bufs *io_buf)
+{
+	pthread_mutex_lock(&ioqh->qmutex);
+	xdr_rdma_buf_pool_destroy_locked(ioqh, io_buf);
+	pthread_mutex_unlock(&ioqh->qmutex);
+}
+
+void
+xdr_rdma_buf_pool_destroy_locked(struct poolq_head *ioqh,
+    struct rpc_io_bufs *io_buf)
 {
 	/* pool_head may not be initialized, so check for qcount */
 	if (ioqh->qcount && !TAILQ_EMPTY(&ioqh->qh)) {
 
-		pthread_mutex_lock(&ioqh->qmutex);
+		assert(io_buf->refs == 0);
 
 		struct poolq_entry *have = TAILQ_FIRST(&ioqh->qh);
 
@@ -354,18 +520,35 @@ xdr_rdma_buf_pool_destroy(struct poolq_head *ioqh)
 			    "%s ioqh %p %d have %p",
 			    __func__, ioqh, ioqh->qcount, have);
 
+			if (io_buf && !parent_chunk(have, io_buf)) {
+				have = next;
+				continue;
+			}
+
+
 			TAILQ_REMOVE(&ioqh->qh, have, q);
 			(ioqh->qcount)--;
+
+			atomic_dec_uint64_t(&io_buf->buf_count);
 
 			xdr_rdma_ioq_uv_destroy(IOQ_(have));
 			have = next;
 		}
+		if (0 == atomic_fetch_uint64_t(&io_buf->buf_count)) {
+			RDMAXPRT *rdma_xprt = (RDMAXPRT *)io_buf->ctx;
+			assert(io_buf->mr);
+			assert(!xdr_rdma_dereg_mr(rdma_xprt, io_buf->mr,
+			    io_buf->buffer_aligned, io_buf->buffer_total));
+			io_buf->mr = NULL;
 
-		assert(ioqh->qcount == 0);
+			__warnx(TIRPC_DEBUG_FLAG_EVENT, "%s() Free xprt %p mr "
+			    "io_bufs %p size %u io_buf %p", __func__, rdma_xprt,
+			    io_buf->buffer_aligned, io_buf->buffer_total, io_buf);
 
-		pthread_mutex_unlock(&ioqh->qmutex);
-
-		poolq_head_destroy(ioqh);
+			assert(io_buf->buffer_aligned);
+			mem_free(io_buf->buffer_aligned, io_buf->buffer_total);
+			io_buf->buffer_aligned = NULL;
+		}
 	}
 }
 

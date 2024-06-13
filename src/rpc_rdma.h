@@ -79,20 +79,6 @@ struct msk_stats {
 	uint64_t nsec_compevent;
 };
 
-typedef enum rpc_extra_io_buf_type {
-	IO_INBUF = 1,	/* Buffers used for recv */
-	IO_OUTBUF	/* Buffers used for send */
-} rpc_extra_io_buf_type_t;
-
-/* Track buffers allocated on demand */
-struct rpc_extra_io_bufs {
-        struct ibv_mr *mr;
-        uint32_t buffer_total;
-        uint8_t *buffer_aligned;
-        struct poolq_entry q;
-	rpc_extra_io_buf_type_t type;
-};
-
 typedef struct rpc_rdma_xprt RDMAXPRT;
 
 struct rpc_rdma_cbc;
@@ -204,9 +190,15 @@ struct rpc_rdma_xprt {
 
 	struct poolq_head cbqh;		/**< combined callback contexts */
 
-	struct poolq_head extra_bufs;
+	struct poolq_head io_bufs;
 
-	u_int extra_bufs_count;
+	struct rpc_io_bufs *first_io_buf;
+
+	struct timespec last_extra_buf_allocation_time;	/* Last allocation from extra IO buf */
+
+	uint64_t total_extra_buf_allocations;	/* Total allocations from extra bufs */
+
+	u_int io_bufs_count;
 
 	uint32_t active_requests;
 
@@ -415,5 +407,8 @@ void svc_rdma_destroy(SVCXPRT *xprt, u_int flags, const char *tag,
 void rdma_cleanup_cbcs_task(struct work_pool_entry *wpe);
 
 void rpc_rdma_close_connection(RDMAXPRT *rdma_xprt);
+
+int xdr_rdma_dereg_mr(RDMAXPRT *rdma_xprt, struct ibv_mr *mr,
+    uint8_t *buffer_aligned, uint32_t buffer_total);
 
 #endif /* !_TIRPC_RPC_RDMA_H */

@@ -932,7 +932,8 @@ xdr_rdma_callq(RDMAXPRT *rdma_xprt)
 static void
 xdr_rdma_add_bufs_locked(RDMAXPRT *rdma_xprt, struct ibv_mr *mr,
     struct xdr_ioq_uv_head *uv_head, xdr_ioq_uv_type_t buf_type,
-    uint32_t buf_size, uint32_t buf_count, uint8_t *b_addr)
+    uint32_t buf_size, uint32_t buf_count, uint8_t *b_addr,
+    struct rpc_io_bufs *io_buf)
 {
 	/* Each pre-allocated buffer has a corresponding xdr_ioq_uv,
 	 * stored on the pool queues.
@@ -958,10 +959,12 @@ xdr_rdma_add_bufs_locked(RDMAXPRT *rdma_xprt, struct ibv_mr *mr,
 		data->rdma_v = data->v;
 		data->u.uio_p1 = &uv_head->uvqh;
 		data->u.uio_p2 = mr;
+		data->u.uio_u1 = io_buf;
 		data->rdma_u = data->u;
 		data->uv_type = buf_type;
 		TAILQ_INSERT_TAIL(&uv_head->uvqh.qh, &data->uvq, q);
 		uv_head->uvqh.qcount++;
+		atomic_inc_uint64_t(&io_buf->buf_count);
 
 		b_addr += buf_size;
 	}
@@ -972,7 +975,8 @@ xdr_rdma_add_bufs_locked(RDMAXPRT *rdma_xprt, struct ibv_mr *mr,
 static void
 xdr_rdma_add_bufs(RDMAXPRT *rdma_xprt, struct ibv_mr *mr,
     struct xdr_ioq_uv_head *uv_head, xdr_ioq_uv_type_t buf_type,
-    uint32_t buf_size, uint32_t buf_count, uint8_t *b_addr)
+    uint32_t buf_size, uint32_t buf_count, uint8_t *b_addr,
+    struct rpc_io_bufs *io_buf)
 {
 
 	/* Each pre-allocated buffer has a corresponding xdr_ioq_uv,
@@ -982,23 +986,23 @@ xdr_rdma_add_bufs(RDMAXPRT *rdma_xprt, struct ibv_mr *mr,
 	pthread_mutex_lock(&uv_head->uvqh.qmutex);
 
 	xdr_rdma_add_bufs_locked(rdma_xprt, mr, uv_head, buf_type,
-	    buf_size, buf_count, b_addr);
+	    buf_size, buf_count, b_addr, io_buf);
 
 	pthread_mutex_unlock(&uv_head->uvqh.qmutex);
 }
 
-/* Add on demand allocated buffers to the extra_bufs */
-static void
-xdr_rdma_update_extra_bufs(RDMAXPRT *rdma_xprt, struct ibv_mr *mr, uint32_t buffer_total,
-    uint8_t *buffer_aligned, rpc_extra_io_buf_type_t type)
+/* Add on allocated buffers to the io_bufs */
+static struct rpc_io_bufs *
+xdr_rdma_update_io_bufs(RDMAXPRT *rdma_xprt, struct ibv_mr *mr, uint32_t buffer_total,
+    uint8_t *buffer_aligned, rpc_io_buf_type_t type)
 {
 
-	pthread_mutex_lock(&rdma_xprt->extra_bufs.qmutex);
+	pthread_mutex_lock(&rdma_xprt->io_bufs.qmutex);
 
-	rdma_xprt->extra_bufs.qsize = sizeof(struct rpc_extra_io_bufs);
+	rdma_xprt->io_bufs.qsize = sizeof(struct rpc_io_bufs);
 
-	struct rpc_extra_io_bufs *io_buf =
-	    mem_zalloc(rdma_xprt->extra_bufs.qsize);
+	struct rpc_io_bufs *io_buf =
+	    mem_zalloc(rdma_xprt->io_bufs.qsize);
 
 	assert(io_buf);
 
@@ -1006,26 +1010,81 @@ xdr_rdma_update_extra_bufs(RDMAXPRT *rdma_xprt, struct ibv_mr *mr, uint32_t buff
 	io_buf->buffer_total = buffer_total;
 	io_buf->buffer_aligned = buffer_aligned;
 	io_buf->type = type;
+	io_buf->refs = 0;
+	io_buf->ctx = (void *)rdma_xprt;
 
-	TAILQ_INSERT_TAIL(&rdma_xprt->extra_bufs.qh, &io_buf->q, q);
+	TAILQ_INSERT_TAIL(&rdma_xprt->io_bufs.qh, &io_buf->q, q);
 
-	rdma_xprt->extra_bufs_count++;
-	rdma_xprt->extra_bufs.qcount++;
+	if (rdma_xprt->io_bufs_count == 0)
+		rdma_xprt->first_io_buf = io_buf;
+
+	rdma_xprt->io_bufs_count++;
+	rdma_xprt->io_bufs.qcount++;
 
 	__warnx(TIRPC_DEBUG_FLAG_EVENT,
-		"%s() extra bufs count %u io_buf %p rdma_xprt %p",
-		__func__, rdma_xprt->extra_bufs_count, io_buf, rdma_xprt);
+		"%s() io bufs count %u io_buf %p rdma_xprt %p",
+		__func__, rdma_xprt->io_bufs_count, io_buf, rdma_xprt);
 
-	pthread_mutex_unlock(&rdma_xprt->extra_bufs.qmutex);
+	pthread_mutex_unlock(&rdma_xprt->io_bufs.qmutex);
+
+	return io_buf;
 }
+
+uint64_t total_rdma_reg_mem;
 
 static struct ibv_mr *
 xdr_rdma_reg_mr(RDMAXPRT *rdma_xprt, uint8_t *buffer_aligned, uint32_t buffer_total)
 {
-	return ibv_reg_mr(rdma_xprt->pd->pd, buffer_aligned, buffer_total,
+	struct ibv_mr *mr = NULL;
+
+	mr = ibv_reg_mr(rdma_xprt->pd->pd, buffer_aligned, buffer_total,
 			    IBV_ACCESS_LOCAL_WRITE |
 			    IBV_ACCESS_REMOTE_WRITE |
 			    IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC);
+
+	if (mr) {
+		atomic_add_uint64_t(&total_rdma_reg_mem, buffer_total);
+
+		__warnx(TIRPC_DEBUG_FLAG_EVENT, "%s: total_rdma_reg_mem %llu registered, "
+		    "registering for xprt %p mr %p buffer_aligned %p buffer_total %u",
+		    __func__, atomic_fetch_uint64_t(&total_rdma_reg_mem),
+		    rdma_xprt, mr, buffer_aligned, buffer_total);
+	} else {
+		__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s: ibv_reg_mr failed "
+		    "total_rdma_reg_mem %llu registered, "
+		    "registering for xprt %p mr %p buffer_aligned %p buffer_total %u",
+		    __func__, atomic_fetch_uint64_t(&total_rdma_reg_mem),
+		    rdma_xprt, mr, buffer_aligned, buffer_total);
+	}
+
+	return mr;
+}
+
+int
+xdr_rdma_dereg_mr(RDMAXPRT *rdma_xprt, struct ibv_mr *mr,
+    uint8_t *buffer_aligned, uint32_t buffer_total)
+{
+	int ret;
+
+
+	ret = ibv_dereg_mr(mr);
+
+	if (ret) {
+		__warnx(TIRPC_DEBUG_FLAG_EVENT, "%s: ibv_dereg_mr failed err %d "
+		    "total_rdma_reg_mem %llu xprt %p mr %p "
+		    "buffer_aligned %p buffer_total %u",
+		    __func__, ret, atomic_fetch_uint64_t(&total_rdma_reg_mem),
+		    rdma_xprt, mr, buffer_aligned, buffer_total);
+	} else {
+		atomic_sub_uint64_t(&total_rdma_reg_mem, buffer_total);
+
+		__warnx(TIRPC_DEBUG_FLAG_EVENT, "%s: total_rdma_reg_mem %llu registered, "
+		    "unregistering for xprt %p mr %p buffer_aligned %p buffer_total %u",
+		    __func__, atomic_fetch_uint64_t(&total_rdma_reg_mem),
+		    rdma_xprt, mr, buffer_aligned, buffer_total);
+	}
+
+	return ret;
 }
 
 void
@@ -1034,6 +1093,7 @@ xdr_rdma_add_outbufs_hdr(RDMAXPRT *rdma_xprt)
 	uint8_t *b;
 	int hdr_qdepth = RDMA_HDR_CHUNKS(rdma_xprt->xa);
 	uint32_t buffer_total = rdma_xprt->sm_dr.send_hdr_sz * hdr_qdepth;
+	struct rpc_io_bufs *io_buf = NULL;
 
 	__warnx(TIRPC_DEBUG_FLAG_EVENT,
 		"%s() buffer_total %llu, sendsz %llu sq %llu rdma_xprt %p pagesz %llu",
@@ -1055,11 +1115,11 @@ xdr_rdma_add_outbufs_hdr(RDMAXPRT *rdma_xprt)
 
 	b = buffer_aligned;
 
-	xdr_rdma_add_bufs_locked(rdma_xprt, mr, &rdma_xprt->outbufs_hdr, UV_HDR,
-	    rdma_xprt->sm_dr.send_hdr_sz, hdr_qdepth, b);
+	io_buf = xdr_rdma_update_io_bufs(rdma_xprt, mr, buffer_total, buffer_aligned,
+	    IO_OUTBUF_HDR);
 
-	xdr_rdma_update_extra_bufs(rdma_xprt, mr, buffer_total, buffer_aligned,
-	    IO_OUTBUF);
+	xdr_rdma_add_bufs_locked(rdma_xprt, mr, &rdma_xprt->outbufs_hdr, UV_HDR,
+	    rdma_xprt->sm_dr.send_hdr_sz, hdr_qdepth, b, io_buf);
 }
 
 void
@@ -1068,6 +1128,7 @@ xdr_rdma_add_outbufs_data(RDMAXPRT *rdma_xprt)
 	uint8_t *b;
 	int data_qdepth = RDMA_DATA_CHUNKS;
 	uint32_t buffer_total = rdma_xprt->sm_dr.sendsz * data_qdepth;
+	struct rpc_io_bufs *io_buf = NULL;
 
 	__warnx(TIRPC_DEBUG_FLAG_EVENT,
 		"%s() buffer_total %llu, sendsz %llu sq %llu rdma_xprt %p pagesz %llu",
@@ -1089,11 +1150,11 @@ xdr_rdma_add_outbufs_data(RDMAXPRT *rdma_xprt)
 
 	b = buffer_aligned;
 
-	xdr_rdma_add_bufs_locked(rdma_xprt, mr, &rdma_xprt->outbufs_data,
-	    UV_DATA, rdma_xprt->sm_dr.sendsz, data_qdepth, b);
+	io_buf = xdr_rdma_update_io_bufs(rdma_xprt, mr, buffer_total, buffer_aligned,
+	    IO_OUTBUF_DATA);
 
-	xdr_rdma_update_extra_bufs(rdma_xprt, mr, buffer_total, buffer_aligned,
-	    IO_OUTBUF);
+	xdr_rdma_add_bufs_locked(rdma_xprt, mr, &rdma_xprt->outbufs_data,
+	    UV_DATA, rdma_xprt->sm_dr.sendsz, data_qdepth, b, io_buf);
 }
 
 void
@@ -1102,6 +1163,7 @@ xdr_rdma_add_inbufs_hdr(RDMAXPRT *rdma_xprt)
 	uint8_t *b;
 	int hdr_qdepth = RDMA_HDR_CHUNKS(rdma_xprt->xa);
 	uint32_t buffer_total = rdma_xprt->sm_dr.recv_hdr_sz * hdr_qdepth;
+	struct rpc_io_bufs *io_buf = NULL;
 
 	__warnx(TIRPC_DEBUG_FLAG_EVENT,
 		"%s() buffer_total %llu, recvsz %llu rq %llu rdma_xprt %p pagesz %llu",
@@ -1123,11 +1185,11 @@ xdr_rdma_add_inbufs_hdr(RDMAXPRT *rdma_xprt)
 
 	b = buffer_aligned;
 
-	xdr_rdma_add_bufs_locked(rdma_xprt, mr, &rdma_xprt->inbufs_hdr, UV_HDR,
-	    rdma_xprt->sm_dr.recv_hdr_sz, hdr_qdepth, b);
+	io_buf = xdr_rdma_update_io_bufs(rdma_xprt, mr, buffer_total, buffer_aligned,
+	    IO_INBUF_HDR);
 
-	xdr_rdma_update_extra_bufs(rdma_xprt, mr, buffer_total, buffer_aligned,
-	    IO_INBUF);
+	xdr_rdma_add_bufs_locked(rdma_xprt, mr, &rdma_xprt->inbufs_hdr, UV_HDR,
+	    rdma_xprt->sm_dr.recv_hdr_sz, hdr_qdepth, b, io_buf);
 }
 
 void
@@ -1136,6 +1198,7 @@ xdr_rdma_add_inbufs_data(RDMAXPRT *rdma_xprt)
 	uint8_t *b;
 	int data_qdepth = RDMA_DATA_CHUNKS;
 	uint32_t buffer_total = rdma_xprt->sm_dr.recvsz * data_qdepth;
+	struct rpc_io_bufs *io_buf = NULL;
 
 	__warnx(TIRPC_DEBUG_FLAG_EVENT,
 		"%s() buffer_total %llu, recvsz %llu rq %llu rdma_xprt %p pagesz %llu",
@@ -1157,11 +1220,11 @@ xdr_rdma_add_inbufs_data(RDMAXPRT *rdma_xprt)
 
 	b = buffer_aligned;
 
-	xdr_rdma_add_bufs_locked(rdma_xprt, mr, &rdma_xprt->inbufs_data,
-	    UV_DATA, rdma_xprt->sm_dr.recvsz, data_qdepth, b);
+	io_buf = xdr_rdma_update_io_bufs(rdma_xprt, mr, buffer_total, buffer_aligned,
+	    IO_INBUF_DATA);
 
-	xdr_rdma_update_extra_bufs(rdma_xprt, mr, buffer_total, buffer_aligned,
-	    IO_INBUF);
+	xdr_rdma_add_bufs_locked(rdma_xprt, mr, &rdma_xprt->inbufs_data,
+	    UV_DATA, rdma_xprt->sm_dr.recvsz, data_qdepth, b, io_buf);
 }
 
 /*
@@ -1175,6 +1238,7 @@ xdr_rdma_create(RDMAXPRT *rdma_xprt)
 	uint8_t *b;
 	int data_qdepth = RDMA_DATA_CHUNKS;
 	int hdr_qdepth = RDMA_HDR_CHUNKS(rdma_xprt->xa);
+	struct rpc_io_bufs *io_buf = NULL;
 
 	if (!rdma_xprt->pd || !rdma_xprt->pd->pd) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
@@ -1242,24 +1306,28 @@ xdr_rdma_create(RDMAXPRT *rdma_xprt)
 
 	b = rdma_xprt->buffer_aligned;
 
+	poolq_head_setup(&rdma_xprt->io_bufs);
+	rdma_xprt->io_bufs_count = 0;
+
+	io_buf = xdr_rdma_update_io_bufs(rdma_xprt, rdma_xprt->mr,
+	    rdma_xprt->buffer_total,
+	    rdma_xprt->buffer_aligned, IO_BUF_ALL);
+
 	xdr_rdma_add_bufs(rdma_xprt, rdma_xprt->mr, &rdma_xprt->inbufs_data, UV_DATA,
-	    rdma_xprt->sm_dr.recvsz, data_qdepth, b);
+	    rdma_xprt->sm_dr.recvsz, data_qdepth, b, io_buf);
 	b = b + (data_qdepth * rdma_xprt->sm_dr.recvsz);
 
 	xdr_rdma_add_bufs(rdma_xprt, rdma_xprt->mr, &rdma_xprt->outbufs_data, UV_DATA,
-	    rdma_xprt->sm_dr.sendsz, data_qdepth, b);
+	    rdma_xprt->sm_dr.sendsz, data_qdepth, b, io_buf);
 	b = b + (data_qdepth * rdma_xprt->sm_dr.sendsz);
 
 	xdr_rdma_add_bufs(rdma_xprt, rdma_xprt->mr, &rdma_xprt->inbufs_hdr, UV_HDR,
-	    rdma_xprt->sm_dr.recv_hdr_sz, hdr_qdepth, b);
+	    rdma_xprt->sm_dr.recv_hdr_sz, hdr_qdepth, b, io_buf);
 	b = b + (hdr_qdepth * rdma_xprt->sm_dr.recv_hdr_sz);
 
 	xdr_rdma_add_bufs(rdma_xprt, rdma_xprt->mr, &rdma_xprt->outbufs_hdr, UV_HDR,
-	    rdma_xprt->sm_dr.send_hdr_sz, hdr_qdepth, b);
+	    rdma_xprt->sm_dr.send_hdr_sz, hdr_qdepth, b, io_buf);
 	b = b + (hdr_qdepth * rdma_xprt->sm_dr.send_hdr_sz);
-
-	poolq_head_setup(&rdma_xprt->extra_bufs);
-	rdma_xprt->extra_bufs_count = 0;
 
 	/* Keep enough cbc available to serve cbc allocation.
 	 * We allocate MAX_CBC_OUTSTANDING * 2 cbcs.

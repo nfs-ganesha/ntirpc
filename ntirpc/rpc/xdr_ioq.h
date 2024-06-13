@@ -35,10 +35,32 @@
 #include <rpc/xdr.h>
 
 #ifdef USE_RPC_RDMA
+
+typedef enum rpc_io_buf_type {
+	IO_INBUF_DATA = 1,	/* Data Buffers used for recv */
+	IO_OUTBUF_DATA,		/* Data Buffers used for send */
+	IO_INBUF_HDR,		/* Hdr Buffers used for recv */
+	IO_OUTBUF_HDR,		/* Hdr Buffers used for send */
+	IO_BUF_ALL		/* Buffers use for all above */
+} rpc_io_buf_type_t;
+
+/* Track buffers allocated on demand */
+struct rpc_io_bufs {
+	struct ibv_mr *mr;
+	uint32_t buffer_total;
+	uint8_t *buffer_aligned;
+	struct poolq_entry q;
+	uint32_t refs;
+	uint64_t buf_count;
+	void *ctx;
+	rpc_io_buf_type_t type;
+};
+
 typedef enum xdr_ioq_uv_type {
 	UV_DATA = 1,	/* Data buffers of big size */
 	UV_HDR		/* Header buffers of smaller size */
 } xdr_ioq_uv_type_t;
+
 #endif
 
 struct xdr_ioq_uv
@@ -155,7 +177,10 @@ extern const struct xdr_ops xdr_ioq_ops_rdma;
 extern void xdr_rdma_ioq_uv_release(struct xdr_ioq_uv *uv);
 extern void xdr_rdma_ioq_release(struct poolq_head *ioqh, bool xioq_recycle,
     struct xdr_ioq *xioq);
-extern void xdr_rdma_buf_pool_destroy(struct poolq_head *ioqh);
+extern void xdr_rdma_buf_pool_destroy(struct poolq_head *ioqh,
+    struct rpc_io_bufs *io_buf);
+extern void xdr_rdma_buf_pool_destroy_locked(struct poolq_head *ioqh,
+    struct rpc_io_bufs *io_buf);
 
 extern struct poolq_entry *xdr_rdma_ioq_uv_fetch(struct xdr_ioq *xioq,
 						 struct poolq_head *ioqh,

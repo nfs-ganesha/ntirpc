@@ -1376,7 +1376,9 @@ static void
 rdma_destroy_cbcs(RDMAXPRT *rdma_xprt) {
 
 	__warnx(TIRPC_DEBUG_FLAG_EVENT,
-	    "%s() Destroying xprt %p cbcs",  __func__, rdma_xprt);
+	    "%s() Destroying xprt %p cbcs qcount %u qsize %u total cbcs_memory %u",
+	    __func__, rdma_xprt, rdma_xprt->cbqh.qcount, rdma_xprt->cbqh.qsize,
+	    rdma_xprt->cbqh.qcount * rdma_xprt->cbqh.qsize);
 
 	/* pool_head may not be initialized, so check for qcount */
 	if (rdma_xprt->cbqh.qcount && !TAILQ_EMPTY(&rdma_xprt->cbqh.qh)) {
@@ -1412,15 +1414,15 @@ rdma_destroy_cbcs(RDMAXPRT *rdma_xprt) {
 }
 
 static void
-rdma_destroy_extra_bufs(RDMAXPRT *rdma_xprt) {
+rdma_destroy_io_bufs(RDMAXPRT *rdma_xprt) {
 	__warnx(TIRPC_DEBUG_FLAG_EVENT,
-	    "%s() Destroying xprt %p extra_bufs",
+	    "%s() Destroying xprt %p io_bufs",
 	    __func__, rdma_xprt);
 
 	/* pool_head may not be initialized, so check for qcount */
-	if (rdma_xprt->extra_bufs.qcount &&
-		!TAILQ_EMPTY(&rdma_xprt->extra_bufs.qh)) {
-		struct poolq_head *ioqh = &rdma_xprt->extra_bufs;
+	if (rdma_xprt->io_bufs.qcount &&
+		!TAILQ_EMPTY(&rdma_xprt->io_bufs.qh)) {
+		struct poolq_head *ioqh = &rdma_xprt->io_bufs;
 
 		pthread_mutex_lock(&ioqh->qmutex);
 
@@ -1430,22 +1432,49 @@ rdma_destroy_extra_bufs(RDMAXPRT *rdma_xprt) {
 		while (have) {
 			struct poolq_entry *next = TAILQ_NEXT(have, q);
 
-			struct rpc_extra_io_bufs *io_buf =
-				opr_containerof(have, struct rpc_extra_io_bufs, q);
+			struct rpc_io_bufs *io_buf =
+				opr_containerof(have, struct rpc_io_bufs, q);
 
-			assert(io_buf->mr);
-			ibv_dereg_mr(io_buf->mr);
-			io_buf->mr = NULL;
+			__warnx(TIRPC_DEBUG_FLAG_EVENT, "%s Destroy io_buf %p ioqh %p count %d",
+			    __func__, io_buf, ioqh, ioqh->qcount);
 
-			__warnx(TIRPC_DEBUG_FLAG_EVENT, "%s() Free xprt %p mr "
-			    "extra_bufs %p size %u", __func__, rdma_xprt,
-			    io_buf->buffer_aligned, io_buf->buffer_total);
+			if ((io_buf->type == IO_BUF_ALL) ||
+			    (io_buf->type == IO_INBUF_HDR)) {
+				struct poolq_head *ioqh_bufs = &rdma_xprt->inbufs_hdr.uvqh;
+				__warnx(TIRPC_DEBUG_FLAG_EVENT,
+				    "%s() Destroying %p inbufs_hdr head %p count %d io_buf %p",
+				    __func__, rdma_xprt, ioqh_bufs, ioqh_bufs->qcount, io_buf);
+				xdr_rdma_buf_pool_destroy(ioqh_bufs, io_buf);
+			}
 
-			assert(io_buf->buffer_aligned);
-			mem_free(io_buf->buffer_aligned, io_buf->buffer_total);
-			io_buf->buffer_aligned = NULL;
+			if ((io_buf->type == IO_BUF_ALL) ||
+			    (io_buf->type == IO_OUTBUF_HDR)) {
+				struct poolq_head *ioqh_bufs = &rdma_xprt->outbufs_hdr.uvqh;
+				__warnx(TIRPC_DEBUG_FLAG_EVENT,
+				    "%s() Destroying %p outbufs_hdr head %p count %d io_buf %p",
+				    __func__, rdma_xprt, ioqh_bufs, ioqh_bufs->qcount, io_buf);
+				xdr_rdma_buf_pool_destroy(ioqh_bufs, io_buf);
+			}
 
-			rdma_xprt->extra_bufs_count--;
+			if ((io_buf->type == IO_BUF_ALL) ||
+			    (io_buf->type == IO_INBUF_DATA)) {
+				struct poolq_head *ioqh_bufs = &rdma_xprt->inbufs_data.uvqh;
+				__warnx(TIRPC_DEBUG_FLAG_EVENT,
+				    "%s() Destroying %p inbufs_data head %p count %d io_buf %p",
+				    __func__, rdma_xprt, ioqh_bufs, ioqh_bufs->qcount, io_buf);
+				xdr_rdma_buf_pool_destroy(ioqh_bufs, io_buf);
+			}
+
+			if ((io_buf->type == IO_BUF_ALL) ||
+			    (io_buf->type == IO_OUTBUF_DATA)) {
+				struct poolq_head *ioqh_bufs = &rdma_xprt->outbufs_data.uvqh;
+				__warnx(TIRPC_DEBUG_FLAG_EVENT,
+				    "%s() Destroying %p outbufs_data head %p count %d io_buf %p",
+				    __func__, rdma_xprt, ioqh_bufs, ioqh_bufs->qcount, io_buf);
+				xdr_rdma_buf_pool_destroy(ioqh_bufs, io_buf);
+			}
+
+			rdma_xprt->io_bufs_count--;
 
 			TAILQ_REMOVE(&ioqh->qh, have, q);
 			(ioqh->qcount)--;
@@ -1460,46 +1489,40 @@ rdma_destroy_extra_bufs(RDMAXPRT *rdma_xprt) {
 
 		poolq_head_destroy(ioqh);
 	}
+
+	assert(TAILQ_EMPTY(&rdma_xprt->inbufs_hdr.uvqh.qh) &&
+	    (rdma_xprt->inbufs_hdr.uvqh.qcount == 0));
+	poolq_head_destroy(&rdma_xprt->inbufs_hdr.uvqh);
+
+	assert(TAILQ_EMPTY(&rdma_xprt->inbufs_data.uvqh.qh) &&
+	    (rdma_xprt->inbufs_data.uvqh.qcount == 0));
+	poolq_head_destroy(&rdma_xprt->inbufs_data.uvqh);
+
+	assert(TAILQ_EMPTY(&rdma_xprt->outbufs_hdr.uvqh.qh) &&
+	    (rdma_xprt->outbufs_hdr.uvqh.qcount == 0));
+	poolq_head_destroy(&rdma_xprt->outbufs_hdr.uvqh);
+
+	assert(TAILQ_EMPTY(&rdma_xprt->outbufs_data.uvqh.qh) &&
+	    (rdma_xprt->outbufs_data.uvqh.qcount == 0));
+	poolq_head_destroy(&rdma_xprt->outbufs_data.uvqh);
 }
 
 /* Destroy all the buf/cbc queues/pools and
  * free registered memory */
 static void
-xdr_ioq_rdma_destroy_pools(RDMAXPRT *rdma_xprt) {
-
-	__warnx(TIRPC_DEBUG_FLAG_EVENT,
-	    "%s() Destroying %p inbufs_hdr", __func__, rdma_xprt);
-	xdr_rdma_buf_pool_destroy(&rdma_xprt->inbufs_hdr.uvqh);
-
-	__warnx(TIRPC_DEBUG_FLAG_EVENT,
-	    "%s() Destroying %p outbufs_hdr", __func__, rdma_xprt);
-	xdr_rdma_buf_pool_destroy(&rdma_xprt->outbufs_hdr.uvqh);
-
-	__warnx(TIRPC_DEBUG_FLAG_EVENT,
-	    "%s() Destroying %p inbufs_data", __func__, rdma_xprt);
-	xdr_rdma_buf_pool_destroy(&rdma_xprt->inbufs_data.uvqh);
-
-	__warnx(TIRPC_DEBUG_FLAG_EVENT,
-	    "%s() Destroying %p outbufs_data", __func__, rdma_xprt);
-	xdr_rdma_buf_pool_destroy(&rdma_xprt->outbufs_data.uvqh);
-
-	rdma_destroy_cbcs(rdma_xprt);
+xdr_ioq_rdma_destroy_pools(RDMAXPRT *rdma_xprt)
+{
+	rdma_destroy_io_bufs(rdma_xprt);
 
 	if (rdma_xprt->mr) {
-		ibv_dereg_mr(rdma_xprt->mr);
 		rdma_xprt->mr = NULL;
 	}
 
 	if (rdma_xprt->buffer_aligned) {
-		__warnx(TIRPC_DEBUG_FLAG_EVENT, "%s() Free xprt %p mr buf %p size %u",
-		    __func__, rdma_xprt, rdma_xprt->buffer_aligned,
-		    rdma_xprt->buffer_total);
-
-		mem_free(rdma_xprt->buffer_aligned, rdma_xprt->buffer_total);
 		rdma_xprt->buffer_aligned = NULL;
 	}
 
-	rdma_destroy_extra_bufs(rdma_xprt);
+	rdma_destroy_cbcs(rdma_xprt);
 }
 
 void
@@ -1877,7 +1900,8 @@ rpc_rdma_allocate_cbc_locked(struct poolq_head *ioqh)
  * rpc_rdma_setup_cbq
  */
 static int
-rpc_rdma_setup_cbq(struct poolq_head *ioqh, u_int depth, u_int sge)
+rpc_rdma_setup_cbq(RDMAXPRT *rdma_xprt,
+    struct poolq_head *ioqh, u_int depth, u_int sge)
 {
 	if (ioqh->qsize) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
@@ -1901,6 +1925,11 @@ rpc_rdma_setup_cbq(struct poolq_head *ioqh, u_int depth, u_int sge)
 	while (depth--) {
 		rpc_rdma_allocate_cbc_locked(ioqh);
 	}
+
+	__warnx(TIRPC_DEBUG_FLAG_EVENT, "%s Total cbcs_memory %u "
+	    "qcount %u qsize %u xprt %p",
+	    __func__, ioqh->qcount * ioqh->qsize,
+	    ioqh->qcount, ioqh->qsize, rdma_xprt);
 
 	pthread_mutex_unlock(&ioqh->qmutex);
 
@@ -2047,7 +2076,7 @@ rpc_rdma_clone(RDMAXPRT *l_rdma_xprt, struct rdma_cm_id *cm_id)
 		}
 
 		if (!rdma_xprt->pd->srqh.qcount) {
-			rc = rpc_rdma_setup_cbq(&rdma_xprt->pd->srqh,
+			rc = rpc_rdma_setup_cbq(rdma_xprt, &rdma_xprt->pd->srqh,
 						rdma_xprt->xa->rq_depth,
 						rdma_xprt->xa->max_recv_sge);
 			if (rc) {
@@ -2059,7 +2088,7 @@ rpc_rdma_clone(RDMAXPRT *l_rdma_xprt, struct rdma_cm_id *cm_id)
 		}
 
 		/* only send contexts */
-		rc = rpc_rdma_setup_cbq(&rdma_xprt->cbqh,
+		rc = rpc_rdma_setup_cbq(rdma_xprt, &rdma_xprt->cbqh,
 					rdma_xprt->xa->sq_depth,
 					rdma_xprt->xa->credits);
 		if (rc) {
@@ -2069,7 +2098,7 @@ rpc_rdma_clone(RDMAXPRT *l_rdma_xprt, struct rdma_cm_id *cm_id)
 			goto failure;
 		}
 	} else {
-		rc = rpc_rdma_setup_cbq(&rdma_xprt->cbqh,
+		rc = rpc_rdma_setup_cbq(rdma_xprt, &rdma_xprt->cbqh,
 					MAX_CBC_ALLOCATION(rdma_xprt->xa),
 					rdma_xprt->xa->credits);
 		if (rc) {
@@ -2369,7 +2398,7 @@ rpc_rdma_connect(RDMAXPRT *rdma_xprt)
 		rpc_rdma_destroy_stuff(rdma_xprt);
 		return rc;
 	}
-	rc = rpc_rdma_setup_cbq(&rdma_xprt->cbqh,
+	rc = rpc_rdma_setup_cbq(rdma_xprt, &rdma_xprt->cbqh,
 				rdma_xprt->xa->rq_depth + rdma_xprt->xa->sq_depth,
 				rdma_xprt->xa->credits);
 	if (rc)
