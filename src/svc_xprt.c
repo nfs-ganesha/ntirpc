@@ -475,7 +475,7 @@ svc_rdma_add_xprt_fd(SVCXPRT *xprt)
 
 		if (opr_rbtree_insert(&t->t, &rec->fd_node)) {
 			/* cant happen */
-			__warnx(TIRPC_DEBUG_FLAG_LOCK,
+			__warnx(TIRPC_DEBUG_FLAG_ERROR,
 				"%s: collision inserting in locked rbtree partition",
 				__func__);
 

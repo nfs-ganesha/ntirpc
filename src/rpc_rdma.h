@@ -150,13 +150,15 @@ struct rpc_rdma_pd {
 #define RDMAX_CLIENT 0
 #define RDMAX_SERVER_CHILD -1
 
-#define RDMA_HDR_CHUNK_SZ 8192
-#define MAX_CBC_OUTSTANDING(xa) (xa)->credits
-#define MAX_CBC_ALLOCATION(xa) (MAX_CBC_OUTSTANDING(xa) * 2)
-#define MAX_RECV_OUTSTANDING(xa) MAX_CBC_OUTSTANDING(xa)
 #define RDMA_DATA_CHUNKS 32
 #define RDMA_DATA_CHUNK_SZ 1048576
 #define RDMA_HDR_CHUNKS(xa) MAX_CBC_OUTSTANDING(xa)
+#define RDMA_HDR_CHUNK_SZ 8192
+#define MAX_QP_WR(xa) ((xa)->credits * 16)
+#define MAX_CQ_SIZE(xa) (2 * MAX_QP_WR(xa))
+#define MAX_CBC_OUTSTANDING(xa) (xa)->credits
+#define MAX_CBC_ALLOCATION(xa) (MAX_CBC_OUTSTANDING(xa) * 2)
+#define MAX_RECV_OUTSTANDING(xa) MAX_CBC_OUTSTANDING(xa)
 
 /**
  * \struct rpc_rdma_xprt
@@ -306,17 +308,6 @@ static inline void cbc_release_it(struct rpc_rdma_cbc *cbc)
 	if ((refs == 0) && (cbc->cbc_flags & CBC_FLAG_RELEASE)) {
 		pthread_mutex_lock(&rdma_xprt->cbclist.qmutex);
 
-		/* we could race here with rdma_cleanup_cbc_tasks
-		 * check if buffer is reused */
-
-		if (!(cbc->cbc_flags & CBC_FLAG_RELEASE)) {
-			__warnx(TIRPC_DEBUG_FLAG_EVENT,
-			    "%s cbc %p reused ref %d flags %x", __func__, cbc,
-			    cbc->refcnt, cbc->cbc_flags);
-
-			return;
-		}
-
 		__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA, "%s: destroy_cbc "
 			"cbc %p ref %d flags %x",
 			__func__, cbc, cbc->refcnt, cbc->cbc_flags);
@@ -403,8 +394,6 @@ void svc_rdma_unlink(SVCXPRT *xprt, u_int flags, const char *tag,
     const int line);
 void svc_rdma_destroy(SVCXPRT *xprt, u_int flags, const char *tag,
     const int line);
-
-void rdma_cleanup_cbcs_task(struct work_pool_entry *wpe);
 
 void rpc_rdma_close_connection(RDMAXPRT *rdma_xprt);
 

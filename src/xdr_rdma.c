@@ -637,8 +637,10 @@ xdr_rdma_wait_cb_done_locked(struct rpc_rdma_cbc *cbc)
 	ts.tv_nsec = 0;
 	RDMAXPRT *rdma_xprt = x_rdma_xprt(cbc->recvq.xdrs);
 
-	if (rdma_xprt->sm_dr.xprt.xp_flags & SVC_XPRT_FLAG_DESTROYED)
-		return -1;
+	if (rdma_xprt->sm_dr.xprt.xp_flags & SVC_XPRT_FLAG_DESTROYED) {
+		__warnx(TIRPC_DEBUG_FLAG_ERROR, " %s rdma_xprt %p cbc %p "
+		    "already destroyed", __func__, rdma_xprt, cbc);
+	}
 
 	/* cond_wait should atomically release cb_done_mutex */
 	return pthread_cond_timedwait(&cbc->cb_done,
@@ -1444,6 +1446,8 @@ xdr_rdma_svc_recv(struct rpc_rdma_cbc *cbc, u_int32_t xid)
 
 	/* Both sendq and recvq (xdrs)->x_lib[1] points to xprt */
 	rdma_xprt = x_rdma_xprt(cbc->recvq.xdrs);
+
+	(void)clock_gettime(CLOCK_MONOTONIC_FAST, &rdma_xprt->sm_dr.recv.ts);
 
 	if (rdma_xprt->sm_dr.xprt.xp_flags & SVC_XPRT_FLAG_DESTROYED) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR, " %s rdma_xprt %p cbc %p "
