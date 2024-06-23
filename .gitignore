@@ -57,6 +57,7 @@ libntirpc.map
 ntirpc/version.h
 src/libntirpc.so
 src/libntirpc.so.*
+src/lttng/libntirpc_tracepoints.so*
 tests/rpcping
 
 .cache
