@@ -844,6 +844,7 @@ again:
 					"%s: %p fd %d proxy header failed rest1=%08x rest2=%08x (will set dead)",
 				__func__, xprt, xprt->xp_fd, (int) rest[0], (int) rest[1]);
 				SVC_DESTROY(xprt);
+				return SVC_STAT(xprt);
 			}
 
 			rlen = recv(xprt->xp_fd, &s, sizeof(s),
