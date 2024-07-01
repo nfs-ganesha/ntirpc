@@ -728,8 +728,31 @@ svc_vc_stat(SVCXPRT *xprt)
 	return (XPRT_IDLE);
 }
 
-static bool is_rpc_address_initialized(struct rpc_address* address) {
-	return address->ss.ss_family != 0;
+static bool is_remote_addr_set(SVCXPRT *xprt)
+{
+	return (xprt->xp_flags & SVC_XPRT_FLAG_REMOTE_ADDR_SET);
+}
+
+static bool update_and_notify_remote_address_set(SVCXPRT *xprt)
+{
+	u_int prev_xp_flags;
+	__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
+			"%s: %p fd %d update remote address set",
+			__func__, xprt, xprt->xp_fd);
+	prev_xp_flags = atomic_postset_uint16_t_bits(&xprt->xp_flags,
+			SVC_XPRT_FLAG_REMOTE_ADDR_SET);
+	/* remote addr set was must be called only once for xprt */
+	assert(!(prev_xp_flags & SVC_XPRT_FLAG_REMOTE_ADDR_SET));
+	if (xprt->xp_dispatch.remote_addr_set_cb) {
+		if (xprt->xp_dispatch.remote_addr_set_cb(xprt)) {
+			__warnx(TIRPC_DEBUG_FLAG_ERROR,
+				"%s: %p fd %d remote_addr_set cb failed"
+				" (will set dead)",
+				__func__, xprt, xprt->xp_fd);
+			return false;
+		}
+	}
+	return true;
 }
 
 enum haproxy_ret_code {
@@ -814,7 +837,7 @@ static enum haproxy_ret_code handle_haproxy_header(SVCXPRT *xprt)
 	}
 
 	if (s.ver_cmd == PP2_VERSIOB2_CMD_PROXY) {
-		if (unlikely(is_rpc_address_initialized(&xprt->xp_proxy))) {
+		if (unlikely(is_remote_addr_set(xprt))) {
 			/* We don't allow more than one proxy protocol packet.
 			   Allowing it will cause a security vulnerability where
 			   at any point the client could sent a PP packet and
@@ -1003,6 +1026,10 @@ again:
 			enum haproxy_ret_code ret = handle_haproxy_header(xprt);
 			switch (ret) {
 			case HAPROXY_RET_CODE__SUCCESS:
+				if (!update_and_notify_remote_address_set(xprt)) {
+					SVC_DESTROY(xprt);
+					return SVC_STAT(xprt);
+				}
 				/* Now look to see if there's more... */
 				hap_again = true;
 				goto again;
@@ -1131,6 +1158,13 @@ again:
 	(rec->ioq.ioq_uv.uvqh.qcount)--;
 	TAILQ_REMOVE(&rec->ioq.ioq_uv.uvqh.qh, &xioq->ioq_s, q);
 	xdr_ioq_reset(xioq, 0);
+
+	if (!is_remote_addr_set(xprt)) {
+		if (!update_and_notify_remote_address_set(xprt)) {
+			SVC_DESTROY(xprt);
+			return SVC_STAT(xprt);
+		}
+	}
 
 	if (unlikely(svc_rqst_rearm_events(xprt, SVC_XPRT_FLAG_ADDED_RECV))) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,

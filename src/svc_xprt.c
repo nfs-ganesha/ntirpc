@@ -179,6 +179,7 @@ svc_xprt_lookup(int fd, svc_xprt_setup_t setup)
 			xprt->xp_fd = fd;
 			xprt->xp_fd_send = -1;
 			xprt->xp_flags = SVC_XPRT_FLAG_INITIAL;
+			xprt->xp_dispatch.remote_addr_set_cb = NULL;
 
 			/* Get ref for caller */
 			SVC_REF(xprt, SVC_REF_FLAG_NONE);
