@@ -53,6 +53,7 @@ struct rpc_io_bufs {
 	uint32_t refs;
 	uint64_t buf_count;
 	void *ctx;
+	bool_t ready;
 	rpc_io_buf_type_t type;
 };
 

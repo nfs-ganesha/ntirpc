@@ -124,6 +124,8 @@ svc_rdma_rendezvous(SVCXPRT *xprt)
 	/* Take ref on parent */
 	SVC_REF(xprt, SVC_REF_FLAG_NONE);
 	rdma_xprt->sm_dr.xprt.xp_parent = xprt;
+	/* Ref for RDMA_CM_EVENT_TIMEWAIT_EXIT */
+	SVC_REF(&rdma_xprt->sm_dr.xprt, SVC_REF_FLAG_NONE);
 
 	int retval = xprt->xp_dispatch.rendezvous_cb(&rdma_xprt->sm_dr.xprt);
 	if (retval) {

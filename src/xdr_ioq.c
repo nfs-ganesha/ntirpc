@@ -271,7 +271,7 @@ get_lru_chunk(RDMAXPRT *rdma_xprt)
 
 			/* We are with ioqh_lock so no other thread can allocated
 			 * from thi ioqh and get io_buf ref */
-			if ((io_buf != rdma_xprt->first_io_buf) &&
+			if (io_buf->ready && (io_buf != rdma_xprt->first_io_buf) &&
 			    (io_buf->refs == 0) && ((io_buf->type == IO_INBUF_DATA) ||
 			    (io_buf->type == IO_OUTBUF_DATA)))
 				break;

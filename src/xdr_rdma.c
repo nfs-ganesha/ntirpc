@@ -209,14 +209,17 @@ static int
 xdr_rdma_respond_callback_send(struct rpc_rdma_cbc *cbc, RDMAXPRT *rdma_xprt)
 {
 	int ret = 0;
+	int32_t write_waits = atomic_dec_int32_t(&cbc->write_waits);
 
 	__warnx(TIRPC_DEBUG_FLAG_XDR,
-		"%s() %p[%u] cbc %p\n",
-		__func__, rdma_xprt, rdma_xprt->state, cbc);
+	    "%s() %p[%u] cbc %p refs %d write_waits %d\n",
+	    __func__, rdma_xprt, rdma_xprt->state, cbc,
+	    cbc->refcnt, write_waits);
 
 	if (rdma_xprt->sm_dr.xprt.xp_flags & SVC_XPRT_FLAG_DESTROYED) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR, " %s rdma_xprt %p cbc %p "
-			"already destroyed", __func__, rdma_xprt, cbc);
+		    "refs %d write_waits %d already destroyed",
+		    __func__, rdma_xprt, cbc, cbc->refcnt, write_waits);
 
 		ret =  -1;
 	}
@@ -230,14 +233,17 @@ static int
 xdr_rdma_destroy_callback_send(struct rpc_rdma_cbc *cbc, RDMAXPRT *rdma_xprt)
 {
 	int ret = 0;
+	int write_waits = atomic_dec_int32_t(&cbc->write_waits);
 
 	__warnx(TIRPC_DEBUG_FLAG_XDR,
-		"%s() %p[%u] cbc %p\n",
-		__func__, rdma_xprt, rdma_xprt->state, cbc);
+	    "%s() %p[%u] cbc %p refs %d write_waits %d\n",
+	    __func__, rdma_xprt, rdma_xprt->state, cbc,
+	    cbc->refcnt, write_waits);
 
 	if (rdma_xprt->sm_dr.xprt.xp_flags & SVC_XPRT_FLAG_DESTROYED) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR, " %s rdma_xprt %p cbc %p "
-			"already destroyed", __func__, rdma_xprt, cbc);
+		    "refs %d write_waits %d already destroyed",
+		    __func__, rdma_xprt, cbc, cbc->refcnt, write_waits);
 
 		ret = -1;
 	}
@@ -301,7 +307,7 @@ xdr_rdma_destroy_callback_recv(struct rpc_rdma_cbc *cbc, RDMAXPRT *rdma_xprt)
 {
 	int ret = 0;
 
-	__warnx(TIRPC_DEBUG_FLAG_XDR,
+	__warnx(TIRPC_DEBUG_FLAG_ERROR,
 		"Error in recv callback %s() %p[%u] cbc %p\n",
 		__func__, rdma_xprt, rdma_xprt->state, cbc);
 
@@ -666,19 +672,21 @@ xdr_rdma_async_send_cb(RDMAXPRT *rdma_xprt, struct rpc_rdma_cbc *cbc, int sge)
 	cbc->negative_cb = xdr_rdma_destroy_callback_send;
 	cbc->callback_arg = NULL;
 	cbc->call_inline = 1;
+	int32_t write_waits = atomic_dec_int32_t(&cbc->write_waits);
 
 	cbc_ref_it(cbc, rdma_xprt);
 
 	ret = xdr_rdma_post_send_n(rdma_xprt, cbc, sge, NULL, IBV_WR_SEND);
 
 	if (ret) {
-		/* Assuming there won't be callback */
-		__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s: failed ret %d err %d "
-			" rdma_xprt %p cbc %p", __func__, ret, errno, rdma_xprt, cbc);
-
 		cbc_release_it(cbc);
 
 		SVC_DESTROY(&rdma_xprt->sm_dr.xprt);
+
+		/* Assuming there won't be callback */
+		__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s: failed ret %d err %d "
+		    " rdma_xprt %p cbc %p refs %d write_waits %d",
+		    __func__, ret, errno, rdma_xprt, cbc, cbc->refcnt, write_waits);
 	}
 
 	return ret;
@@ -705,12 +713,15 @@ xdr_rdma_wait_read_cb(RDMAXPRT *rdma_xprt, struct rpc_rdma_cbc *cbc, int sge,
 	ret = xdr_rdma_post_send_n(rdma_xprt, cbc, sge, rs, IBV_WR_RDMA_READ);
 
 	if (ret) {
-		/* Assuming there won't be callback */
-		__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s: failed ret %d err %d "
-			" rdma_xprt %p cbc %p", __func__, ret, errno, rdma_xprt, cbc);
+		read_waits = atomic_dec_int32_t(&cbc->read_waits);
 
 		cbc_release_it(cbc);
 		SVC_DESTROY(&rdma_xprt->sm_dr.xprt);
+
+		/* Assuming there won't be callback */
+		__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s: failed ret %d err %d "
+		    " rdma_xprt %p cbc %p refs %d read_waits %d",
+		    __func__, ret, errno, rdma_xprt, cbc, cbc->refcnt, read_waits);
 	}
 
 	return ret;
@@ -726,19 +737,24 @@ xdr_rdma_async_write_cb(RDMAXPRT *rdma_xprt, struct rpc_rdma_cbc *cbc, int sge,
 	cbc->negative_cb = xdr_rdma_destroy_callback_send;
 	cbc->callback_arg = NULL;
 	cbc->call_inline = 1;
+	int32_t write_waits = atomic_inc_int32_t(&cbc->write_waits);
 
 	cbc_ref_it(cbc, rdma_xprt);
 
 	ret = xdr_rdma_post_send_n(rdma_xprt, cbc, sge, rs, IBV_WR_RDMA_WRITE);
 
 	if (ret) {
-		/* Assuming there won't be callback */
-		__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s: failed ret %d err %d "
-			" rdma_xprt %p cbc %p", __func__, ret, errno, rdma_xprt, cbc);
+		write_waits = atomic_dec_int32_t(&cbc->write_waits);
 
 		cbc_release_it(cbc);
 
 		SVC_DESTROY(&rdma_xprt->sm_dr.xprt);
+
+		/* Assuming there won't be callback */
+		__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s: failed ret %d err %d "
+		    " rdma_xprt %p cbc %p refs %d write_waits %d",
+		    __func__, ret, errno, rdma_xprt, cbc, cbc->refcnt,
+		    write_waits);
 	}
 
 	return ret;
@@ -911,6 +927,9 @@ xdr_rdma_callq(RDMAXPRT *rdma_xprt)
 	cbc->data_chunk_uv = NULL;
 	cbc->refcnt = 1; // Senital ref
 	cbc->cbc_flags = CBC_FLAG_NONE;
+	cbc->read_waits = 0;
+	cbc->write_waits = 0;
+	cbc->active = false;
 	cbc->non_registered_buf = NULL;
 	cbc->non_registered_buf_len = 0;
 
@@ -1013,6 +1032,7 @@ xdr_rdma_update_io_bufs(RDMAXPRT *rdma_xprt, struct ibv_mr *mr, uint32_t buffer_
 	io_buf->buffer_aligned = buffer_aligned;
 	io_buf->type = type;
 	io_buf->refs = 0;
+	io_buf->ready = false;
 	io_buf->ctx = (void *)rdma_xprt;
 
 	TAILQ_INSERT_TAIL(&rdma_xprt->io_bufs.qh, &io_buf->q, q);
@@ -1122,6 +1142,8 @@ xdr_rdma_add_outbufs_hdr(RDMAXPRT *rdma_xprt)
 
 	xdr_rdma_add_bufs_locked(rdma_xprt, mr, &rdma_xprt->outbufs_hdr, UV_HDR,
 	    rdma_xprt->sm_dr.send_hdr_sz, hdr_qdepth, b, io_buf);
+
+	io_buf->ready = true;
 }
 
 void
@@ -1157,6 +1179,8 @@ xdr_rdma_add_outbufs_data(RDMAXPRT *rdma_xprt)
 
 	xdr_rdma_add_bufs_locked(rdma_xprt, mr, &rdma_xprt->outbufs_data,
 	    UV_DATA, rdma_xprt->sm_dr.sendsz, data_qdepth, b, io_buf);
+
+	io_buf->ready = true;
 }
 
 void
@@ -1192,6 +1216,8 @@ xdr_rdma_add_inbufs_hdr(RDMAXPRT *rdma_xprt)
 
 	xdr_rdma_add_bufs_locked(rdma_xprt, mr, &rdma_xprt->inbufs_hdr, UV_HDR,
 	    rdma_xprt->sm_dr.recv_hdr_sz, hdr_qdepth, b, io_buf);
+
+	io_buf->ready = true;
 }
 
 void
@@ -1227,6 +1253,8 @@ xdr_rdma_add_inbufs_data(RDMAXPRT *rdma_xprt)
 
 	xdr_rdma_add_bufs_locked(rdma_xprt, mr, &rdma_xprt->inbufs_data,
 	    UV_DATA, rdma_xprt->sm_dr.recvsz, data_qdepth, b, io_buf);
+
+	io_buf->ready = true;
 }
 
 /*
@@ -1330,6 +1358,8 @@ xdr_rdma_create(RDMAXPRT *rdma_xprt)
 	xdr_rdma_add_bufs(rdma_xprt, rdma_xprt->mr, &rdma_xprt->outbufs_hdr, UV_HDR,
 	    rdma_xprt->sm_dr.send_hdr_sz, hdr_qdepth, b, io_buf);
 	b = b + (hdr_qdepth * rdma_xprt->sm_dr.send_hdr_sz);
+
+	io_buf->ready = true;
 
 	/* Keep enough cbc available to serve cbc allocation.
 	 * We allocate MAX_CBC_OUTSTANDING * 2 cbcs.
@@ -1466,6 +1496,8 @@ xdr_rdma_svc_recv(struct rpc_rdma_cbc *cbc, u_int32_t xid)
 	assert(cbc->sendq.ioq_uv.uvqh.qcount == 0);
 	assert(cbc->dataq.ioq_uv.uvqh.qcount == 0);
 	assert(cbc->freeq.ioq_uv.uvqh.qcount == 0);
+	assert(cbc->read_waits == 0);
+	assert(cbc->write_waits == 0);
 
 	/* Maintain max_outstanding */
 	xdr_rdma_callq(rdma_xprt);
@@ -1600,8 +1632,6 @@ xdr_rdma_svc_recv(struct rpc_rdma_cbc *cbc, u_int32_t xid)
 
 	assert(cbc->recvq.ioq_uv.uvqh.qcount == 0);
 
-	cbc->read_waits = 0;
-
 	while (rl(cbc->read_chunk)->present && status) {
 		l = ntohl(rl(cbc->read_chunk)->target.length);
 
@@ -1675,17 +1705,38 @@ xdr_rdma_svc_recv(struct rpc_rdma_cbc *cbc, u_int32_t xid)
 		offset = offset + l;
 	}
 
-	if (status == true) {
+	/* Wait for callback only if rdma_reads pending */
+	if ((status == true) && atomic_fetch_int32_t(&cbc->read_waits)) {
 		pthread_mutex_lock(&cbc->cb_done_mutex);
+
+		/* Check for race signaled before we wait
+		 * If read_waits > 1 then not signaled yet since we hold
+		 * cb_done_mutex */
 		if (atomic_fetch_int32_t(&cbc->read_waits)) {
+
 			/* Wait for all rdma_read callbacks to complete */
 			int rc = xdr_rdma_wait_cb_done_locked(cbc);
 
 			if (rc) {
 				__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s: Failed to "
-				    "get callback cbc %p cbc read_waits %d err %d",
+				    "get callback cbc %p cbc refs %d "
+				    "read_waits %d rdma_xprt %p err %s",
 				    __func__, cbc, cbc->refcnt, cbc->read_waits,
-				    rc);
+				    rdma_xprt, strerror(rc));
+
+				/* If connection is in closing state, then we don't expect any
+				 * callback, so release the refs on rdma_reads */
+				if ((rc == ETIMEDOUT) &&
+				    (rdma_xprt->state == RDMAXS_CLOSING)) {
+					__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s: cbc release "
+					    "for rdma_reads cbc %p xprt %p", __func__,
+					    cbc, rdma_xprt);
+					for (int i = 0;
+					    i < atomic_fetch_int32_t(&cbc->read_waits);
+					    i++) {
+						cbc_release_it(cbc);
+					}
+				}
 				status = false;
 			}
 		}

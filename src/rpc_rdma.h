@@ -108,8 +108,10 @@ struct rpc_rdma_cbc {
 	void *reply_chunk;	/* current in array */
 	void *call_data;
 	bool_t call_inline;
+	bool_t active;
 	int32_t refcnt;
 	int32_t read_waits;
+	int32_t write_waits;
 	uint16_t cbc_flags;
 	struct poolq_entry *have;
 	struct xdr_ioq_uv *data_chunk_uv;
@@ -154,10 +156,11 @@ struct rpc_rdma_pd {
 #define RDMA_DATA_CHUNK_SZ 1048576
 #define RDMA_HDR_CHUNKS(xa) MAX_CBC_OUTSTANDING(xa)
 #define RDMA_HDR_CHUNK_SZ 8192
-#define MAX_QP_WR(xa) ((xa)->credits * 16)
+#define MAX_QP_WR(xa) MAX(2048, ((xa)->credits * 16))
 #define MAX_CQ_SIZE(xa) (2 * MAX_QP_WR(xa))
 #define MAX_CBC_OUTSTANDING(xa) (xa)->credits
-#define MAX_CBC_ALLOCATION(xa) (MAX_CBC_OUTSTANDING(xa) * 2)
+/* Keep enough cbcs to avoid on demand allocation */
+#define MAX_CBC_ALLOCATION(xa) (MAX_CBC_OUTSTANDING(xa) * 3)
 #define MAX_RECV_OUTSTANDING(xa) MAX_CBC_OUTSTANDING(xa)
 
 /**
@@ -227,6 +230,7 @@ struct rpc_rdma_xprt {
 		RDMAXS_ROUTE_RESOLVED,
 		RDMAXS_CONNECT_REQUEST,
 		RDMAXS_CONNECTED,
+		RDMAXS_CLOSING,
 		RDMAXS_ERROR
 	} state;			/**< transport state machine */
 
@@ -304,6 +308,8 @@ static inline void cbc_release_it(struct rpc_rdma_cbc *cbc)
 	__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA, "%s: release_ref cbc %p ref %d "
 		"refs %d",
 		__func__, cbc, cbc->refcnt, refs);
+
+	assert(refs >= 0);
 
 	if ((refs == 0) && (cbc->cbc_flags & CBC_FLAG_RELEASE)) {
 		pthread_mutex_lock(&rdma_xprt->cbclist.qmutex);

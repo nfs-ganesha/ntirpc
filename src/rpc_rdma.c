@@ -59,7 +59,8 @@
 /*^ maximum number of events per poll */
 #define EPOLL_WAIT_MS (1000)
 /*^ ms check for rpc_rdma_state.run_count (was 100) */
-#define IBV_POLL_EVENTS (16)
+#define IBV_POLL_EVENTS (64)
+#define IBV_POLL_COUNT (2048)
 /*^ maximum number of events per poll */
 #define NSEC_IN_SEC (1000*1000*1000)
 
@@ -326,11 +327,13 @@ static void
 rdma_cleanup_cbcs(RDMAXPRT *rdma_xprt) {
 
 	int cleanup_count = 0;
+	struct poolq_head *ioqh = &rdma_xprt->cbclist;
 
 	__warnx(TIRPC_DEBUG_FLAG_EVENT, "%s() before cleanup "
-	    "%p xp_refcnt %d active requests %d",
+	    "%p xp_refcnt %d active requests %d qcount %d",
 	    __func__, &rdma_xprt->sm_dr.xprt,
-	    rdma_xprt->sm_dr.xprt.xp_refcnt, rdma_xprt->active_requests);
+	    rdma_xprt->sm_dr.xprt.xp_refcnt, rdma_xprt->active_requests,
+	    ioqh->qcount);
 
 
 	/* If cbclist is still not empty, then most likely we won't
@@ -338,10 +341,9 @@ rdma_cleanup_cbcs(RDMAXPRT *rdma_xprt) {
 	 * so just force remove outstanding cbcs and release refs.
 	 * pool_head may not be initialized, so check for qcount */
 
-	if (rdma_xprt->cbclist.qcount && !TAILQ_EMPTY(&rdma_xprt->cbclist.qh)) {
-		struct poolq_head *ioqh = &rdma_xprt->cbclist;
+	pthread_mutex_lock(&ioqh->qmutex);
 
-		pthread_mutex_lock(&ioqh->qmutex);
+	if (ioqh->qcount && !TAILQ_EMPTY(&ioqh->qh)) {
 
 		struct poolq_entry *have = TAILQ_FIRST(&ioqh->qh);
 
@@ -350,38 +352,52 @@ rdma_cleanup_cbcs(RDMAXPRT *rdma_xprt) {
 			struct rpc_rdma_cbc *cbc =
 				opr_containerof(have, struct rpc_rdma_cbc, cbc_list);
 
+			struct poolq_entry *next = TAILQ_NEXT(have, q);
+
 			__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA, "%s cbc %p refcnt %d "
 			    "rdma_xprt %p", __func__, cbc, cbc->refcnt, rdma_xprt);
 
-			cbc->cbc_flags = CBC_FLAG_RELEASE;
+			/* cbc->active indicates cq event received for RECV
+			 * before RDMA_CM_EVENT_TIMEWAIT_EXIT, so cq event handler
+			 * should release the cbc to avoid race */
+			if (cbc->active) {
+				/* Pending request should cleanup this cbc */
+				__warnx(TIRPC_DEBUG_FLAG_EVENT, "%s active cbc %p "
+				    "refcnt %d read_waits %d write_waits %d "
+				    "active requests %d rdma_xprt %p",
+				    __func__, cbc, cbc->refcnt, cbc->read_waits,
+				    cbc->write_waits, rdma_xprt->active_requests,
+				    rdma_xprt);
+			} else {
+				/* Cleanup cbc posted for recv,
+				 * there should not be any RECV event after
+				 * RDMA_CM_EVENT_TIMEWAIT_EXIT so safe to cleanup
+				 * without any race */
+				assert(cbc->refcnt == 1);
 
-			if (cbc->refcnt > 1) {
-				__warnx(TIRPC_DEBUG_FLAG_EVENT, "%s cbc %p refcnt %d "
-				    "active requests %d rdma_xprt %p", __func__, cbc,
-				    cbc->refcnt, rdma_xprt->active_requests, rdma_xprt);
+				cbc->cbc_flags = CBC_FLAG_RELEASE;
+
+				pthread_mutex_unlock(&ioqh->qmutex);
+
+				cbc_release_it(cbc);
+
+				cleanup_count++;
+
+				pthread_mutex_lock(&ioqh->qmutex);
 			}
 
-			pthread_mutex_unlock(&ioqh->qmutex);
-
-			cbc_release_it(cbc);
-
-			cleanup_count++;
-
-			pthread_mutex_lock(&ioqh->qmutex);
-
-			have = TAILQ_FIRST(&ioqh->qh);;
+			have = next;
 		}
-
-		assert(ioqh->qcount == 0);
-
-		pthread_mutex_unlock(&ioqh->qmutex);
 	}
 
+	pthread_mutex_unlock(&ioqh->qmutex);
+
 	__warnx(TIRPC_DEBUG_FLAG_EVENT, "%s() after cleanup "
-	    "%p xp_refcnt %d active requests %d cleanup count %d",
+	    "%p xp_refcnt %d active requests %d cleanup count %d "
+	    "qcount %d",
 	    __func__, &rdma_xprt->sm_dr.xprt,
 	    rdma_xprt->sm_dr.xprt.xp_refcnt, rdma_xprt->active_requests,
-	    cleanup_count);
+	    cleanup_count, ioqh->qcount);
 }
 
 /**
@@ -812,6 +828,7 @@ rpc_rdma_cq_event_handler(RDMAXPRT *rdma_xprt)
 	int rc;
 	int npoll = 0;
 	uint32_t len;
+	int poll_count = IBV_POLL_COUNT;
 
 	rc = ibv_get_cq_event(rdma_xprt->comp_channel, &ev_cq, &ev_ctx);
 	if (rc) {
@@ -839,7 +856,13 @@ rpc_rdma_cq_event_handler(RDMAXPRT *rdma_xprt)
 		return rc;
 	}
 
-	while ((npoll = ibv_poll_cq(rdma_xprt->cq, IBV_POLL_EVENTS, wc)) > 0) {
+	while (poll_count-- &&
+	    ((npoll = ibv_poll_cq(rdma_xprt->cq, IBV_POLL_EVENTS, wc)) > 0)) {
+
+		__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA, "%s: npoll %d "
+		    "poll_count %d xprt %p",
+		    __func__, npoll, poll_count);
+
 		for (i = 0; i < npoll; i++) {
 			if (rdma_xprt->bad_recv_wr) {
 				__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA,
@@ -859,6 +882,7 @@ rpc_rdma_cq_event_handler(RDMAXPRT *rdma_xprt)
 			cbc->opcode = wc[i].opcode;
 			cbc->status = wc[i].status;
 			cbc->wpe.arg = rdma_xprt;
+			cbc->active = true;
 
 			if (wc[i].status) {
 				rc = -1;
@@ -1190,7 +1214,9 @@ rpc_rdma_cm_event_handler(RDMAXPRT *ep_rdma_xprt, struct rdma_cm_event *event)
 		    "%s() %p[%u] RDMA_CM_EVENT_TIMEWAIT_EXIT",
 		    __func__, rdma_xprt, rdma_xprt->state);
 
+		rdma_xprt->state = RDMAXS_CLOSING;
 		rdma_cleanup_cbcs(rdma_xprt);
+		SVC_RELEASE(&rdma_xprt->sm_dr.xprt, SVC_REF_FLAG_NONE);
 
 		break;
 
