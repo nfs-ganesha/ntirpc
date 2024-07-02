@@ -824,7 +824,7 @@ again:
 			/* HA Proxy V2? */
 			uint32_t rest[2];
 			struct proxy_header_part s;
-			union proxy_addr *pa;
+			union proxy_addr pa;
 
 			rlen = recv(xprt->xp_fd, rest, sizeof(rest),
 				    MSG_WAITALL);
@@ -859,8 +859,16 @@ again:
 			}
 
 			s.len = ntohs(s.len);
-			pa = mem_zalloc(s.len);
-			rlen = recv(xprt->xp_fd, pa, s.len, MSG_WAITALL);
+			if (unlikely(s.len > sizeof(pa))) {
+				__warnx(TIRPC_DEBUG_FLAG_ERROR,
+					"%s: %p fd %d incorrect proxy header "
+					"addr len = %z (will set dead)",
+				__func__, xprt, xprt->xp_fd, s.len);
+				SVC_DESTROY(xprt);
+				return SVC_STAT(xprt);
+			}
+
+			rlen = recv(xprt->xp_fd, &pa, s.len, MSG_WAITALL);
 
 			if (rlen != s.len) {
 				__warnx(TIRPC_DEBUG_FLAG_ERROR,
@@ -889,6 +897,15 @@ again:
 					return SVC_STAT(xprt);
 				}
 				if (s.fam == PP2_TRANS_STREAM_FAM_INET) {
+					if (unlikely(s.len != sizeof(pa.ip4))) {
+						__warnx(TIRPC_DEBUG_FLAG_ERROR,
+							"%s: %p fd %d incorrect "
+							"proxy header ipv4 addr "
+							"len = %z (will set dead)",
+						__func__, xprt, xprt->xp_fd, s.len);
+						SVC_DESTROY(xprt);
+						return SVC_STAT(xprt);
+					}
 					struct sockaddr_in *ss4;
 
 					xprt->xp_proxy = xprt->xp_remote;
@@ -896,12 +913,21 @@ again:
 							&xprt->xp_remote.ss;
 					ss4->sin_family = AF_INET;
 					memcpy(&ss4->sin_addr,
-					       &pa->ip4.src_addr,
+					       &pa.ip4.src_addr,
 					       sizeof(struct in_addr));
-					ss4->sin_port = pa->ip4.src_port;
+					ss4->sin_port = pa.ip4.src_port;
 
 				} else if (s.fam ==
 						   PP2_TRANS_STREAM_FAM_INET6) {
+					if (unlikely(s.len != sizeof(pa.ip6))) {
+						__warnx(TIRPC_DEBUG_FLAG_ERROR,
+							"%s: %p fd %d incorrect "
+							"proxy header ipv6 addr "
+							"len = %z (will set dead)",
+						__func__, xprt, xprt->xp_fd, s.len);
+						SVC_DESTROY(xprt);
+						return SVC_STAT(xprt);
+					}
 					struct sockaddr_in6 *ss6;
 
 					xprt->xp_proxy = xprt->xp_remote;
@@ -909,9 +935,9 @@ again:
 							&xprt->xp_remote.ss;
 					xprt->xp_remote.ss.ss_family = AF_INET6;
 					memcpy(&ss6->sin6_addr,
-					       &pa->ip6.src_addr,
+					       &pa.ip6.src_addr,
 					       sizeof(struct in6_addr));
-					ss6->sin6_port = pa->ip6.src_port;
+					ss6->sin6_port = pa.ip6.src_port;
 
 				} else {
 					/* NOTE: we don't support UNIX or UDP
