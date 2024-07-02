@@ -826,8 +826,9 @@ again:
 			struct proxy_header_part s;
 			union proxy_addr pa;
 
+			/* PEEK in order not to consume a non haproxy packet */
 			rlen = recv(xprt->xp_fd, rest, sizeof(rest),
-				    MSG_WAITALL);
+				    MSG_WAITALL | MSG_PEEK);
 			if (rlen != sizeof(rest)) {
 				__warnx(TIRPC_DEBUG_FLAG_ERROR,
 					"%s: %p fd %d proxy header failed rest rlen = %z (will set dead)",
@@ -840,9 +841,20 @@ again:
 
 			if (rest[0] != PP2_SIG_UINT32_2 ||
 			    rest[1] != PP2_SIG_UINT32_3) {
-				__warnx(TIRPC_DEBUG_FLAG_ERROR,
-					"%s: %p fd %d proxy header failed rest1=%08x rest2=%08x (will set dead)",
+				__warnx(TIRPC_DEBUG_FLAG_WARN,
+					"%s: %p fd %d proxy header failed rest1=%08x rest2=%08x (treat as regular rpc packet)",
 				__func__, xprt, xprt->xp_fd, (int) rest[0], (int) rest[1]);
+				/* The signature does not fully match, treat
+				 * packet as a regular rpc packet.*/
+				goto rpc_req;
+			}
+
+			rlen = recv(xprt->xp_fd, rest, sizeof(rest),
+				    MSG_WAITALL);
+			if (rlen != sizeof(rest)) {
+				__warnx(TIRPC_DEBUG_FLAG_ERROR,
+					"%s: %p fd %d proxy header failed rest rlen = %z (will set dead)",
+				__func__, xprt, xprt->xp_fd, rlen);
 				SVC_DESTROY(xprt);
 				return SVC_STAT(xprt);
 			}
@@ -987,7 +999,7 @@ again:
 			return SVC_STAT(xprt);
 			/* return (XPRT_IDLE); */
 		}
-	
+rpc_req:
 		flags = UIO_FLAG_FREE | UIO_FLAG_MORE;
 
 		if (xd->sx_fbtbc & LAST_FRAG) {
