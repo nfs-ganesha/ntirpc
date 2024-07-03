@@ -732,6 +732,184 @@ static bool is_rpc_address_initialized(struct rpc_address* address) {
 	return address->ss.ss_family != 0;
 }
 
+enum haproxy_ret_code {
+       HAPROXY_RET_CODE__SUCCESS = 0,
+       HAPROXY_RET_CODE__FAILURE,
+       HAPROXY_RET_CODE__IGNORE_LOCAL,
+       HAPROXY_RET_CODE__NOT_HAPROXY
+};
+
+static enum haproxy_ret_code handle_haproxy_header(SVCXPRT *xprt)
+{
+	/* HA Proxy V2? */
+	ssize_t rlen;
+	uint32_t rest[2];
+	struct proxy_header_part s;
+	union proxy_addr pa;
+	enum haproxy_ret_code ret;
+
+	__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
+			"%s: %p fd %d potential haproxy packet",
+			__func__, xprt, xprt->xp_fd);
+
+	/* PEEK in order not to consume a non haproxy packet */
+	rlen = recv(xprt->xp_fd, rest, sizeof(rest), MSG_WAITALL | MSG_PEEK);
+	if (rlen != sizeof(rest)) {
+		__warnx(TIRPC_DEBUG_FLAG_ERROR,
+			"%s: %p fd %d proxy header failed rest rlen = %z "
+			"(will set dead)",
+			__func__, xprt, xprt->xp_fd, rlen);
+		return HAPROXY_RET_CODE__FAILURE;
+	}
+	rest[0] = ntohl(rest[0]);
+	rest[1] = ntohl(rest[1]);
+
+	if (rest[0] != PP2_SIG_UINT32_2 || rest[1] != PP2_SIG_UINT32_3) {
+		__warnx(TIRPC_DEBUG_FLAG_WARN,
+			"%s: %p fd %d proxy header failed rest1=%08x rest2=%08x "
+			"(treat as regular rpc packet)",
+			__func__, xprt, xprt->xp_fd, (int) rest[0],
+			(int) rest[1]);
+		/* The signature does not fully match.
+		 * Flow should treat the packet as a regular rpc packet.*/
+		return HAPROXY_RET_CODE__NOT_HAPROXY;
+	}
+
+	rlen = recv(xprt->xp_fd, rest, sizeof(rest), MSG_WAITALL);
+	if (rlen != sizeof(rest)) {
+		__warnx(TIRPC_DEBUG_FLAG_ERROR,
+			"%s: %p fd %d proxy header failed rest rlen = %z "
+			"(will set dead)",
+			__func__, xprt, xprt->xp_fd, rlen);
+		return HAPROXY_RET_CODE__FAILURE;
+	}
+
+	rlen = recv(xprt->xp_fd, &s, sizeof(s), MSG_WAITALL);
+
+	if (rlen != sizeof(s)) {
+		__warnx(TIRPC_DEBUG_FLAG_ERROR,
+			"%s: %p fd %d proxy header failed header rlen = %z "
+			"(will set dead)",
+			__func__, xprt, xprt->xp_fd, rlen);
+		return HAPROXY_RET_CODE__FAILURE;
+	}
+
+	s.len = ntohs(s.len);
+	if (unlikely(s.len > sizeof(pa))) {
+		__warnx(TIRPC_DEBUG_FLAG_ERROR,
+			"%s: %p fd %d incorrect proxy header "
+			"addr len = %z (will set dead)",
+			__func__, xprt, xprt->xp_fd, s.len);
+		return HAPROXY_RET_CODE__FAILURE;
+	}
+
+	rlen = recv(xprt->xp_fd, &pa, s.len, MSG_WAITALL);
+
+	if (rlen != s.len) {
+		__warnx(TIRPC_DEBUG_FLAG_ERROR,
+			"%s: %p fd %d proxy header rest len failed header "
+			"rlen = %z (will set dead)",
+			__func__, xprt, xprt->xp_fd, rlen);
+		return HAPROXY_RET_CODE__FAILURE;
+	}
+
+	if (s.ver_cmd == PP2_VERSIOB2_CMD_PROXY) {
+		if (unlikely(is_rpc_address_initialized(&xprt->xp_proxy))) {
+			/* We don't allow more than one proxy protocol packet.
+			   Allowing it will cause a security vulnerability where
+			   at any point the client could sent a PP packet and
+			   change its IP to circumvent any IP based access rules.
+			*/
+			__warnx(TIRPC_DEBUG_FLAG_WARN,
+				"%s: %p fd %d got more than one PP packet. "
+				"This is not allowed - terminating",
+				__func__, xprt, xprt->xp_fd);
+			return HAPROXY_RET_CODE__FAILURE;
+		}
+		if (s.fam == PP2_TRANS_STREAM_FAM_INET) {
+			if (unlikely(s.len < sizeof(pa.ip4))) {
+				__warnx(TIRPC_DEBUG_FLAG_ERROR,
+					"%s: %p fd %d incorrect proxy header "
+					"ipv4 addr len = %z (will set dead)",
+					__func__, xprt, xprt->xp_fd, s.len);
+				return HAPROXY_RET_CODE__FAILURE;
+			}
+			struct sockaddr_in *ss4;
+
+			xprt->xp_proxy = xprt->xp_remote;
+			ss4 = (struct sockaddr_in *)
+					&xprt->xp_remote.ss;
+			ss4->sin_family = AF_INET;
+			memcpy(&ss4->sin_addr,
+			       &pa.ip4.src_addr,
+			       sizeof(struct in_addr));
+			ss4->sin_port = pa.ip4.src_port;
+
+		} else if (s.fam ==
+				   PP2_TRANS_STREAM_FAM_INET6) {
+			if (unlikely(s.len < sizeof(pa.ip6))) {
+				__warnx(TIRPC_DEBUG_FLAG_ERROR,
+					"%s: %p fd %d incorrect proxy header "
+					"ipv6 addr len = %z (will set dead)",
+					__func__, xprt, xprt->xp_fd, s.len);
+				return HAPROXY_RET_CODE__FAILURE;
+			}
+			struct sockaddr_in6 *ss6;
+
+			xprt->xp_proxy = xprt->xp_remote;
+			ss6 = (struct sockaddr_in6 *)
+					&xprt->xp_remote.ss;
+			xprt->xp_remote.ss.ss_family = AF_INET6;
+			memcpy(&ss6->sin6_addr,
+			       &pa.ip6.src_addr,
+			       sizeof(struct in6_addr));
+			ss6->sin6_port = pa.ip6.src_port;
+
+		} else {
+			/* NOTE: we don't support UNIX or UDP
+			 * sockets
+			 */
+			__warnx(TIRPC_DEBUG_FLAG_ERROR,
+				"%s: %p fd %d invalid proxy protocol = %0x2 "
+				"(will set dead)",
+				__func__, xprt, xprt->xp_fd, (int) s.fam);
+			return HAPROXY_RET_CODE__FAILURE;
+		}
+
+		return HAPROXY_RET_CODE__SUCCESS;
+
+	} else if (s.ver_cmd == PP2_VERSION2_CMD_LOCAL) {
+		__warnx(TIRPC_DEBUG_FLAG_EVENT,
+			"%s: %p fd %d proxy ignored for local",
+			__func__, xprt, xprt->xp_fd);
+		ret = HAPROXY_RET_CODE__IGNORE_LOCAL;
+	} else {
+		__warnx(TIRPC_DEBUG_FLAG_ERROR,
+			"%s: %p fd %d invalid proxy command = %0x2 (will set dead)",
+			__func__, xprt, xprt->xp_fd,(int) s.ver_cmd);
+		return HAPROXY_RET_CODE__FAILURE;
+	}
+
+	if (unlikely(svc_rqst_rearm_events(xprt,
+				   SVC_XPRT_FLAG_ADDED_RECV))) {
+		__warnx(TIRPC_DEBUG_FLAG_ERROR,
+			"%s: %p fd %d svc_rqst_rearm_events failed (will set dead)",
+			__func__, xprt, xprt->xp_fd);
+		ret = HAPROXY_RET_CODE__FAILURE;
+#ifndef USE_LTTNG_NTIRPC
+	}
+#else
+		tracepoint(xprt, recv_exit, __func__, __LINE__,
+			   xprt, "REARM FAILED", -1);
+	} else {
+		tracepoint(xprt, recv_exit, __func__, __LINE__,
+			   xprt, "MORE", 0);
+	}
+#endif /* USE_LTTNG_NTIRPC */
+
+	return ret;
+}
+
 static enum xprt_stat
 svc_vc_recv(SVCXPRT *xprt)
 {
@@ -822,184 +1000,22 @@ again:
 
 		if (xd->sx_fbtbc == PP2_SIG_UINT32) {
 			/* HA Proxy V2? */
-			uint32_t rest[2];
-			struct proxy_header_part s;
-			union proxy_addr pa;
-
-			/* PEEK in order not to consume a non haproxy packet */
-			rlen = recv(xprt->xp_fd, rest, sizeof(rest),
-				    MSG_WAITALL | MSG_PEEK);
-			if (rlen != sizeof(rest)) {
-				__warnx(TIRPC_DEBUG_FLAG_ERROR,
-					"%s: %p fd %d proxy header failed rest rlen = %z (will set dead)",
-				__func__, xprt, xprt->xp_fd, rlen);
-				SVC_DESTROY(xprt);
-				return SVC_STAT(xprt);
-			}
-			rest[0] = ntohl(rest[0]);
-			rest[1] = ntohl(rest[1]);
-
-			if (rest[0] != PP2_SIG_UINT32_2 ||
-			    rest[1] != PP2_SIG_UINT32_3) {
-				__warnx(TIRPC_DEBUG_FLAG_WARN,
-					"%s: %p fd %d proxy header failed rest1=%08x rest2=%08x (treat as regular rpc packet)",
-				__func__, xprt, xprt->xp_fd, (int) rest[0], (int) rest[1]);
-				/* The signature does not fully match, treat
-				 * packet as a regular rpc packet.*/
-				goto rpc_req;
-			}
-
-			rlen = recv(xprt->xp_fd, rest, sizeof(rest),
-				    MSG_WAITALL);
-			if (rlen != sizeof(rest)) {
-				__warnx(TIRPC_DEBUG_FLAG_ERROR,
-					"%s: %p fd %d proxy header failed rest rlen = %z (will set dead)",
-				__func__, xprt, xprt->xp_fd, rlen);
-				SVC_DESTROY(xprt);
-				return SVC_STAT(xprt);
-			}
-
-			rlen = recv(xprt->xp_fd, &s, sizeof(s),
-				    MSG_WAITALL);
-
-			if (rlen != sizeof(s)) {
-				__warnx(TIRPC_DEBUG_FLAG_ERROR,
-					"%s: %p fd %d proxy header failed header rlen = %z (will set dead)",
-				__func__, xprt, xprt->xp_fd, rlen);
-				SVC_DESTROY(xprt);
-				return SVC_STAT(xprt);
-			}
-
-			s.len = ntohs(s.len);
-			if (unlikely(s.len > sizeof(pa))) {
-				__warnx(TIRPC_DEBUG_FLAG_ERROR,
-					"%s: %p fd %d incorrect proxy header "
-					"addr len = %z (will set dead)",
-				__func__, xprt, xprt->xp_fd, s.len);
-				SVC_DESTROY(xprt);
-				return SVC_STAT(xprt);
-			}
-
-			rlen = recv(xprt->xp_fd, &pa, s.len, MSG_WAITALL);
-
-			if (rlen != s.len) {
-				__warnx(TIRPC_DEBUG_FLAG_ERROR,
-					"%s: %p fd %d proxy header rest len failed header rlen = %z (will set dead)",
-				__func__, xprt, xprt->xp_fd, rlen);
-				SVC_DESTROY(xprt);
-				return SVC_STAT(xprt);
-			}
-
-			if (s.ver_cmd == PP2_VERSIOB2_CMD_PROXY) {
-				if (unlikely(is_rpc_address_initialized(
-						&xprt->xp_proxy))) {
-					/* We don't allow more than one proxy
-					   protocol packet. Allowing it will
-					   cause a security vulnerability where
-					   at any point the client could sent a
-					   PP packet and change its IP to
-					   circumvent any IP based access rules.
-					*/
-					__warnx(TIRPC_DEBUG_FLAG_WARN,
-						"%s: %p fd %d got more than "
-						"one PP packet. This is not "
-						"allowed - terminating",
-						__func__, xprt, xprt->xp_fd);
-					SVC_DESTROY(xprt);
-					return SVC_STAT(xprt);
-				}
-				if (s.fam == PP2_TRANS_STREAM_FAM_INET) {
-					if (unlikely(s.len != sizeof(pa.ip4))) {
-						__warnx(TIRPC_DEBUG_FLAG_ERROR,
-							"%s: %p fd %d incorrect "
-							"proxy header ipv4 addr "
-							"len = %z (will set dead)",
-						__func__, xprt, xprt->xp_fd, s.len);
-						SVC_DESTROY(xprt);
-						return SVC_STAT(xprt);
-					}
-					struct sockaddr_in *ss4;
-
-					xprt->xp_proxy = xprt->xp_remote;
-					ss4 = (struct sockaddr_in *)
-							&xprt->xp_remote.ss;
-					ss4->sin_family = AF_INET;
-					memcpy(&ss4->sin_addr,
-					       &pa.ip4.src_addr,
-					       sizeof(struct in_addr));
-					ss4->sin_port = pa.ip4.src_port;
-
-				} else if (s.fam ==
-						   PP2_TRANS_STREAM_FAM_INET6) {
-					if (unlikely(s.len != sizeof(pa.ip6))) {
-						__warnx(TIRPC_DEBUG_FLAG_ERROR,
-							"%s: %p fd %d incorrect "
-							"proxy header ipv6 addr "
-							"len = %z (will set dead)",
-						__func__, xprt, xprt->xp_fd, s.len);
-						SVC_DESTROY(xprt);
-						return SVC_STAT(xprt);
-					}
-					struct sockaddr_in6 *ss6;
-
-					xprt->xp_proxy = xprt->xp_remote;
-					ss6 = (struct sockaddr_in6 *)
-							&xprt->xp_remote.ss;
-					xprt->xp_remote.ss.ss_family = AF_INET6;
-					memcpy(&ss6->sin6_addr,
-					       &pa.ip6.src_addr,
-					       sizeof(struct in6_addr));
-					ss6->sin6_port = pa.ip6.src_port;
-
-				} else {
-					/* NOTE: we don't support UNIX or UDP
-					 * sockets
-					 */
-					__warnx(TIRPC_DEBUG_FLAG_ERROR,
-						"%s: %p fd %d invalid proxy protocol = %0x2 (will set dead)",
-						__func__, xprt, xprt->xp_fd,
-						(int) s.fam);
-					SVC_DESTROY(xprt);
-					return SVC_STAT(xprt);
-				}
-
+			enum haproxy_ret_code ret = handle_haproxy_header(xprt);
+			switch (ret) {
+			case HAPROXY_RET_CODE__SUCCESS:
 				/* Now look to see if there's more... */
 				hap_again = true;
 				goto again;
-
-			} else if (s.ver_cmd == PP2_VERSION2_CMD_LOCAL) {
-				__warnx(TIRPC_DEBUG_FLAG_EVENT,
-					"%s: %p fd %d proxy ignored for local",
-					__func__, xprt, xprt->xp_fd);
-			} else {
-				__warnx(TIRPC_DEBUG_FLAG_ERROR,
-					"%s: %p fd %d invalid proxy command = %0x2 (will set dead)",
-					__func__, xprt, xprt->xp_fd,
-					(int) s.ver_cmd);
+			case HAPROXY_RET_CODE__FAILURE:
 				SVC_DESTROY(xprt);
 				return SVC_STAT(xprt);
+			case HAPROXY_RET_CODE__IGNORE_LOCAL:
+				return SVC_STAT(xprt);
+			case HAPROXY_RET_CODE__NOT_HAPROXY:
+				break;
 			}
-
-			if (unlikely(svc_rqst_rearm_events(xprt,
-						   SVC_XPRT_FLAG_ADDED_RECV))) {
-				__warnx(TIRPC_DEBUG_FLAG_ERROR,
-					"%s: %p fd %d svc_rqst_rearm_events failed (will set dead)",
-				__func__, xprt, xprt->xp_fd);
-				SVC_DESTROY(xprt);
-#ifndef USE_LTTNG_NTIRPC
-			}
-#else
-				tracepoint(xprt, recv_exit, __func__, __LINE__,
-					   xprt, "REARM FAILED", -1);
-			} else {
-				tracepoint(xprt, recv_exit, __func__, __LINE__,
-					   xprt, "MORE", 0);
-			}
-#endif /* USE_LTTNG_NTIRPC */
-			return SVC_STAT(xprt);
-			/* return (XPRT_IDLE); */
 		}
-rpc_req:
+
 		flags = UIO_FLAG_FREE | UIO_FLAG_MORE;
 
 		if (xd->sx_fbtbc & LAST_FRAG) {
