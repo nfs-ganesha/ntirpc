@@ -235,7 +235,7 @@ xdr_rdma_destroy_callback_send(struct rpc_rdma_cbc *cbc, RDMAXPRT *rdma_xprt)
 	int ret = 0;
 	int write_waits = atomic_dec_int32_t(&cbc->write_waits);
 
-	__warnx(TIRPC_DEBUG_FLAG_XDR,
+	__warnx(TIRPC_DEBUG_FLAG_ERROR,
 	    "%s() %p[%u] cbc %p refs %d write_waits %d\n",
 	    __func__, rdma_xprt, rdma_xprt->state, cbc,
 	    cbc->refcnt, write_waits);
@@ -282,7 +282,8 @@ static int
 xdr_rdma_destroy_callback(struct rpc_rdma_cbc *cbc, RDMAXPRT *rdma_xprt)
 {
 	int ret = 0;
-	__warnx(TIRPC_DEBUG_FLAG_XDR,
+
+	__warnx(TIRPC_DEBUG_FLAG_ERROR,
 		"%s() %p[%u] cbc %p\n",
 		__func__, rdma_xprt, rdma_xprt->state, cbc);
 
@@ -672,13 +673,15 @@ xdr_rdma_async_send_cb(RDMAXPRT *rdma_xprt, struct rpc_rdma_cbc *cbc, int sge)
 	cbc->negative_cb = xdr_rdma_destroy_callback_send;
 	cbc->callback_arg = NULL;
 	cbc->call_inline = 1;
-	int32_t write_waits = atomic_dec_int32_t(&cbc->write_waits);
+	int32_t write_waits = atomic_inc_int32_t(&cbc->write_waits);
 
 	cbc_ref_it(cbc, rdma_xprt);
 
 	ret = xdr_rdma_post_send_n(rdma_xprt, cbc, sge, NULL, IBV_WR_SEND);
 
 	if (ret) {
+		write_waits = atomic_dec_int32_t(&cbc->write_waits);
+
 		cbc_release_it(cbc);
 
 		SVC_DESTROY(&rdma_xprt->sm_dr.xprt);

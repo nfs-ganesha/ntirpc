@@ -106,9 +106,9 @@ rpc_rdma_internals_init(void)
 static void
 rpc_rdma_internals_join(void)
 {
-	if (rpc_rdma_state.cm_thread) {
-		pthread_join(rpc_rdma_state.cm_thread, NULL);
-		rpc_rdma_state.cm_thread = 0;
+	if (rpc_rdma_state.cm_thread_id) {
+		pthread_join(rpc_rdma_state.cm_thread_id, NULL);
+		rpc_rdma_state.cm_thread_id = 0;
 	}
 
 	int i = 0;
@@ -118,9 +118,9 @@ rpc_rdma_internals_join(void)
 			rpc_rdma_state.cq_thread_ids[i] = 0;
 		}
 	}
-	if (rpc_rdma_state.stats_thread) {
-		pthread_join(rpc_rdma_state.stats_thread, NULL);
-		rpc_rdma_state.stats_thread = 0;
+	if (rpc_rdma_state.stats_thread_id) {
+		pthread_join(rpc_rdma_state.stats_thread_id, NULL);
+		rpc_rdma_state.stats_thread_id = 0;
 	}
 }
 
@@ -349,6 +349,9 @@ rdma_cleanup_cbcs(RDMAXPRT *rdma_xprt) {
 
 		/* release queued buffers */
 		while (have) {
+			bool cbc_release = true;
+			int cbc_release_count = 1;
+
 			struct rpc_rdma_cbc *cbc =
 				opr_containerof(have, struct rpc_rdma_cbc, cbc_list);
 
@@ -360,7 +363,27 @@ rdma_cleanup_cbcs(RDMAXPRT *rdma_xprt) {
 			/* cbc->active indicates cq event received for RECV
 			 * before RDMA_CM_EVENT_TIMEWAIT_EXIT, so cq event handler
 			 * should release the cbc to avoid race */
-			if (cbc->active) {
+
+			if (cbc->active)
+				cbc_release = false;
+
+			/* If there are rdma_writes or send completion pending
+			 * then pending request can't cleanup cbc since we won't
+			 * get any completion afte RDMA_CM_EVENT_TIMEWAIT_EXIT */
+
+			if (cbc->write_waits) {
+				cbc_release = true;
+				cbc_release_count = cbc->write_waits;
+
+				__warnx(TIRPC_DEBUG_FLAG_EVENT, "%s active cbc %p "
+				    "refcnt %d read_waits %d write_waits %d "
+				    "active requests %d rdma_xprt %p",
+				    __func__, cbc, cbc->refcnt, cbc->read_waits,
+				    cbc->write_waits, rdma_xprt->active_requests,
+				    rdma_xprt);
+			}
+
+			if (!cbc_release) {
 				/* Pending request should cleanup this cbc */
 				__warnx(TIRPC_DEBUG_FLAG_EVENT, "%s active cbc %p "
 				    "refcnt %d read_waits %d write_waits %d "
@@ -369,17 +392,18 @@ rdma_cleanup_cbcs(RDMAXPRT *rdma_xprt) {
 				    cbc->write_waits, rdma_xprt->active_requests,
 				    rdma_xprt);
 			} else {
-				/* Cleanup cbc posted for recv,
-				 * there should not be any RECV event after
+				/* Cleanup cbc posted for recv or waiting write/send
+				 * completions, there should not be completion  after
 				 * RDMA_CM_EVENT_TIMEWAIT_EXIT so safe to cleanup
 				 * without any race */
-				assert(cbc->refcnt == 1);
+				assert(cbc->refcnt > 0);
 
 				cbc->cbc_flags = CBC_FLAG_RELEASE;
 
 				pthread_mutex_unlock(&ioqh->qmutex);
 
-				cbc_release_it(cbc);
+				while(cbc_release_count--)
+					cbc_release_it(cbc);
 
 				cleanup_count++;
 
@@ -1798,7 +1822,7 @@ rpc_rdma_setup_stuff(RDMAXPRT *rdma_xprt)
 	}
 
 	if (rdma_xprt->xa->statistics_prefix != NULL
-	 && (rc = rpc_rdma_thread_create_epoll(&rpc_rdma_state.stats_thread,
+	 && (rc = rpc_rdma_thread_create_epoll(&rpc_rdma_state.stats_thread_id,
 		rpc_rdma_stats_thread, rdma_xprt, &rpc_rdma_state.stats_epollfd))) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s:%u ERROR (return)",
@@ -2001,7 +2025,7 @@ rpc_rdma_bind_server(RDMAXPRT *rdma_xprt)
 	rdma_xprt->state = RDMAXS_LISTENING;
 	atomic_inc_int32_t(&rpc_rdma_state.run_count);
 
-	rc = rpc_rdma_thread_create_epoll(&rpc_rdma_state.cm_thread,
+	rc = rpc_rdma_thread_create_epoll(&rpc_rdma_state.cm_thread_id,
 		rpc_rdma_cm_thread, rdma_xprt, &rpc_rdma_state.cm_epollfd);
 	if (rc) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
@@ -2371,7 +2395,7 @@ rpc_rdma_connect(RDMAXPRT *rdma_xprt)
 		return EINVAL;
 	}
 
-	rc = rpc_rdma_thread_create_epoll(&rpc_rdma_state.cm_thread,
+	rc = rpc_rdma_thread_create_epoll(&rpc_rdma_state.cm_thread_id,
 		rpc_rdma_cm_thread, rdma_xprt, &rpc_rdma_state.cm_epollfd);
 	if (rc) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
