@@ -261,7 +261,7 @@ clnt_vc_ncreatef(const int fd,	/* open file descriptor */
  * Get the transport handle for a given rpc_client.
  */
 SVCXPRT *
-clnt_vc_get_client_xprt(const CLIENT *clnt)
+clnt_vc_get_client_xprt(const struct rpc_client *clnt)
 {
 	if (clnt == NULL)
 		return NULL;

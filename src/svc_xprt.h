@@ -32,6 +32,10 @@
 #include <misc/portable.h>
 #include <misc/rbtree_x.h>
 
+#ifdef USE_RPC_RDMA
+#include "rpc_rdma.h"
+#endif
+
 /**
  * @file svc_xprt.h
  * @contributeur William Allen Simpson <bill@cohortfs.com>
@@ -65,4 +69,7 @@ int svc_xprt_foreach(svc_xprt_each_func_t, void *);
 void svc_xprt_dump_xprts(const char *);
 void svc_xprt_shutdown(void);
 
+#ifdef USE_RPC_RDMA
+int svc_rdma_add_xprt_fd(SVCXPRT *xprt);
+#endif
 #endif				/* TIRPC_SVC_XPRT_H */

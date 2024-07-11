@@ -240,6 +240,8 @@ svc_init(svc_init_params *params)
 
 #ifdef USE_RPC_RDMA
 	rpc_rdma_internals_init();
+	__svc_params->nfs_rdma_port = params->nfs_rdma_port;
+	__svc_params->max_rdma_connections = params->max_rdma_connections;
 #endif
 
 	__svc_params->initialized = true;

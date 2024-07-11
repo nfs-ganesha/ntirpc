@@ -69,52 +69,93 @@ enum xprt_stat
 svc_rdma_rendezvous(SVCXPRT *xprt)
 {
 	struct sockaddr_storage *ss;
-	RDMAXPRT *req_xd = RDMA_DR(REC_XPRT(xprt));
-	RDMAXPRT *xd = rpc_rdma_accept_wait(req_xd,
-					    __svc_params->idle_timeout);
+	RDMAXPRT *req_rdma_xprt = RDMA_DR(REC_XPRT(xprt));
 
-	if (!xd) {
+	RDMAXPRT *rdma_xprt = rpc_rdma_accept_wait(req_rdma_xprt,
+					           __svc_params->idle_timeout);
+
+	if (!rdma_xprt) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s:%u ERROR (return)",
 			__func__, __LINE__);
 		return (XPRT_DIED);
 	}
 
-	xd->sm_dr.xprt.xp_flags = SVC_XPRT_FLAG_CLOSE
-				| SVC_XPRT_FLAG_INITIAL
+	/* We don't manage socket fd for rdma */
+	rdma_xprt->sm_dr.xprt.xp_flags = SVC_XPRT_FLAG_INITIAL
 				| SVC_XPRT_FLAG_INITIALIZED;
-	/* fixme: put something here, but make it not work on fd operations. */
-	xd->sm_dr.xprt.xp_fd = -1;
 
-	ss = (struct sockaddr_storage *)rdma_get_local_addr(xd->cm_id);
-	__rpc_address_setup(&xd->sm_dr.xprt.xp_local);
-	memcpy(&xd->sm_dr.xprt.xp_local.nb.buf, ss,
-		xd->sm_dr.xprt.xp_local.nb.len);
+	ss = (struct sockaddr_storage *)rdma_get_local_addr(rdma_xprt->cm_id);
+	__rpc_address_setup(&rdma_xprt->sm_dr.xprt.xp_local);
+	memcpy(rdma_xprt->sm_dr.xprt.xp_local.nb.buf, ss,
+		rdma_xprt->sm_dr.xprt.xp_local.nb.len);
 
-	ss = (struct sockaddr_storage *)rdma_get_peer_addr(xd->cm_id);
-	__rpc_address_setup(&xd->sm_dr.xprt.xp_remote);
-	memcpy(&xd->sm_dr.xprt.xp_remote.nb.buf, ss,
-		xd->sm_dr.xprt.xp_remote.nb.len);
+	ss = (struct sockaddr_storage *)rdma_get_peer_addr(rdma_xprt->cm_id);
+	__rpc_address_setup(&rdma_xprt->sm_dr.xprt.xp_remote);
+	memcpy(rdma_xprt->sm_dr.xprt.xp_remote.nb.buf, ss,
+		rdma_xprt->sm_dr.xprt.xp_remote.nb.len);
 
-	svc_rdma_ops(&xd->sm_dr.xprt);
+	__warnx(TIRPC_DEBUG_FLAG_EVENT,
+		"%s:%u local %p remote %p xprt %p", __func__, __LINE__,
+		&rdma_xprt->sm_dr.xprt.xp_local.nb,
+		&rdma_xprt->sm_dr.xprt.xp_remote.nb,
+		&rdma_xprt->sm_dr.xprt);
 
-	if (xdr_rdma_create(xd)) {
-		SVC_DESTROY(&xd->sm_dr.xprt);
+	svc_rdma_ops(&rdma_xprt->sm_dr.xprt);
+	rdma_xprt->sm_dr.recvsz = req_rdma_xprt->sm_dr.recvsz;
+	rdma_xprt->sm_dr.sendsz = req_rdma_xprt->sm_dr.sendsz;
+	rdma_xprt->sm_dr.pagesz = req_rdma_xprt->sm_dr.pagesz;
+
+	rdma_xprt->sm_dr.recv_hdr_sz = req_rdma_xprt->sm_dr.recv_hdr_sz;
+	rdma_xprt->sm_dr.send_hdr_sz = req_rdma_xprt->sm_dr.send_hdr_sz;
+
+	if (xdr_rdma_create(rdma_xprt)) {
+		SVC_DESTROY(&rdma_xprt->sm_dr.xprt);
 		return (XPRT_DESTROYED);
 	}
 
-	if (rpc_rdma_accept_finalize(xd)) {
-		SVC_DESTROY(&xd->sm_dr.xprt);
+	if (rpc_rdma_accept_finalize(rdma_xprt)) {
+		SVC_DESTROY(&rdma_xprt->sm_dr.xprt);
 		return (XPRT_DESTROYED);
 	}
 
+	XPRT_TRACE(&rdma_xprt->sm_dr.xprt, __func__, __func__, __LINE__);
+
+	/* Take ref on parent */
 	SVC_REF(xprt, SVC_REF_FLAG_NONE);
-	xd->sm_dr.xprt.xp_parent = xprt;
-	if (xprt->xp_dispatch.rendezvous_cb(&xd->sm_dr.xprt)
-	 || svc_rqst_xprt_register(&xd->sm_dr.xprt, xprt)) {
-		SVC_DESTROY(&xd->sm_dr.xprt);
+	rdma_xprt->sm_dr.xprt.xp_parent = xprt;
+
+	int retval = xprt->xp_dispatch.rendezvous_cb(&rdma_xprt->sm_dr.xprt);
+	if (retval) {
+		__warnx(TIRPC_DEBUG_FLAG_WARN,
+			"%s:%u ERROR (return %d)",
+			__func__, __LINE__, retval);
+		SVC_DESTROY(&rdma_xprt->sm_dr.xprt);
 		return (XPRT_DESTROYED);
 	}
+
+	/* RDMA xprts do not have a valid FD but identified with QPs, But for
+	 * bookkeeping the clients we will use the FD of RDMA event channel here
+	 */
+	rdma_xprt->sm_dr.xprt.xp_fd = rdma_xprt->event_channel->fd;
+
+	if (svc_rdma_add_xprt_fd(xprt)) {
+		__warnx(TIRPC_DEBUG_FLAG_WARN,
+			"%s:%u svc_rdma_add_xprt failed (xprt %p)",
+			__func__, __LINE__, xprt);
+		SVC_DESTROY(&rdma_xprt->sm_dr.xprt);
+		return (XPRT_DESTROYED);
+	}
+
+	__warnx(TIRPC_DEBUG_FLAG_EVENT,
+		"%s:%u New RDMA client connected xprt %p, xp_fd %d, "
+		"qp_num %d, xp_fd %d is_rdma_enabled %d ref %d epoll %#04x",
+		__func__, __LINE__,
+		&rdma_xprt->sm_dr.xprt, rdma_xprt->sm_dr.xprt.xp_fd,
+		rdma_xprt->qp->qp_num,
+		rdma_xprt->sm_dr.xprt.xp_fd, rdma_xprt->sm_dr.xprt.xp_rdma,
+		rdma_xprt->sm_dr.xprt.xp_refcnt, rdma_xprt->sm_dr.xprt.xp_flags);
+
 	return (XPRT_IDLE);
 }
 
@@ -136,10 +177,11 @@ svc_rdma_stat(SVCXPRT *xprt)
 static enum xprt_stat
 svc_rdma_decode(struct svc_req *req)
 {
+	/* We used xdrs from sendq */
 	XDR *xdrs = req->rq_xdrs;
-	struct xdr_ioq *holdq = XIOQ(xdrs);
+	struct xdr_ioq *recvq = XIOQ(xdrs);
 	struct rpc_rdma_cbc *cbc =
-		opr_containerof(holdq, struct rpc_rdma_cbc, holdq);
+		opr_containerof(recvq, struct rpc_rdma_cbc, recvq);
 
 	__warnx(TIRPC_DEBUG_FLAG_SVC_RDMA,
 		"%s() xprt %p req %p cbc %p incoming xdr %p\n",
@@ -151,6 +193,12 @@ svc_rdma_decode(struct svc_req *req)
 			__func__);
 		return (XPRT_DIED);
 	}
+
+	req->data_chunk = cbc->data_chunk_uv->v.vio_head;
+	req->data_chunk_length = ioquv_size(cbc->data_chunk_uv);
+
+	__warnx(TIRPC_DEBUG_FLAG_XDR, "%s: xdata %p req %p data chunk %p",
+		__func__, xdrs->x_data, req, req->data_chunk);
 
 	xdrs->x_op = XDR_DECODE;
 	/* No need, already positioned to beginning ...
@@ -168,6 +216,9 @@ svc_rdma_decode(struct svc_req *req)
 	/* the checksum */
 	req->rq_cksum = 0;
 
+	__warnx(TIRPC_DEBUG_FLAG_XDR, "%s: post decode req %p data chunk %p",
+		__func__, xdrs->x_data, req, req->data_chunk);
+
 	return (req->rq_xprt->xp_dispatch.process_cb(req));
 }
 
@@ -175,20 +226,23 @@ static enum xprt_stat
 svc_rdma_reply(struct svc_req *req)
 {
 	XDR *xdrs = req->rq_xdrs;
-	struct xdr_ioq *holdq = XIOQ(xdrs);
+	struct xdr_ioq *recvq = XIOQ(xdrs);
 	struct rpc_rdma_cbc *cbc =
-		opr_containerof(holdq, struct rpc_rdma_cbc, holdq);
+		opr_containerof(recvq, struct rpc_rdma_cbc, recvq);
 
 	__warnx(TIRPC_DEBUG_FLAG_SVC_RDMA,
 		"%s() xprt %p req %p cbc %p outgoing xdr %p\n",
 		__func__, req->rq_xprt, req, cbc, xdrs);
 
-	if (!xdr_rdma_svc_reply(cbc, 0)){
+	xdrs = cbc->sendq.xdrs;
+
+	if (!xdr_rdma_svc_reply(cbc, 0, req->data_chunk_length ? 1 : 0)){
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s: xdr_rdma_svc_reply failed (will set dead)",
 			__func__);
 		return (XPRT_DIED);
 	}
+
 	xdrs->x_op = XDR_ENCODE;
 
 	if (!xdr_reply_encode(xdrs, &req->rq_msg)) {
@@ -210,7 +264,7 @@ svc_rdma_reply(struct svc_req *req)
 	}
 	xdr_tail_update(xdrs);
 
-	if (!xdr_rdma_svc_flushout(cbc)){
+	if (!xdr_rdma_svc_flushout(cbc, req->data_chunk_length ? 1 : 0)){
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s: flushout failed (will set dead)",
 			__func__);
@@ -220,25 +274,36 @@ svc_rdma_reply(struct svc_req *req)
 	return (XPRT_IDLE);
 }
 
-static void
+void
+svc_rdma_unlink(SVCXPRT *xprt, u_int flags, const char *tag, const int line)
+{
+	svc_rqst_xprt_unregister_rdma(xprt, flags);
+
+	/* schedule task to cleanup pending cbcs and release xprt refs */
+	REC_XPRT(xprt)->ioq.ioq_wpe.fun = rdma_cleanup_cbcs_task;
+	SVC_REF(xprt, SVC_REF_FLAG_NONE);
+	work_pool_submit(&svc_work_pool, &(REC_XPRT(xprt)->ioq.ioq_wpe));
+}
+
+void
 svc_rdma_destroy(SVCXPRT *xprt, u_int flags, const char *tag, const int line)
 {
-	RDMAXPRT *xd = RDMA_DR(REC_XPRT(xprt));
+	RDMAXPRT *rdma_xprt = RDMA_DR(REC_XPRT(xprt));
 
 	__warnx(TIRPC_DEBUG_FLAG_REFCNT,
 		"%s() %p xp_refcnt %" PRId32
 		" should actually destroy things @ %s:%d",
 		__func__, xprt, xprt->xp_refcnt, tag, line);
 
-	xdr_rdma_destroy(xd);
-
 	if (xprt->xp_ops->xp_free_user_data) {
 		/* call free hook */
 		xprt->xp_ops->xp_free_user_data(xprt);
 	}
+
 	if (xprt->xp_parent)
 		SVC_RELEASE(xprt->xp_parent, SVC_RELEASE_FLAG_NONE);
-	rpc_rdma_destroy(xd);
+
+	rpc_rdma_destroy(rdma_xprt);
 }
 
 extern mutex_t ops_lock;
@@ -299,6 +364,7 @@ svc_rdma_ops(SVCXPRT *xprt)
 		ops.xp_reply = svc_rdma_reply;
 		ops.xp_checksum = NULL;		/* not used */
 		ops.xp_unref_user_data = NULL;	/* no default */
+		ops.xp_unlink = svc_rdma_unlink;
 		ops.xp_destroy = svc_rdma_destroy,
 		ops.xp_control = svc_rdma_control;
 		ops.xp_free_user_data = NULL;	/* no default */
