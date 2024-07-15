@@ -3,8 +3,7 @@ include_directories(
 )
 
 set(ntirpc_tracepoints_LIB_SRCS
-  rpcping.c
-  xprt.c
+  lttng_probes.c
 )
 
 add_library(ntirpc_tracepoints SHARED ${ntirpc_tracepoints_LIB_SRCS})
@@ -22,7 +21,7 @@ set_target_properties(ntirpc_tracepoints PROPERTIES
 install(TARGETS ntirpc_tracepoints COMPONENT tracing DESTINATION ${LIB_INSTALL_DIR} )
 
 set(ntirpc_lttng_LIB_SRCS
-  main.c
+  lttng_defines.c
 )
 
 add_library(ntirpc_lttng STATIC ${ntirpc_lttng_LIB_SRCS})

@@ -36,6 +36,7 @@ lib*.a
 src/libtirpc.la
 src/libtirpc_la-*.lo
 libntirpc.pc
+libntirpc_tracepoints.so*
 *.la
 #
 # generic editor backup et al

@@ -30,19 +30,13 @@
 
 #include "config.h"
 
-/**
- * @brief LTTng trace enabling magic
+/* This file creates LTTNG tracepoints weak symbols. These are empty weak
+ * functions that are overloaded by libntirpc_tracepoints.so. This allows us
+ * to compile with LTTNG, but only enable it when we load
+ * libntirpc_tracepoints.so.
  *
- * Every trace include file must be added here regardless whether it
- * is actually used in this source file.  The file must also be
- * included ONLY ONCE.  Failure to do so will create interesting
- * build time failure messages.  The key bit is the definitions of
- * TRACEPOINT_DEFINE and TRACEPOINT_PROBE_DYNAMIC_LINKAGE that are here
- * to trigger the global definitions as a shared object with the right
- * (weak) symbols to make the module loading optional.
- *
- * If and when this file gets some tracepoints of its own, the include
- * here is necessary and sufficient.
+ * Build targets that call tracepoints need to link with this file, by linking
+ * with ganesha_trace_symbols. This will allow them to compile.
  */
 
 #ifdef USE_LTTNG_NTIRPC
@@ -53,7 +47,6 @@
 #include "lttng/xprt.h"
 
 /* This is a hack to make older versions of LTTng link */
-struct lttng_ust_tracepoint_dlopen tracepoint_dlopen
-	__attribute__((weak));
+struct lttng_ust_tracepoint_dlopen tracepoint_dlopen __attribute__((weak));
 
 #endif /* USE_LTTNG_NTIRPC */
