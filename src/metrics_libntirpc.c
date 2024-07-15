@@ -57,6 +57,7 @@ static const uint8_t auth_stats_idx[] = {
 static histogram_metric_handle_t
 	svc_auth_request_latency[ARRAY_SIZE(sec_flavors_idx)][ARRAY_SIZE(auth_stats_idx)];
 
+#ifdef _HAVE_GSSAPI
 /* For each RPCSEC_GSS-service as an array index, assign a serial number to be
  * represented as the index in the metrics array.
  * The serial number `0` is not assigned, since un-mentioned RPCSEC_GSS
@@ -76,7 +77,15 @@ static histogram_metric_handle_t
 static histogram_metric_handle_t
 	gss_svc_auth_ops_latency[ARRAY_SIZE(gss_svcs_idx)][SVC_AUTH_OPS_COUNT];
 
+static int get_gss_svc_idx_in_metrics_array(rpc_gss_svc_t svc)
+{
+	assert(svc < ARRAY_SIZE(gss_svcs_idx));
+	const uint8_t gss_svc_idx = gss_svcs_idx[svc];
+	/* The metric indexes represented by the gss-svcs array start from 1 */
+	return (gss_svc_idx - 1);
+}
 
+#endif
 static int get_sec_flavor_idx_in_metrics_array(int sec_flavor)
 {
 	assert(sec_flavor < ARRAY_SIZE(sec_flavors_idx));
@@ -91,14 +100,6 @@ static int get_auth_stat_idx_in_metrics_array(enum auth_stat auth_status)
 	const uint8_t auth_stat_idx = auth_stats_idx[auth_status];
 	/* The metric indexes represented by the auth-stats array start from 1 */
 	return (auth_stat_idx - 1);
-}
-
-static int get_gss_svc_idx_in_metrics_array(rpc_gss_svc_t svc)
-{
-	assert(svc < ARRAY_SIZE(gss_svcs_idx));
-	const uint8_t gss_svc_idx = gss_svcs_idx[svc];
-	/* The metric indexes represented by the gss-svcs array start from 1 */
-	return (gss_svc_idx - 1);
 }
 
 /* Get string corresponding to security flavor */
@@ -171,6 +172,7 @@ static const char *get_gss_svc_auth_step_string(gss_svc_auth_step_t step)
 	}
 }
 
+#ifdef _HAVE_GSSAPI
 /* Get string corresponding to RPCSEC_GSS service */
 static const char *get_gss_svc_string(rpc_gss_svc_t svc)
 {
@@ -188,6 +190,7 @@ static const char *get_gss_svc_string(rpc_gss_svc_t svc)
 		abort();
 	}
 }
+#endif
 
 /* Get string corresponding to svc-auth op */
 static const char *get_svc_auth_op_string(svc_auth_op_t op)
@@ -247,6 +250,7 @@ static void register_svc_auth_request_latency_metric(void) {
 }
 
 static void register_gss_svc_auth_steps_latency_metric(void) {
+#ifdef _HAVE_GSSAPI
 	int svc, as, status;
 
 	for (svc = 0; svc < ARRAY_SIZE(gss_svcs_idx); svc++) {
@@ -279,9 +283,11 @@ static void register_gss_svc_auth_steps_latency_metric(void) {
 			}
 		}
 	}
+#endif
 }
 
 static void register_gss_svc_auth_ops_latency_metric(void) {
+#ifdef _HAVE_GSSAPI
 	int svc, i;
 
 	for (svc = 0; svc < ARRAY_SIZE(gss_svcs_idx); svc++) {
@@ -308,6 +314,7 @@ static void register_gss_svc_auth_ops_latency_metric(void) {
 					monitoring__buckets_exp2_compact());
 		}
 	}
+#endif
 }
 
 void metrics_libntirpc_observe_svc_auth_request_latency(int sec_flavor,
@@ -321,6 +328,7 @@ void metrics_libntirpc_observe_svc_auth_request_latency(int sec_flavor,
 		svc_auth_request_latency[sf_idx][as_idx], timespec_us(latency));
 }
 
+#ifdef _HAVE_GSSAPI
 void metrics_libntirpc_observe_gss_svc_auth_step_latency(
 	gss_svc_auth_step_t step, rpc_gss_svc_t svc, bool step_succeeded,
 	const struct timespec *latency)
@@ -342,6 +350,7 @@ void metrics_libntirpc_observe_gss_svc_auth_op_latency(svc_auth_op_t op,
 	monitoring__histogram_observe(
 		gss_svc_auth_ops_latency[svc_idx][op], timespec_us(latency));
 }
+#endif
 
 void metrics_libntirpc_update_tcp_connection_count(int connection_count)
 {
