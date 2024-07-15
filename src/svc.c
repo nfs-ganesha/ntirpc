@@ -77,7 +77,6 @@
 #endif
 #include "svc_ioq.h"
 
-#include "gtraces_libntirpc_internal.h"
 #include "metrics_libntirpc.h"
 
 #define SVC_VERSQUIET 0x0001	/* keep quiet about vers mismatch */
@@ -134,8 +133,6 @@ svc_init(svc_init_params *params)
 	uint32_t channels = params->channels ? params->channels : 8;
 
 	/* Initialize gtraces for libntirpc */
-	gtraces_libntirpc_init();
-	DEBUG("Libntirpc gtraces initialized");
 	metrics_libntirpc_init();
 
 	mutex_lock(&__svc_params->mtx);
