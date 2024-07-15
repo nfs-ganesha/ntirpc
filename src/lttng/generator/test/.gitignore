@@ -1,0 +1,4 @@
+test_bin
+auto/
+lttng_generation_rules.cmake
+lttng_generation_file_properties.cmake

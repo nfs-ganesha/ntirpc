@@ -1,0 +1,26 @@
+prov1:event_no_arg: { format = ( "This is a tracepoint with no arguments | main" : container = 0 ) }
+prov2:event1: { format = ( "int literal: {}, string literal: {}, int var: {}, char var: {}, char_array: {}, char pointer: {}, double pointer: {}" : container = 0 ), arg_1 = 1, arg_2 = ( "Test string literal" : container = 0 ), int_var = 5, char_var = 0x61, char_arr = "const size char array", char_ptr = 0x333, double_ptr = 0x444 }
+prov2:event2: { format = ( "main | float: {}, double: {}, long: {}, ulong: {}, long long: {}, unsigned long log: {}, short: {}, ushort: {}" : container = 0 ), f = 1.17549e-38, d = 1.79769e+308, l = 9223372036854775807, ul = 18446744073709551615, ll = 9223372036854775807, ull = 18446744073709551615, s = -32768, us = 65535 }
+prov1:event1: { format = ( "enum: {}, int: {}, struct pointer: {}, result: {}" : container = 0 ), arg_1 = ( "TEST_VAL1" : container = 0 ), arg_2 = 8, strct_ptr = 0x444, arg_4 = 9 }
+prov2:event_arrays: { format = ( "variable len string: {}, variable len int array: {}, terminated string: {}" : container = 0 ), _arg_1_length = 11, arg_1 = "var_len_str", _arg_2_length = 4, arg_2 = [ = 20, = -21, = 22, = -23 ], arg_3 = "null terminated str" }
+prov2:event_arrays2: { format = ( "variable len uint array: {}, byte array: {}" : container = 0 ), _arg_1_length = 4, arg_1 = [ = 30, = 31, = 32, = 33 ], _arg_2_length = 3, arg_2 = [ = 0x1, = 0x2, = 0x3 ] }
+prov1:generated_event_de90f30: { format = ( "main | Test event {}" : container = 0 ), arg_1 = 1 }
+prov1:generated_event_de90f31: { format = ( "main | Test event {}" : container = 0 ), arg_1 = 1 }
+prov3:event_in_func: { format = ( "funcWithTracepoint | This is a tracepoint inside another function. {}" : container = 0 ), num = 10 }
+prov1:inline_event: { format = ( "inlineFuncWithTrace | inline function" : container = 0 ) }
+prov1:event_enum: { format = ( "enum1: {}, enum2: {}" : container = 0 ), e = ( "TEST_VAL1" : container = 0 ), arg_2 = ( "TEST_VAL2" : container = 1 ) }
+prov1:event_header_enum: { format = ( "enum1: {}, enum2: {}" : container = 0 ), header_enum = ( "HEADER_ENUM_VAL1" : container = 0 ), arg_2 = ( "HEADER_ENUM_VAL2" : container = 1 ) }
+prov1:special_string: { format = ( "format with quotes: \"\"" : container = 0 ) }
+prov1:max_args: { format = ( "Tracepoint with max args: {} {} {} {} {} {} {} {} {}" : container = 0 ), arg_1 = 1, arg_2 = 2, arg_3 = 3, arg_4 = 4, arg_5 = 5, arg_6 = 6, arg_7 = 7, arg_8 = 8, arg_9 = 9 }
+prov1:curly_brackets: { format = ( "Tracepoint with curly brackets: {{x}} {{{}}}, {}" : container = 0 ), arg_1 = 1, arg_2 = 2 }
+prov1:max_uint64: { format = ( "Max uint64: {}" : container = 0 ), arg_1 = 18446744073709551615 }
+prov1:unicode: { format = ( "Unicode char: 😋" : container = 0 ) }
+prov1:type_def: { format = ( "Typedef: {}" : container = 0 ), td = 5 }
+prov1:qualifiers: { format = ( "const: {}, static: {}, static const: P{}" : container = 0 ), cnst = 1, stat = 0x6, sc = 7 }
+prov1:array_qualifiers: { format = ( "const arr: {}, array: {}, static array: {}, static const array: {}" : container = 0 ), ca = [ = 1, = 2, = 3 ], arr1 = [ = 4, = 5, = 6 ], sa = [ = 4, = 5, = 6 ], sca = [ = 8, = 9, = 10 ] }
+prov1:preprocessor: { format = ( "Preprocessor: {}" : container = 0 ), var_1 = 3 }
+prov1:fnc_test: { format = ( "fnc several times: main main main" : container = 0 ) }
+prov1:empty: { format = ( "empty arr: {}, empty var len arr: {}, empty str: {}, empty val len str: {}" : container = 0 ), empty_arr = [ ], _arg_2_length = 0, arg_2 = [ ], arg_3 = "", _arg_4_length = 0, arg_4 = "" }
+prov1:underscore_vars: { format = ( "Underscore vars: {} {} {}" : container = 0 ), arg_1 = 3, arg_2 = 4, arg_3 = 5 }
+prov1:event_test2: { format = ( "test_code2_func | This is an event in the same provider but other compilation unit" : container = 0 ) }
+prov1:global_var: { format = ( "Global var is: {}" : container = 0 ), global_var = 1 }

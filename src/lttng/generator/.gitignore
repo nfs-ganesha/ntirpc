@@ -1,0 +1,5 @@
+build/
+auto/
+compile_commands.json
+__pycache__
+generate_lttng_for_files

@@ -1,3 +1,5 @@
+add_subdirectory(generator ${CMAKE_CURRENT_SOURCE_DIR}/generator/build)
+
 include_directories(
   ${LTTNG_INCLUDE_DIR}
 )
