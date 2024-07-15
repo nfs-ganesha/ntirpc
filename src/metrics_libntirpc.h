@@ -4,6 +4,7 @@
 #ifdef _HAVE_GSSAPI
 #include <rpc/auth_gss.h>
 #endif
+#include <rpc/auth_stat.h>
 
 typedef enum gss_svc_auth_step {
 	VALIDATE_AUTH_DATA = 0,
