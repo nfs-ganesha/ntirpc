@@ -8,3 +8,7 @@ target_link_libraries(rpcping ntirpc
   ${CMAKE_THREAD_LIBS_INIT}
   ${LTTNG_LIBRARIES}
   -ldl)
+
+if(USE_LTTNG)
+target_link_libraries(rpcping ntirpc_lttng)
+endif(USE_LTTNG)
