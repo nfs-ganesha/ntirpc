@@ -89,6 +89,7 @@ if(USE_RPC_RDMA)
 endif(USE_RPC_RDMA)
 
 if(USE_LTTNG_NTIRPC)
+  include("${CMAKE_CURRENT_SOURCE_DIR}/../ntirpc_lttng_generation_file_properties.cmake")
   add_subdirectory(lttng)
 endif(USE_LTTNG_NTIRPC)
 

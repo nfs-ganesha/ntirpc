@@ -61,4 +61,9 @@ src/libntirpc.so.*
 src/lttng/libntirpc_tracepoints.so*
 tests/rpcping
 
+ntirpc_lttng_generation_rules.cmake
+ntirpc_lttng_generation_file_properties.cmake
+ntirpc/lttng/generated_traces
+compile_commands.json
+
 .cache

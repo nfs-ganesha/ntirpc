@@ -15,6 +15,8 @@ target_link_libraries(ntirpc_tracepoints
   ${LTTNG_LIBRARIES}
 )
 
+add_dependencies(ntirpc_tracepoints ntirpc_generate_lttng_trace_headers)
+
 set_target_properties(ntirpc_tracepoints PROPERTIES
   VERSION ${NTIRPC_VERSION}
   SOVERSION "${NTIRPC_MAJOR_VERSION}${NTIRPC_MINOR_VERSION}"
@@ -28,3 +30,5 @@ add_library(ntirpc_lttng STATIC lttng_defines.c)
 target_link_libraries(ntirpc_lttng
   ${LTTNG_LIBRARIES}
 )
+
+add_dependencies(ntirpc_lttng ntirpc_generate_lttng_trace_headers)

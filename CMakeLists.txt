@@ -119,9 +119,48 @@ if(USE_LTTNG)
   # if your LTTng is not in a standard place
   find_package(LTTng REQUIRED)
   if(LTTNG_FOUND)
-    include_directories(${LTTNG_INCLUDE_DIR})
+
+    if(NOT CMAKE_EXPORT_COMPILE_COMMANDS)
+      # We must create compile_commands.json for lttng trace generation
+      set(CMAKE_EXPORT_COMPILE_COMMANDS 1)
+    endif(NOT CMAKE_EXPORT_COMPILE_COMMANDS)
+
+    set(CMAKE_C_STANDARD_INCLUDE_DIRECTORIES ${CMAKE_C_IMPLICIT_INCLUDE_DIRECTORIES})
+
+    # Create symlink for compile commands to the source directory. This way it
+    # can be found regardless of where the binary dir is
+    if(NOT ${CMAKE_BINARY_DIR} STREQUAL ${CMAKE_CURRENT_SOURCE_DIR})
+    execute_process(
+        COMMAND ${CMAKE_COMMAND} -E create_symlink
+            ${CMAKE_BINARY_DIR}/compile_commands.json
+            ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json
+    )
+    endif(NOT ${CMAKE_BINARY_DIR} STREQUAL ${CMAKE_CURRENT_SOURCE_DIR})
+
+    include_directories(
+      ${LTTNG_INCLUDE_DIR}
+      "${NTIRPC_BASE_DIR}/src/lttng/generator/include/"
+    )
+
     set(USE_LTTNG_NTIRPC ON)
     set(BINARY_LIBRARIES ${BINARY_LIBRARIES} ntirpc_lttng)
+
+    execute_process(
+      COMMAND bash -c "${CMAKE_CURRENT_SOURCE_DIR}/src/lttng/generator/generate_cmake_rules.py \
+          --project_path ${CMAKE_CURRENT_SOURCE_DIR} \
+          --provider_include_base_path lttng/generated_traces/ \
+          --unique_prefix ntirpc \
+          --filter_out src/lttng/generator \
+          --traces_output_dir ${CMAKE_CURRENT_SOURCE_DIR}/ntirpc/lttng/generated_traces/ \
+          --include_path ${CMAKE_CURRENT_SOURCE_DIR}/ntirpc:${CMAKE_CURRENT_SOURCE_DIR}/src/lttng/generator/include/ \
+          --targets_output_path ${CMAKE_CURRENT_SOURCE_DIR}/ntirpc_lttng_generation_rules.cmake \
+          --file_properties_output_path ${CMAKE_CURRENT_SOURCE_DIR}/ntirpc_lttng_generation_file_properties.cmake"
+
+      COMMAND_ERROR_IS_FATAL ANY
+    )
+
+    include("${CMAKE_CURRENT_SOURCE_DIR}/ntirpc_lttng_generation_rules.cmake")
+    include("${CMAKE_CURRENT_SOURCE_DIR}/ntirpc_lttng_generation_file_properties.cmake")
   else(LTTNG_FOUND)
     message(WARNING "LTTng libraries not found. Disabling USE_LTTNG_NTIRPC")
     set(USE_LTTNG_NTIRPC OFF)

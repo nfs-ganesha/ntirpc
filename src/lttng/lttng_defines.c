@@ -46,6 +46,10 @@
 #include "lttng/rpcping.h"
 #include "lttng/xprt.h"
 
+#ifndef LTTNG_PARSING
+#include "lttng/generated_traces/generated_lttng.h"
+#endif /* LTTNG_PARSING */
+
 /* This is a hack to make older versions of LTTng link */
 struct lttng_ust_tracepoint_dlopen tracepoint_dlopen __attribute__((weak));
 
