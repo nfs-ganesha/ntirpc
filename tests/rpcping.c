@@ -33,8 +33,10 @@
 #include <getopt.h>
 #include <rpc/rpc.h>
 #include <rpc/svc_auth.h>
-#ifdef USE_LTTNG_NTIRPC
-#include "lttng/rpcping.h"
+
+#include "lttng/ntirpc_traces.h"
+#if defined(USE_LTTNG_NTIRPC) && !defined(LTTNG_PARSING)
+#include "lttng/generated_traces/rpcping.h"
 #endif
 
 static pthread_mutex_t rpcping_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -256,10 +258,8 @@ int main(int argc, char *argv[])
 	unsigned int timeouts = 0;
 	bool rpcbind = false;
 
-#ifdef USE_LTTNG_NTIRPC
-	tracepoint(rpcping, test,
-		   __FILE__, __func__, __LINE__, "Boo");
-#endif
+	NTIRPC_AUTO_TRACEPOINT(rpcping, test, TRACE_INFO, "Boo");
+
 	/* protocol and host/dest positional */
 	if (argc < 3) {
 		usage();

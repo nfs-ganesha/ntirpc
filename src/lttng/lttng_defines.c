@@ -43,9 +43,6 @@
 #define TRACEPOINT_DEFINE
 #define TRACEPOINT_PROBE_DYNAMIC_LINKAGE
 
-#include "lttng/rpcping.h"
-#include "lttng/xprt.h"
-
 #ifndef LTTNG_PARSING
 #include "lttng/generated_traces/generated_lttng.h"
 #endif /* LTTNG_PARSING */

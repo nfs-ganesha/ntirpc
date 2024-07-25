@@ -11,8 +11,6 @@
  */
 
 #define TRACEPOINT_CREATE_PROBES
-#include "lttng/rpcping.h"
-#include "lttng/xprt.h"
 
 #ifndef LTTNG_PARSING
 #include "lttng/generated_traces/generated_lttng.h"

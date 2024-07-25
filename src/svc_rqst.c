@@ -53,7 +53,7 @@
 
 #ifdef USE_RPC_RDMA
 #include "rpc_rdma.h"
-#endif
+#endif // USE_RPC_RDMA
 
 /**
  * @file svc_rqst.c
@@ -525,9 +525,9 @@ svc_rqst_unhook_events(struct rpc_dplx_rec *rec, struct svc_rqst_rec *sr_rec,
 {
 	int code = EINVAL;
 
-#ifdef USE_LTTNG_NTIRPC
-	tracepoint(xprt, unhook, __func__, __LINE__, &rec->xprt, ev_flags);
-#endif /* USE_LTTNG_NTIRPC */
+	XPRT_AUTO_TRACEPOINT(&rec->xprt, unhook, TRACE_DEBUG,
+		"Unhook. ev_flags: {}", ev_flags);
+
 	__warnx(TIRPC_DEBUG_FLAG_SVC_RQST,
 		"%s: xprt %p fd %d ev_flags%s%s%s%s%s%s%s%s%s",
 		__func__, &rec->xprt, rec->xprt.xp_fd,
@@ -643,9 +643,8 @@ svc_rqst_rearm_events_locked(SVCXPRT *xprt, uint16_t ev_flags)
 	struct svc_rqst_rec *sr_rec = rec->ev_p;
 	int code = EINVAL;
 
-#ifdef USE_LTTNG_NTIRPC
-	tracepoint(xprt, rearm, __func__, __LINE__, xprt, ev_flags);
-#endif /* USE_LTTNG_NTIRPC */
+	XPRT_AUTO_TRACEPOINT(xprt, rearm, TRACE_DEBUG,
+		"Rearm. ev_flags: {}", ev_flags);
 
 	const bool is_xprt_destroyed = xprt->xp_flags & (ev_flags | SVC_XPRT_FLAG_DESTROYED);
 	/* MUST follow the destroyed check above */
@@ -778,9 +777,8 @@ svc_rqst_hook_events(struct rpc_dplx_rec *rec, struct svc_rqst_rec *sr_rec,
 {
 	int code = EINVAL;
 
-#ifdef USE_LTTNG_NTIRPC
-	tracepoint(xprt, hook, __func__, __LINE__, &rec->xprt, ev_flags);
-#endif /* USE_LTTNG_NTIRPC */
+	XPRT_AUTO_TRACEPOINT(&rec->xprt, hook, TRACE_DEBUG,
+		"Hook. ev_flags: {}", ev_flags);
 
 	__warnx(TIRPC_DEBUG_FLAG_SVC_RQST,
 		"%s: xprt %p fd %d ev_flags%s%s%s%s%s%s%s%s%s",
@@ -1200,12 +1198,7 @@ svc_rqst_xprt_task_recv(struct work_pool_entry *wpe)
 
 	atomic_clear_uint16_t_bits(&ioq->ioq_s.qflags, IOQ_FLAG_WORKING);
 
-#ifdef USE_LTTNG_NTIRPC
-	tracepoint(xprt, recv, __func__, __LINE__,
-		   &rec->xprt,
-		   (unsigned int)(rec->xprt.xp_flags & SVC_XPRT_FLAG_DESTROYED),
-		   (unsigned int) rec->xprt.xp_refcnt);
-#endif /* USE_LTTNG_NTIRPC */
+	XPRT_AUTO_TRACEPOINT(&rec->xprt, task_recv, TRACE_DEBUG, "Hook");
 
 	/* atomic barrier (above) should protect following values */
 	if (rec->xprt.xp_refcnt > 1
@@ -1293,12 +1286,8 @@ svc_rqst_xprt_task_send(struct work_pool_entry *wpe)
 
 	atomic_clear_uint16_t_bits(&ioq->ioq_s.qflags, IOQ_FLAG_WORKING);
 
-#ifdef USE_LTTNG_NTIRPC
-	tracepoint(xprt, send, __func__, __LINE__,
-		   &rec->xprt,
-		   (unsigned int)(rec->xprt.xp_flags & SVC_XPRT_FLAG_DESTROYED),
-		   (unsigned int) rec->xprt.xp_refcnt);
-#endif /* USE_LTTNG_NTIRPC */
+	XPRT_AUTO_TRACEPOINT(&rec->xprt, task_send, TRACE_DEBUG,
+		"Task send");
 
 	svc_ioq_write(&rec->xprt);
 	SVC_RELEASE(&rec->xprt, SVC_RELEASE_FLAG_NONE);
@@ -1446,10 +1435,8 @@ svc_rqst_epoll_event(struct svc_rqst_rec *sr_rec, struct epoll_event *ev)
 		ev_flag & SVC_XPRT_FLAG_ADDED_RECV ? " ADDED_RECV" : "",
 		ev_flag & SVC_XPRT_FLAG_ADDED_SEND ? " ADDED_SEND" : "");
 
-#ifdef USE_LTTNG_NTIRPC
-	tracepoint(xprt, event, __func__, __LINE__, &rec->xprt, xp_flags,
-		   ev_flag);
-#endif /* USE_LTTNG_NTIRPC */
+	XPRT_AUTO_TRACEPOINT(&rec->xprt, epoll_event, TRACE_DEBUG,
+		"Epoll event. ev_flag: {}", ev_flag);
 
 	if (rec->xprt.xp_refcnt > 1
 	    && (xp_flags & ev_flag)
