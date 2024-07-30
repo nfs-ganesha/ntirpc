@@ -175,6 +175,7 @@ typedef struct svc_init_params {
 #define SVC_XPRT_FLAG_RELEASING		0x0040	/* (*xp_destroy) was called */
 #define SVC_XPRT_FLAG_UREG		0x0080
 #define SVC_XPRT_TREE_LOCKED		0x0100
+#define SVC_XPRT_FLAG_REMOTE_ADDR_SET	0x0200	/* remote addr was final set */
 
 #define SVC_XPRT_FLAG_DESTROYED (SVC_XPRT_FLAG_DESTROYING \
 				| SVC_XPRT_FLAG_RELEASING)
@@ -264,7 +265,10 @@ struct svc_xprt {
 
 	/* handle incoming connections (per xp_fd) */
 	union {
-		svc_req_fun_t process_cb;
+		struct {
+			svc_req_fun_t process_cb;
+			svc_xprt_fun_t remote_addr_set_cb;
+		};
 		svc_xprt_fun_t rendezvous_cb;
 	}  xp_dispatch;
 	SVCXPRT *xp_parent;
