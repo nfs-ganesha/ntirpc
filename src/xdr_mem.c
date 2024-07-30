@@ -85,13 +85,19 @@ xdrmem_ncreate(XDR *xdrs, char *addr, u_int size, enum xdr_op op)
 		xdrs->x_v.vio_tail = addr;
 		break;
 	case XDR_DECODE:
-		xdrs->x_v.vio_tail = addr + size;
+		if (addr)
+			xdrs->x_v.vio_tail = addr + size;
+		else
+			xdrs->x_v.vio_tail = NULL;
 		break;
 	default:
 		abort();
 		break;
 	};
-	xdrs->x_v.vio_wrap = addr + size;
+	if (addr)
+		xdrs->x_v.vio_wrap = addr + size;
+	else
+		xdrs->x_v.vio_wrap = NULL;
 	xdrs->x_base = &xdrs->x_v;
 }
 
