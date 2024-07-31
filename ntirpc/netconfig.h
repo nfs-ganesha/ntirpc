@@ -12,6 +12,9 @@
 #endif
 #define NETPATH	  "NETPATH"
 
+/* Environment variable to override the location of NETCONFIG */
+#define ENV_NETCONFIG_OVERRIDE "NETCONFIG_OVERRIDE"
+
 struct netconfig {
 	char *nc_netid;		/* Network ID */
 	unsigned long nc_semantics;	/* Semantics (see below) */

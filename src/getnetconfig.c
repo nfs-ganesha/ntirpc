@@ -162,6 +162,13 @@ __nc_error(void)
 	return (nc_addr);
 }
 
+static inline const char* getnetconfig_path(void)
+{
+	/* Overriding netconfig path is used for unit testing */
+	const char *const override = getenv(ENV_NETCONFIG_OVERRIDE);
+	return override != NULL ? override : NETCONFIG;
+}
+
 #define nc_error        (*(__nc_error()))
 /*
  * A call to setnetconfig() establishes a /etc/netconfig "session".  A session
@@ -196,7 +203,7 @@ setnetconfig(void)
 	ni.ref++;
 
 	if (!nc_file) {
-		nc_file = fopen(NETCONFIG, "r");
+		nc_file = fopen(getnetconfig_path(), "r");
 		if (!nc_file) {
 			ni.ref--;
 			mutex_unlock(&nc_mtx);
@@ -436,7 +443,7 @@ getnetconfigent(const char *netid)
 		}
 	}
 
-	file = fopen(NETCONFIG, "r");
+	file = fopen(getnetconfig_path(), "r");
 	if (!file) {
 		nc_error = NC_NONETCONFIG;
 		mutex_unlock(&nc_mtx);
