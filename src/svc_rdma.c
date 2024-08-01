@@ -149,12 +149,18 @@ svc_rdma_rendezvous(SVCXPRT *xprt)
 
 	__warnx(TIRPC_DEBUG_FLAG_EVENT,
 		"%s:%u New RDMA client connected xprt %p, xp_fd %d, "
-		"qp_num %d, xp_fd %d is_rdma_enabled %d ref %d epoll %#04x",
+		"qp_num %d, xp_fd %d is_rdma_enabled %d to local port %d "
+		"from remote port %d ref %d epoll %#04x",
 		__func__, __LINE__,
 		&rdma_xprt->sm_dr.xprt, rdma_xprt->sm_dr.xprt.xp_fd,
 		rdma_xprt->qp->qp_num,
 		rdma_xprt->sm_dr.xprt.xp_fd, rdma_xprt->sm_dr.xprt.xp_rdma,
-		rdma_xprt->sm_dr.xprt.xp_refcnt, rdma_xprt->sm_dr.xprt.xp_flags);
+		rdma_xprt->sm_dr.xprt.xp_local.nb.buf ?
+		svc_get_port(rdma_xprt->sm_dr.xprt.xp_local.nb.buf) : 0,
+		rdma_xprt->sm_dr.xprt.xp_remote.nb.buf ?
+		svc_get_port(rdma_xprt->sm_dr.xprt.xp_remote.nb.buf) : 0,
+		rdma_xprt->sm_dr.xprt.xp_refcnt,
+		rdma_xprt->sm_dr.xprt.xp_flags);
 
 	return (XPRT_IDLE);
 }

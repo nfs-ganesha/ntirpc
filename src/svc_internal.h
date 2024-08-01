@@ -194,4 +194,7 @@ int svc_rqst_evchan_write(SVCXPRT *, struct xdr_ioq *, bool);
 void svc_rqst_xprt_send_complete(SVCXPRT *);
 void svc_rqst_unhook(SVCXPRT *);
 
+typedef struct sockaddr_storage sockaddr_t;
+int svc_get_port(sockaddr_t *);
+
 #endif				/* TIRPC_SVC_INTERNAL_H */
