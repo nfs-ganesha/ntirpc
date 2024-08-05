@@ -291,9 +291,9 @@ static inline void cbc_ref_it(struct rpc_rdma_cbc *cbc, RDMAXPRT *rdma_xprt)
 
 	SVC_REF(&rdma_xprt->sm_dr.xprt, SVC_REF_FLAG_NONE);
 
-	__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA, "%s: take_ref cbc %p ref %d "
-		"refs %d rdma xprt %p",
-		__func__, cbc, cbc->refcnt, refs, rdma_xprt);
+	__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA, "%s: rdma_xprt %p take_ref "
+		"cbc %p cbc_ref %d refs %d",
+		__func__, rdma_xprt, cbc, cbc->refcnt, refs);
 }
 
 #define x_rdma_xprt(xdrs) ((RDMAXPRT *)((xdrs)->x_lib[1]))
@@ -305,9 +305,9 @@ static inline void cbc_release_it(struct rpc_rdma_cbc *cbc)
 		atomic_dec_int32_t(&cbc->refcnt);
 	RDMAXPRT *rdma_xprt = x_rdma_xprt(cbc->recvq.xdrs);
 
-	__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA, "%s: release_ref cbc %p ref %d "
-		"refs %d",
-		__func__, cbc, cbc->refcnt, refs);
+	__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA, "%s: rdma_xprt %p release_ref "
+		"cbc %p cbc_ref %d refs %d",
+		__func__, rdma_xprt, cbc, cbc->refcnt, refs);
 
 	assert(refs >= 0);
 
@@ -315,14 +315,14 @@ static inline void cbc_release_it(struct rpc_rdma_cbc *cbc)
 		pthread_mutex_lock(&rdma_xprt->cbclist.qmutex);
 
 		__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA, "%s: destroy_cbc "
-			"cbc %p ref %d flags %x",
+			"cbc %p cbc_ref %d flags %x",
 			__func__, cbc, cbc->refcnt, cbc->cbc_flags);
 
 		uint16_t flags = atomic_postset_uint16_t_bits(&cbc->cbc_flags,
 		    CBC_FLAG_RELEASING);
 
 		__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA, "%s: destroy_cbc "
-			" destroying cbc %p ref %d cbc_flags %x flags %x",
+			" destroying cbc %p cbc_ref %d cbc_flags %x flags %x",
 			__func__, cbc, cbc->refcnt, cbc->cbc_flags, flags);
 
 		TAILQ_REMOVE(&rdma_xprt->cbclist.qh, &cbc->cbc_list, q);

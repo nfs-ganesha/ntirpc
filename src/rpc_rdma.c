@@ -357,8 +357,9 @@ rdma_cleanup_cbcs(RDMAXPRT *rdma_xprt) {
 
 			struct poolq_entry *next = TAILQ_NEXT(have, q);
 
-			__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA, "%s cbc %p refcnt %d "
-			    "rdma_xprt %p", __func__, cbc, cbc->refcnt, rdma_xprt);
+			__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA, "%s cbc %p cbc_ref %d "
+			    "rdma_xprt %p", __func__, cbc,
+			    cbc->refcnt, rdma_xprt);
 
 			/* cbc->active indicates cq event received for RECV
 			 * before RDMA_CM_EVENT_TIMEWAIT_EXIT, so cq event handler
@@ -369,14 +370,14 @@ rdma_cleanup_cbcs(RDMAXPRT *rdma_xprt) {
 
 			/* If there are rdma_writes or send completion pending
 			 * then pending request can't cleanup cbc since we won't
-			 * get any completion afte RDMA_CM_EVENT_TIMEWAIT_EXIT */
+			 * get any completion after RDMA_CM_EVENT_TIMEWAIT_EXIT */
 
 			if (cbc->write_waits) {
 				cbc_release = true;
 				cbc_release_count = cbc->write_waits;
 
 				__warnx(TIRPC_DEBUG_FLAG_EVENT, "%s active cbc %p "
-				    "refcnt %d read_waits %d write_waits %d "
+				    "cbc_ref %d read_waits %d write_waits %d "
 				    "active requests %d rdma_xprt %p",
 				    __func__, cbc, cbc->refcnt, cbc->read_waits,
 				    cbc->write_waits, rdma_xprt->active_requests,
@@ -386,7 +387,7 @@ rdma_cleanup_cbcs(RDMAXPRT *rdma_xprt) {
 			if (!cbc_release) {
 				/* Pending request should cleanup this cbc */
 				__warnx(TIRPC_DEBUG_FLAG_EVENT, "%s active cbc %p "
-				    "refcnt %d read_waits %d write_waits %d "
+				    "cbc_ref %d read_waits %d write_waits %d "
 				    "active requests %d rdma_xprt %p",
 				    __func__, cbc, cbc->refcnt, cbc->read_waits,
 				    cbc->write_waits, rdma_xprt->active_requests,
@@ -576,20 +577,22 @@ rpc_rdma_worker_callback(struct work_pool_entry *wpe)
 	bool call_inline = cbc->call_inline;
 
 	__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA,
-		"%s() %p opcode: %d %d %d %d %d %d",
-		__func__, cbc->opcode, rdma_xprt, IBV_WC_SEND, IBV_WC_RDMA_WRITE,
+		"%s() %p[%u] opcode: %d %d %d %d %d %d",
+		__func__, rdma_xprt, rdma_xprt->state, cbc->opcode,
+		IBV_WC_SEND, IBV_WC_RDMA_WRITE,
 		IBV_WC_RDMA_READ, IBV_WC_RECV, IBV_WC_RECV_RDMA_WITH_IMM);
 
 	if (rdma_xprt->sm_dr.xprt.xp_flags & SVC_XPRT_FLAG_DESTROYED) {
-		__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA, "%s : rdma_xprt already "
-		    " destroyed %p", __func__, rdma_xprt);
+		__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA, "%s : rdma_xprt %p already "
+		    "destroyed", __func__, rdma_xprt);
 	}
 
 	if (cbc->status) {
 		if (cbc->negative_cb) {
 			__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA,
 				"%s() %p[%u] cbc %p status: %d",
-				__func__, rdma_xprt, rdma_xprt->state, cbc, cbc->status);
+				__func__, rdma_xprt, rdma_xprt->state,
+				cbc, cbc->status);
 			cbc->negative_cb(cbc, rdma_xprt);
 		}
 
@@ -608,7 +611,8 @@ rpc_rdma_worker_callback(struct work_pool_entry *wpe)
 		if (cbc->positive_cb) {
 			__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA,
 				"%s() %p[%u] cbc %p opcode: %d",
-				__func__, rdma_xprt, rdma_xprt->state, cbc, cbc->opcode);
+				__func__, rdma_xprt, rdma_xprt->state,
+				cbc, cbc->opcode);
 			cbc->positive_cb(cbc, rdma_xprt);
 		}
 		break;
@@ -1105,8 +1109,9 @@ rpc_rdma_cq_thread(void *arg)
 			}
 
 			if (rdma_xprt->sm_dr.xprt.xp_flags & SVC_XPRT_FLAG_DESTROYED) {
-				__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA, "%s : rdma_xprt already "
-					" destroyed %p", __func__, rdma_xprt);
+				__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA,
+					"%s : rdma_xprt %p already "
+					"destroyed ", __func__, rdma_xprt);
 			}
 
 			mutex_lock(&rdma_xprt->cm_lock);

@@ -212,13 +212,13 @@ xdr_rdma_respond_callback_send(struct rpc_rdma_cbc *cbc, RDMAXPRT *rdma_xprt)
 	int32_t write_waits = atomic_dec_int32_t(&cbc->write_waits);
 
 	__warnx(TIRPC_DEBUG_FLAG_XDR,
-	    "%s() %p[%u] cbc %p refs %d write_waits %d\n",
+	    "%s() %p[%u] cbc %p cbc_ref %d write_waits %d\n",
 	    __func__, rdma_xprt, rdma_xprt->state, cbc,
 	    cbc->refcnt, write_waits);
 
 	if (rdma_xprt->sm_dr.xprt.xp_flags & SVC_XPRT_FLAG_DESTROYED) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR, " %s rdma_xprt %p cbc %p "
-		    "refs %d write_waits %d already destroyed",
+		    "cbc_ref %d write_waits %d already destroyed",
 		    __func__, rdma_xprt, cbc, cbc->refcnt, write_waits);
 
 		ret =  -1;
@@ -242,7 +242,7 @@ xdr_rdma_destroy_callback_send(struct rpc_rdma_cbc *cbc, RDMAXPRT *rdma_xprt)
 
 	if (rdma_xprt->sm_dr.xprt.xp_flags & SVC_XPRT_FLAG_DESTROYED) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR, " %s rdma_xprt %p cbc %p "
-		    "refs %d write_waits %d already destroyed",
+		    "cbc_ref %d write_waits %d already destroyed",
 		    __func__, rdma_xprt, cbc, cbc->refcnt, write_waits);
 
 		ret = -1;
@@ -321,7 +321,7 @@ xdr_rdma_destroy_callback_recv(struct rpc_rdma_cbc *cbc, RDMAXPRT *rdma_xprt)
 
 	cbc->cbc_flags = CBC_FLAG_RELEASE;
 
-	/* Release senital ref */
+	/* Release sentinel ref */
 	cbc_release_it(cbc);
 
 	SVC_DESTROY(&rdma_xprt->sm_dr.xprt);
@@ -358,7 +358,7 @@ xdr_rdma_wrap_callback(struct rpc_rdma_cbc *cbc, RDMAXPRT *rdma_xprt)
 err:
 	cbc->cbc_flags = CBC_FLAG_RELEASE;
 
-	/* Release senital ref */
+	/* Release sentinel ref */
 	cbc_release_it(cbc);
 
 	return ret;
@@ -489,7 +489,7 @@ xdr_rdma_post_recv_cb(RDMAXPRT *rdma_xprt, struct rpc_rdma_cbc *cbc, int sge)
 
 		cbc->cbc_flags = CBC_FLAG_RELEASE;
 
-		/* Release senital ref */
+		/* Release sentinel ref */
 		cbc_release_it(cbc);
 
 		SVC_DESTROY(&rdma_xprt->sm_dr.xprt);
@@ -687,9 +687,10 @@ xdr_rdma_async_send_cb(RDMAXPRT *rdma_xprt, struct rpc_rdma_cbc *cbc, int sge)
 		SVC_DESTROY(&rdma_xprt->sm_dr.xprt);
 
 		/* Assuming there won't be callback */
-		__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s: failed ret %d err %d "
-		    " rdma_xprt %p cbc %p refs %d write_waits %d",
-		    __func__, ret, errno, rdma_xprt, cbc, cbc->refcnt, write_waits);
+		__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s: failed ret %d err %d"
+		    " rdma_xprt %p cbc %p cbc_ref %d write_waits %d",
+		    __func__, ret, errno, rdma_xprt, cbc, cbc->refcnt,
+		    write_waits);
 	}
 
 	return ret;
@@ -723,7 +724,7 @@ xdr_rdma_wait_read_cb(RDMAXPRT *rdma_xprt, struct rpc_rdma_cbc *cbc, int sge,
 
 		/* Assuming there won't be callback */
 		__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s: failed ret %d err %d "
-		    " rdma_xprt %p cbc %p refs %d read_waits %d",
+		    " rdma_xprt %p cbc %p cbc_ref %d read_waits %d",
 		    __func__, ret, errno, rdma_xprt, cbc, cbc->refcnt, read_waits);
 	}
 
@@ -755,7 +756,7 @@ xdr_rdma_async_write_cb(RDMAXPRT *rdma_xprt, struct rpc_rdma_cbc *cbc, int sge,
 
 		/* Assuming there won't be callback */
 		__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s: failed ret %d err %d "
-		    " rdma_xprt %p cbc %p refs %d write_waits %d",
+		    " rdma_xprt %p cbc %p cbc_ref %d write_waits %d",
 		    __func__, ret, errno, rdma_xprt, cbc, cbc->refcnt,
 		    write_waits);
 	}
@@ -928,7 +929,7 @@ xdr_rdma_callq(RDMAXPRT *rdma_xprt)
 
 	cbc->call_inline = 0;
 	cbc->data_chunk_uv = NULL;
-	cbc->refcnt = 1; // Senital ref
+	cbc->refcnt = 1; // Sentinel ref
 	cbc->cbc_flags = CBC_FLAG_NONE;
 	cbc->read_waits = 0;
 	cbc->write_waits = 0;
@@ -1378,7 +1379,8 @@ xdr_rdma_create(RDMAXPRT *rdma_xprt)
 		 * callback will be done on recv which should rearam again */
 		__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA,
 			"%s() qcount %d callq size %d",
-			__func__, rdma_xprt->sm_dr.ioq.ioq_uv.uvqh.qcount);
+			__func__, rdma_xprt->sm_dr.ioq.ioq_uv.uvqh.qcount,
+			callq_size);
 		xdr_rdma_callq(rdma_xprt);
 	}
 
@@ -1722,7 +1724,7 @@ xdr_rdma_svc_recv(struct rpc_rdma_cbc *cbc, u_int32_t xid)
 
 			if (rc) {
 				__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s: Failed to "
-				    "get callback cbc %p cbc refs %d "
+				    "get callback cbc %p cbc_ref %d "
 				    "read_waits %d rdma_xprt %p err %s",
 				    __func__, cbc, cbc->refcnt, cbc->read_waits,
 				    rdma_xprt, strerror(rc));

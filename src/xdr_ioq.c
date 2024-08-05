@@ -435,7 +435,7 @@ xdr_rdma_ioq_uv_recycle(struct poolq_head *ioqh, struct poolq_entry *have)
 {
 	pthread_mutex_lock(&ioqh->qmutex);
 
-	__warnx(TIRPC_DEBUG_FLAG_XDR, "%s() ioq_track Reccycle ioqh %p %d have %p",
+	__warnx(TIRPC_DEBUG_FLAG_XDR, "%s() ioq_track Recycle ioqh %p %d have %p",
 		__func__, ioqh, ioqh->qcount, have);
 
 	TAILQ_INSERT_TAIL(&ioqh->qh, have, q);
@@ -450,7 +450,7 @@ xdr_rdma_ioq_uv_recycle_io_buf(struct poolq_head *ioqh,
 {
 	pthread_mutex_lock(&ioqh->qmutex);
 
-	__warnx(TIRPC_DEBUG_FLAG_XDR, "%s() ioq_track Reccycle ioqh %p %d have %p",
+	__warnx(TIRPC_DEBUG_FLAG_XDR, "%s() ioq_track Recycle ioqh %p %d have %p",
 		__func__, ioqh, ioqh->qcount, have);
 
 	struct rpc_io_bufs *io_buf = get_parent_chunk(have);
