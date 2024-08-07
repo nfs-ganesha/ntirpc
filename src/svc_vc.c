@@ -546,7 +546,7 @@ svc_vc_rendezvous(SVCXPRT *xprt)
 	return (XPRT_IDLE);
 }
 
-// This can be overriden in tests.
+// This can be overridden in tests.
 __attribute__((weak)) void svc_vc_notify_xprt_destroy_for_testing(
 	const struct sockaddr_storage *remote_address)
 {
