@@ -546,6 +546,12 @@ svc_vc_rendezvous(SVCXPRT *xprt)
 	return (XPRT_IDLE);
 }
 
+// This can be overriden in tests.
+__attribute__((weak)) void svc_vc_notify_xprt_destroy_for_testing(
+	const struct sockaddr_storage *remote_address)
+{
+}
+
 static void
 svc_vc_destroy_task(struct work_pool_entry *wpe)
 {
@@ -611,7 +617,9 @@ svc_vc_destroy_task(struct work_pool_entry *wpe)
 	if (rec->xprt.xp_parent)
 		SVC_RELEASE(rec->xprt.xp_parent, SVC_RELEASE_FLAG_NONE);
 
+	const struct sockaddr_storage remote_address = rec->xprt.xp_remote.ss;
 	svc_vc_xprt_free(VC_DR(rec));
+	svc_vc_notify_xprt_destroy_for_testing(&remote_address);
 }
 
 static void
