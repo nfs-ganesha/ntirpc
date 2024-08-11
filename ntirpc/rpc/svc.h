@@ -453,9 +453,7 @@ __END_DECLS
 static inline void svc_ref_it(SVCXPRT *xprt, u_int flags,
 			      const char *tag, const int line)
 {
-#ifdef USE_LTTNG_NTIRPC
-	int32_t refs =
-#endif /* USE_LTTNG_NTIRPC */
+	const int32_t refs =
 		atomic_inc_int32_t(&xprt->xp_refcnt);
 
 	if (flags & SVC_REF_FLAG_LOCKED)  {

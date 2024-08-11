@@ -54,8 +54,23 @@
 
 #else // USE_LTTNG_NTIRPC
 
-#define NTIRPC_AUTO_TRACEPOINT(...)
-#define NTIRPC_UNIQUE_AUTO_TRACEPOINT(...)
+/* We call the empty function with the variable args to avoid unused variables
+ * warning when LTTNG traces are disabled */
+static void inline ntirpc_empty_function(const char* unused, ...) {}
+
+#define NTIRPC_AUTO_TRACEPOINT(prov_name, event_name, log_level, ...) \
+		ntirpc_empty_function("unused", ##__VA_ARGS__)
+#define NTIRPC_UNIQUE_AUTO_TRACEPOINT(prov_name, event_name, log_level, ...) \
+		ntirpc_empty_function("unused", ##__VA_ARGS__)
+
+/* Define array macros for when lttng generator doesn't exist */
+#ifndef TP_INT_ARR
+#define TP_INT_ARR(_data, _len) (_data), (_len)
+#define TP_UINT_ARR(_data, _len) (_data), (_len)
+#define TP_BYTE_ARR(_data, _len) (_data), (_len)
+#define TP_VAR_STR_ARR(_data, _len) (_data), (_len)
+#define TP_STR(_str) (_str)
+#endif /* TP_INT_ARR */
 
 #endif // USE_LTTNG_NTIRPC
 #endif // __NTIRPC_TRACES_H__
