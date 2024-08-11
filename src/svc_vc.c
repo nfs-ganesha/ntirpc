@@ -428,7 +428,7 @@ svc_vc_rendezvous(SVCXPRT *xprt)
 	static int n = 1;
 	struct timeval timeval;
 
-	XPRT_AUTO_TRACEPOINT(xprt, rendezvous_start, TRACE_DEBUG,
+	XPRT_AUTO_TRACEPOINT(xprt, rendezvous_start, TRACE_INFO,
 		"rendezvous_start");
 
  again:
@@ -1000,7 +1000,7 @@ again:
 			SVC_DESTROY(xprt);
 
 			XPRT_AUTO_TRACEPOINT(xprt, recv_err,
-				TRACE_DEBUG, "recv got errno: {}", code);
+				TRACE_WARNING, "recv got errno: {}", code);
 			return SVC_STAT(xprt);
 		}
 
@@ -1114,7 +1114,7 @@ again:
 		SVC_DESTROY(xprt);
 
 		XPRT_AUTO_TRACEPOINT(xprt, recv_closed,
-				TRACE_DEBUG, "recv closed");
+				TRACE_INFO, "recv closed");
 
 		return SVC_STAT(xprt);
 	}
