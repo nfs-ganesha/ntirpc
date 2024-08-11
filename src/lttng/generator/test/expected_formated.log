@@ -1,0 +1,26 @@
+This is a tracepoint with no arguments | main
+int literal: 1, string literal: Test string literal, int var: 5, char var: 97, char_array: const size char array, char pointer: 819, double pointer: 1092
+main | float: 1.1754943508222875e-38, double: 1.7976931348623157e+308, long: 9223372036854775807, ulong: 18446744073709551615, long long: 9223372036854775807, unsigned long log: 18446744073709551615, short: -32768, ushort: 65535
+enum: TEST_VAL1, int: 8, struct pointer: 1092, result: 9
+variable len string: var_len_str, variable len int array: [20, -21, 22, -23], terminated string: null terminated str
+variable len uint array: [30, 31, 32, 33], byte array: [1, 2, 3]
+main | Test event 1
+main | Test event 1
+funcWithTracepoint | This is a tracepoint inside another function. 10
+inlineFuncWithTrace | inline function
+enum1: TEST_VAL1, enum2: TEST_VAL2
+enum1: HEADER_ENUM_VAL1, enum2: HEADER_ENUM_VAL2
+format with quotes: ""
+Tracepoint with max args: 1 2 3 4 5 6 7 8 9
+Tracepoint with curly brackets: {x} {1}, 2
+Max uint64: 18446744073709551615
+Unicode char: 😋
+Typedef: 5
+const: 1, static: 6, static const: P7
+const arr: [1, 2, 3], array: [4, 5, 6], static array: [4, 5, 6], static const array: [8, 9, 10]
+Preprocessor: 3
+fnc several times: main main main
+empty arr: [], empty var len arr: [], empty str: , empty val len str: 
+Underscore vars: 3 4 5
+test_code2_func | This is an event in the same provider but other compilation unit
+Global var is: 1

@@ -89,6 +89,7 @@ if(USE_RPC_RDMA)
 endif(USE_RPC_RDMA)
 
 if(USE_LTTNG_NTIRPC)
+  include("${CMAKE_CURRENT_SOURCE_DIR}/../ntirpc_lttng_generation_file_properties.cmake")
   add_subdirectory(lttng)
 endif(USE_LTTNG_NTIRPC)
 
@@ -97,8 +98,7 @@ add_library(ntirpc SHARED
   ${ntirpc_common_SRCS}
   ${ntirpc_gss_SRCS}
   ${ntirpc_rdma_SRCS}
-  ${ntirpc_lttng_SRCS}
-  )
+)
 
 # add required libraries--for Ganesha build, it's ok for them to
 # propagate (i.e., omit PRIVATE)
@@ -109,6 +109,10 @@ target_link_libraries(ntirpc
   elfstraces
   generate_trace_info
 )
+
+if(USE_LTTNG)
+target_link_libraries(ntirpc ntirpc_lttng)
+endif(USE_LTTNG)
 
 # set library version and symbol namespace(s) from gen'd map file
 set_target_properties(ntirpc PROPERTIES LINK_FLAGS

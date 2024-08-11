@@ -216,14 +216,10 @@ svc_ioq_flushv(SVCXPRT *xprt, struct xdr_ioq *xioq)
 		msg.msg_iovlen = iov_count + frag_needed;
 
 again:
-
-#ifdef USE_LTTNG_NTIRPC
-			tracepoint(xprt, sendmsg, __func__, __LINE__,
-				   xprt,
-				   (unsigned int) remaining,
-				   (unsigned int) frag_needed,
-				   (unsigned int) iov_count);
-#endif /* USE_LTTNG_NTIRPC */
+		XPRT_AUTO_TRACEPOINT(xprt, sendmsg, TRACE_DEBUG,
+			"Calling sendmsg. remaining: {}, frag_needed: {}, "
+			"iov_count: {}", remaining, frag_needed,
+			iov_count);
 
 		/* non-blocking write */
 		errno = 0;
@@ -323,12 +319,15 @@ void svc_ioq_write(SVCXPRT *xprt)
 	struct xdr_ioq *xioq;
 	struct poolq_entry *have;
 
-#ifdef USE_LTTNG_NTIRPC
-	tracepoint(xprt, mutex, __func__, __LINE__, xprt);
-#endif /* USE_LTTNG_NTIRPC */
 	mutex_lock(&rec->writeq.qmutex);
+	XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, mutex_lock, TRACE_DEBUG,
+		"Locked mutex");
+
 	/* Process the xioq from the head of the xprt queue */
 	have = TAILQ_FIRST(&rec->writeq.qh);
+
+	XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, mutex_unlock, TRACE_DEBUG,
+		"Unlocking mutex");
 	mutex_unlock(&rec->writeq.qmutex);
 
 	while (have != NULL) {
@@ -346,10 +345,10 @@ void svc_ioq_write(SVCXPRT *xprt)
 			rc = svc_ioq_flushv(xprt, xioq);
 		}
 
-#ifdef USE_LTTNG_NTIRPC
-		tracepoint(xprt, mutex, __func__, __LINE__, &rec->xprt);
-#endif /* USE_LTTNG_NTIRPC */
 		mutex_lock(&rec->writeq.qmutex);
+		XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, mutex_lock,
+			TRACE_DEBUG, "Locked mutex");
+
 		if (rc < 0) {
 			/* IO failed, destroy the XPRT but continue the loop in order to
 			   release resources */
@@ -362,11 +361,15 @@ void svc_ioq_write(SVCXPRT *xprt)
 				"%s: %p fd %d EWOULDBLOCK",
 				__func__, xprt, xprt->xp_fd);
 			/* Add to epoll and stop processing this xprt's queue */
-#ifdef USE_LTTNG_NTIRPC
-			tracepoint(xprt, write_blocked, __func__, __LINE__,
-				   &rec->xprt);
-#endif /* USE_LTTNG_NTIRPC */
+
+			XPRT_AUTO_TRACEPOINT(
+				xprt, write_would_block,
+				TRACE_DEBUG, "Write got EWOULDBLOCK.");
+
 			svc_rqst_evchan_write(xprt, xioq, has_blocked);
+
+			XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, mutex_unlock,
+				TRACE_DEBUG, "Unlocking mutex");
 			mutex_unlock(&rec->writeq.qmutex);
 			break;
 		} else {
@@ -374,19 +377,23 @@ void svc_ioq_write(SVCXPRT *xprt)
 				__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
 					"%s: %p fd %d COMPLETED AFTER BLOCKING",
 					__func__, xprt, xprt->xp_fd);
-#ifdef USE_LTTNG_NTIRPC
-				tracepoint(xprt, write_complete, __func__, __LINE__,
-					   &rec->xprt, (int) xioq->has_blocked);
-#endif /* USE_LTTNG_NTIRPC */
+
+				XPRT_AUTO_TRACEPOINT(
+					xprt, write_complete_blocked,
+					TRACE_DEBUG, "Write completed after "
+					"blocking.");
+
 				svc_rqst_xprt_send_complete(xprt);
 			} else {
 				__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
 					"%s: %p fd %d COMPLETED",
 					__func__, xprt, xprt->xp_fd);
-#ifdef USE_LTTNG_NTIRPC
-				tracepoint(xprt, write_complete, __func__, __LINE__,
-					   &rec->xprt, (int) xioq->has_blocked);
-#endif /* USE_LTTNG_NTIRPC */
+
+				XPRT_AUTO_TRACEPOINT(
+					xprt, write_completed,
+					TRACE_DEBUG,
+					"Write completed. has_blocked: {}",
+					xioq->has_blocked);
 			}
 		}
 
@@ -421,9 +428,9 @@ svc_ioq_write_now(SVCXPRT *xprt, struct xdr_ioq *xioq)
 
 	SVC_REF(xprt, SVC_REF_FLAG_NONE);
 
-#ifdef USE_LTTNG_NTIRPC
-	tracepoint(xprt, mutex, __func__, __LINE__, &rec->xprt);
-#endif /* USE_LTTNG_NTIRPC */
+
+	XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, mutex_lock,
+		TRACE_DEBUG, "Locking mutex");
 	mutex_lock(&rec->writeq.qmutex);
 
 	was_empty = TAILQ_FIRST(&rec->writeq.qh) == NULL;
@@ -431,6 +438,8 @@ svc_ioq_write_now(SVCXPRT *xprt, struct xdr_ioq *xioq)
 	/* always queue output requests on the duplex record's writeq */
 	TAILQ_INSERT_TAIL(&rec->writeq.qh, &(xioq->ioq_s), q);
 
+	XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, mutex_unlock,
+		TRACE_DEBUG, "Unlocking mutex");
 	mutex_unlock(&rec->writeq.qmutex);
 
 	if (was_empty) {
@@ -457,16 +466,17 @@ svc_ioq_write_submit(SVCXPRT *xprt, struct xdr_ioq *xioq)
 
 	SVC_REF(xprt, SVC_REF_FLAG_NONE);
 
-#ifdef USE_LTTNG_NTIRPC
-	tracepoint(xprt, mutex, __func__, __LINE__, &xprt);
-#endif /* USE_LTTNG_NTIRPC */
 	mutex_lock(&rec->writeq.qmutex);
+	XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, mutex_lock, TRACE_DEBUG,
+		"Locked mutex");
 
 	was_empty = TAILQ_FIRST(&rec->writeq.qh) == NULL;
 
 	/* always queue output requests on the duplex record's writeq */
 	TAILQ_INSERT_TAIL(&rec->writeq.qh, &(xioq->ioq_s), q);
 
+	XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, mutex_unlock,
+		TRACE_DEBUG, "Unlocking mutex");
 	mutex_unlock(&rec->writeq.qmutex);
 
 	if (was_empty) {

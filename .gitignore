@@ -36,6 +36,7 @@ lib*.a
 src/libtirpc.la
 src/libtirpc_la-*.lo
 libntirpc.pc
+libntirpc_tracepoints.so*
 *.la
 #
 # generic editor backup et al
@@ -59,5 +60,10 @@ src/libntirpc.so
 src/libntirpc.so.*
 src/lttng/libntirpc_tracepoints.so*
 tests/rpcping
+
+ntirpc_lttng_generation_rules.cmake
+ntirpc_lttng_generation_file_properties.cmake
+ntirpc/lttng/generated_traces
+compile_commands.json
 
 .cache
