@@ -16,7 +16,7 @@ Tracepoint with curly brackets: {x} {1}, 2
 Max uint64: 18446744073709551615
 Unicode char: 😋
 Typedef: 5
-const: 1, static: 6, static const: P7
+const: 1, static: 6, static const: 7
 const arr: [1, 2, 3], array: [4, 5, 6], static array: [4, 5, 6], static const array: [8, 9, 10]
 Preprocessor: 3
 fnc several times: main main main

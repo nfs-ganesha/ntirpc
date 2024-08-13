@@ -1,11 +1,11 @@
 #!/usr/bin/python
 from pathlib import Path
+import tempfile
 import re
 import subprocess
 
 DIR_PATH = Path(__file__).parent
 GENERATOR_PATH = DIR_PATH / ".." / "generate_lttng_for_files"
-OUTPUT_PATH = DIR_PATH / "auto" / "error_tests"
 
 # Dictionary of tests and partial expected error
 TESTS = {
@@ -59,13 +59,13 @@ TESTS = {
 
 
 def tests():
-  OUTPUT_PATH.mkdir(parents=True, exist_ok=True)
+  output_path = tempfile.mkdtemp()
 
   for test, expected_error in TESTS.items():
     command = [
         str(GENERATOR_PATH),
         "--output_dir",
-        str(OUTPUT_PATH),
+        output_path,
         str(DIR_PATH / test),
     ]
     res = subprocess.run(

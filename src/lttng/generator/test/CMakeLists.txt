@@ -1,16 +1,22 @@
+execute_process(
+	COMMAND ${CMAKE_COMMAND} -E make_directory
+		"${CMAKE_CURRENT_BINARY_DIR}/generated_include/auto"
+	COMMAND_ERROR_IS_FATAL ANY
+)
+
 # Generate build rules for generated test traces
 execute_process(
     COMMAND bash -c "${CMAKE_CURRENT_SOURCE_DIR}/../generate_cmake_rules.py \
         --project_path ${CMAKE_CURRENT_SOURCE_DIR} \
         --provider_include_base_path auto/ \
         --traces_output_dir ${CMAKE_CURRENT_SOURCE_DIR}/auto/ \
-        --targets_output_path ${CMAKE_CURRENT_SOURCE_DIR}/lttng_generation_rules.cmake \
-        --file_properties_output_path ${CMAKE_CURRENT_SOURCE_DIR}/lttng_generation_file_properties.cmake"
+        --targets_output_path ${CMAKE_CURRENT_BINARY_DIR}/lttng_generation_rules.cmake \
+        --file_properties_output_path ${CMAKE_CURRENT_BINARY_DIR}/lttng_generation_file_properties.cmake"
     COMMAND_ERROR_IS_FATAL ANY
 )
 
-include("${CMAKE_CURRENT_SOURCE_DIR}/lttng_generation_rules.cmake")
-include("${CMAKE_CURRENT_SOURCE_DIR}/lttng_generation_file_properties.cmake")
+include("${CMAKE_CURRENT_BINARY_DIR}/lttng_generation_rules.cmake")
+include("${CMAKE_CURRENT_BINARY_DIR}/lttng_generation_file_properties.cmake")
 
 set(TestBinFiles
     test_code.c
@@ -35,6 +41,7 @@ target_link_libraries(test_bin
 target_include_directories(test_bin PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/../include/
+    "${CMAKE_CURRENT_BINARY_DIR}/generated_include/"
     ${LTTNGUST_INCLUDE_DIRS}
 )
 

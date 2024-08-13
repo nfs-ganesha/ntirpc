@@ -16,7 +16,7 @@ prov1:curly_brackets: { format = ( "Tracepoint with curly brackets: {{x}} {{{}}}
 prov1:max_uint64: { format = ( "Max uint64: {}" : container = 0 ), arg_1 = 18446744073709551615 }
 prov1:unicode: { format = ( "Unicode char: 😋" : container = 0 ) }
 prov1:type_def: { format = ( "Typedef: {}" : container = 0 ), td = 5 }
-prov1:qualifiers: { format = ( "const: {}, static: {}, static const: P{}" : container = 0 ), cnst = 1, stat = 0x6, sc = 7 }
+prov1:qualifiers: { format = ( "const: {}, static: {}, static const: {}" : container = 0 ), cnst = 1, stat = 0x6, sc = 7 }
 prov1:array_qualifiers: { format = ( "const arr: {}, array: {}, static array: {}, static const array: {}" : container = 0 ), ca = [ = 1, = 2, = 3 ], arr1 = [ = 4, = 5, = 6 ], sa = [ = 4, = 5, = 6 ], sca = [ = 8, = 9, = 10 ] }
 prov1:preprocessor: { format = ( "Preprocessor: {}" : container = 0 ), var_1 = 3 }
 prov1:fnc_test: { format = ( "fnc several times: main main main" : container = 0 ) }

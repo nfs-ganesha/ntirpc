@@ -43,6 +43,7 @@ C_FILE_EXTENSIONS = (".c", ".cxx", ".cpp")
 CODE_FILE_EXTENSIONS = C_FILE_EXTENSIONS + (".h", ".hpp")
 
 CMAKE_CURRENT_SOURCE_DIR = "${CMAKE_CURRENT_SOURCE_DIR}"
+CMAKE_BINARY_DIR = "${CMAKE_BINARY_DIR}"
 
 
 class CodeFile:
@@ -86,14 +87,8 @@ class CmakeRulesGenerator:
     self._include_path = include_path
     self._filter_out = filter_out
 
-    self._generate_command = os.path.join(
-        CMAKE_CURRENT_SOURCE_DIR, os.path.relpath(GENERATOR_PATH, project_path)
-    )
-
-    self._combine_command = os.path.join(
-        CMAKE_CURRENT_SOURCE_DIR,
-        os.path.relpath(COMBINED_COMMAND_PATH, project_path),
-    )
+    self._generate_command = GENERATOR_PATH
+    self._combine_command = COMBINED_COMMAND_PATH
 
   def _filter_code_files(self, files: Iterable[str]) -> List[str]:
     return [file for file in files if file.endswith(CODE_FILE_EXTENSIONS)]
@@ -343,9 +338,11 @@ class CmakeRulesGenerator:
       self, provider: str, dependencies: Iterable[str]
   ) -> str:
     c_files = " ".join(
-        file for file in dependencies if file.endswith(C_FILE_EXTENSIONS)
+        os.path.abspath(file)
+        for file in dependencies
+        if file.endswith(C_FILE_EXTENSIONS)
     )
-    deps = " ".join(dependencies)
+    deps = " ".join(os.path.abspath(file) for file in dependencies)
     include_path_option = ""
     if self._include_path:
       include_path_option = "--include_path {}".format(self._include_path)
@@ -353,6 +350,7 @@ class CmakeRulesGenerator:
     out = (
         "add_custom_command(OUTPUT {traces_output_dir}/{provider}.h\n\tCOMMAND"
         ' bash -c "{generate_command} --output_dir {traces_output_dir}'
+        " --compile_commands_dir {current_binary_dir}"
         " {include_path_option} --provider {provider}"
         ' {c_files}"\n\tWORKING_DIRECTORY {current_source_dir}\n\tDEPENDS'
         " {generator_binary} {dependencies}\n\tCOMMENT Generating header file"
@@ -365,6 +363,7 @@ class CmakeRulesGenerator:
             generator_binary=GENERATOR_BINARY,
             include_path_option=include_path_option,
             current_source_dir=CMAKE_CURRENT_SOURCE_DIR,
+            current_binary_dir=CMAKE_BINARY_DIR,
         )
     )
 
@@ -559,10 +558,7 @@ def parse_args() -> Tuple[str, str, str, str, List[str], str, str, str]:
   traces_output_relative_path = os.path.relpath(
       args.traces_output_dir, project_path
   )
-  traces_output_dir = os.path.join(
-      CMAKE_CURRENT_SOURCE_DIR,
-      traces_output_relative_path,
-  )
+  traces_output_dir = os.path.abspath(args.traces_output_dir)
 
   unique_prefix = args.unique_prefix + "_" if args.unique_prefix else ""
 

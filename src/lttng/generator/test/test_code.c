@@ -126,7 +126,7 @@ int main(void) {
   static char stat = 6;
   static const int sc = 7;
   AUTO_TRACEPOINT(prov1, qualifiers, TRACE_NOTICE,
-                  "const: {}, static: {}, static const: P{}", cnst, stat, sc);
+                  "const: {}, static: {}, static const: {}", cnst, stat, sc);
 
   const int ca[] = {1, 2, 3};
   int arr1[] = {4, 5, 6};

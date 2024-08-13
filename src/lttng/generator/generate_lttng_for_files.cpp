@@ -27,6 +27,7 @@
 #include <clang/Tooling/CommonOptionsParser.h>
 #include <clang/Tooling/Tooling.h>
 #include <filesystem>
+#include <iostream>
 #include <string>
 #include <vector>
 
@@ -47,11 +48,12 @@ static std::vector<std::string> splitPath(std::string path) {
 }
 
 static std::vector<std::string>
-getCompileSourcePath(CommonOptionsParser &parser) {
+getCompileSourcePath(const CompilationDatabase &compilationDatabase,
+                     const std::vector<std::string> &sourcePathList) {
   std::vector<std::string> sourcesToCompile;
 
-  const auto sourcesInDb = parser.getCompilations().getAllFiles();
-  for (const auto &source : parser.getSourcePathList()) {
+  const auto sourcesInDb = compilationDatabase.getAllFiles();
+  for (const auto &source : sourcePathList) {
     if (std::find(sourcesInDb.begin(), sourcesInDb.end(),
                   std::filesystem::canonical(source)) != sourcesInDb.end()) {
       sourcesToCompile.push_back(source);
@@ -67,16 +69,20 @@ int main(int argc, const char **argv) {
                                "boilerplate code for LTTNG tracepoints");
   llvm::cl::extrahelp commonHelp(CommonOptionsParser::HelpMessage);
 
-  static llvm::cl::opt<std::string> outputDir(
+  llvm::cl::opt<std::string> outputDir(
       "output_dir", llvm::cl::NormalFormatting, llvm::cl::Required,
       llvm::cl::desc("Output directory for generated headers"));
 
-  static llvm::cl::opt<std::string> provider(
+  llvm::cl::opt<std::string> compileCommandsPath(
+      "compile_commands_dir", llvm::cl::NormalFormatting, llvm::cl::Optional,
+      llvm::cl::desc("Path to the directory containing compile_commands.json"));
+
+  llvm::cl::opt<std::string> provider(
       "provider", llvm::cl::NormalFormatting, llvm::cl::Optional,
       llvm::cl::init(""),
       llvm::cl::desc("The provider for which to generate traces"));
 
-  static llvm::cl::opt<std::string> includePath(
+  llvm::cl::opt<std::string> includePath(
       "include_path", llvm::cl::NormalFormatting, llvm::cl::Optional,
       llvm::cl::init(""),
       llvm::cl::desc(
@@ -98,8 +104,27 @@ int main(int argc, const char **argv) {
                                  : std::optional<std::vector<std::string>>(
                                        splitPath(includePath.getValue()));
 
-  ClangTool tool(expectedParser->getCompilations(),
-                 getCompileSourcePath(*expectedParser));
+  const CompilationDatabase *compilationDatabase;
+  std::unique_ptr<CompilationDatabase> compilationDbFromDir;
+  if (compileCommandsPath.getValue() != "") {
+    std::string err;
+    compilationDbFromDir = CompilationDatabase::loadFromDirectory(
+        compileCommandsPath.getValue(), err);
+    if (!compilationDbFromDir) {
+      std::cerr << "Failed to get compilation database from "
+                << compileCommandsPath.getValue() << ".\n"
+                << "Err: " << err << "\n";
+      exit(1);
+    }
+
+    compilationDatabase = compilationDbFromDir.get();
+  } else {
+    compilationDatabase = &expectedParser->getCompilations();
+  }
+
+  ClangTool tool(*compilationDatabase,
+                 getCompileSourcePath(*compilationDatabase,
+                                      expectedParser->getSourcePathList()));
   generate_lttng(tool, std::filesystem::absolute(outputDir.getValue()),
                  optionalProvider, optionalCompilePath);
 

@@ -52,7 +52,8 @@ public:
 
     for (const auto &pathEntry : getPath()) {
       if (headerFullPathStr.substr(0, pathEntry.length()) == pathEntry &&
-          headerFullPathStr.length() > pathEntry.length() + 1) {
+          headerFullPathStr.length() > pathEntry.length() + 1 &&
+          headerFullPathStr[pathEntry.length() + 1] == '/') {
         /* We remove the relative path + 1 to also remove the following "/" */
         return headerFullPathStr.substr(pathEntry.length() + 1);
       }

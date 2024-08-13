@@ -63,7 +63,6 @@ tests/rpcping
 
 ntirpc_lttng_generation_rules.cmake
 ntirpc_lttng_generation_file_properties.cmake
-ntirpc/lttng/generated_traces
-compile_commands.json
+ntirpc_generated_include
 
 .cache

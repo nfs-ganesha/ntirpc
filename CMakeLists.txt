@@ -127,19 +127,16 @@ if(USE_LTTNG)
 
     set(CMAKE_C_STANDARD_INCLUDE_DIRECTORIES ${CMAKE_C_IMPLICIT_INCLUDE_DIRECTORIES})
 
-    # Create symlink for compile commands to the source directory. This way it
-    # can be found regardless of where the binary dir is
-    if(NOT ${CMAKE_BINARY_DIR} STREQUAL ${CMAKE_CURRENT_SOURCE_DIR})
     execute_process(
-        COMMAND ${CMAKE_COMMAND} -E create_symlink
-            ${CMAKE_BINARY_DIR}/compile_commands.json
-            ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json
+	COMMAND ${CMAKE_COMMAND} -E make_directory
+		"${CMAKE_CURRENT_BINARY_DIR}/ntirpc_generated_include/lttng/generated_traces"
+	COMMAND_ERROR_IS_FATAL ANY
     )
-    endif(NOT ${CMAKE_BINARY_DIR} STREQUAL ${CMAKE_CURRENT_SOURCE_DIR})
 
     include_directories(
       ${LTTNG_INCLUDE_DIR}
-      "${NTIRPC_BASE_DIR}/src/lttng/generator/include/"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/lttng/generator/include/"
+      "${CMAKE_CURRENT_BINARY_DIR}/ntirpc_generated_include/"
     )
 
     set(USE_LTTNG_NTIRPC ON)
@@ -151,16 +148,16 @@ if(USE_LTTNG)
           --provider_include_base_path lttng/generated_traces/ \
           --unique_prefix ntirpc \
           --filter_out src/lttng/generator \
-          --traces_output_dir ${CMAKE_CURRENT_SOURCE_DIR}/ntirpc/lttng/generated_traces/ \
-          --include_path ${CMAKE_CURRENT_SOURCE_DIR}/ntirpc:${CMAKE_CURRENT_SOURCE_DIR}/src/lttng/generator/include/ \
-          --targets_output_path ${CMAKE_CURRENT_SOURCE_DIR}/ntirpc_lttng_generation_rules.cmake \
-          --file_properties_output_path ${CMAKE_CURRENT_SOURCE_DIR}/ntirpc_lttng_generation_file_properties.cmake"
+          --traces_output_dir ${CMAKE_CURRENT_BINARY_DIR}/ntirpc_generated_include/lttng/generated_traces/ \
+          --include_path ${CMAKE_CURRENT_SOURCE_DIR}/ntirpc:${CMAKE_CURRENT_SOURCE_DIR}/src/lttng/generator/include/:${CMAKE_CURRENT_BINARY_DIR}/ntirpc_generated_include/ \
+          --targets_output_path ${CMAKE_CURRENT_BINARY_DIR}/ntirpc_lttng_generation_rules.cmake \
+          --file_properties_output_path ${CMAKE_CURRENT_BINARY_DIR}/ntirpc_lttng_generation_file_properties.cmake"
 
       COMMAND_ERROR_IS_FATAL ANY
     )
 
-    include("${CMAKE_CURRENT_SOURCE_DIR}/ntirpc_lttng_generation_rules.cmake")
-    include("${CMAKE_CURRENT_SOURCE_DIR}/ntirpc_lttng_generation_file_properties.cmake")
+    include("${CMAKE_CURRENT_BINARY_DIR}/ntirpc_lttng_generation_rules.cmake")
+    include("${CMAKE_CURRENT_BINARY_DIR}/ntirpc_lttng_generation_file_properties.cmake")
   else(LTTNG_FOUND)
     message(WARNING "LTTng libraries not found. Disabling USE_LTTNG_NTIRPC")
     set(USE_LTTNG_NTIRPC OFF)

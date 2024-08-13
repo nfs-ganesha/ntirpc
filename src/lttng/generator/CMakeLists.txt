@@ -96,13 +96,13 @@ if(NOT ${CMAKE_BINARY_DIR} STREQUAL ${CMAKE_CURRENT_SOURCE_DIR})
 endif(NOT ${CMAKE_BINARY_DIR} STREQUAL ${CMAKE_CURRENT_SOURCE_DIR})
 
 # Run tests at the end of the build
-add_custom_command(OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/test/auto/ran_tests
-     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test/run_tests.sh && touch ${CMAKE_CURRENT_SOURCE_DIR}/test/auto/ran_tests
+add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/ran_tests
+     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test/run_tests.sh ${} && touch ${CMAKE_CURRENT_BINARY_DIR}/ran_tests
      DEPENDS generate_lttng_for_files generate_lttng_for_project test_bin
      COMMENT "Run tests"
 )
 
 add_custom_target(tests_target
      ALL
-     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/test/auto/ran_tests
+     DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/ran_tests
 )
