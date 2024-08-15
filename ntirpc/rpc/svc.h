@@ -548,7 +548,7 @@ static inline void svc_destroy_it(SVCXPRT *xprt,
 	 */
 	retry = 0;
 	while (xprt->xp_ops == NULL && retry < SVC_DESTROY_RETRY) {
-		pthread_yield();
+		sched_yield();
 		retry += 1;
 	};
 
