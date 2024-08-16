@@ -156,6 +156,7 @@ typedef struct xdr_uio {
 	void	*uio_p2;
 	void	*uio_u1;
 	void	*uio_u2;
+	void	*uio_u3;
 
 	size_t	uio_count;	/* count of entries in vio array,
 				 * 0: not allocated */
