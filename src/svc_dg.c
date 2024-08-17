@@ -143,6 +143,7 @@ svc_dg_ncreatef(const int fd, const u_int sendsz, const u_int recvsz,
 			__func__, fd);
 		return (NULL);
 	}
+	atomic_clear_uint16_t_bits(&xprt->xp_flags, SVC_XPRT_FLAG_INITIAL);
 	rec = REC_XPRT(xprt);
 
 	xp_flags = atomic_postset_uint16_t_bits(&xprt->xp_flags, flags

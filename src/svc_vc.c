@@ -168,6 +168,9 @@ svc_vc_ncreatef(const int fd, const u_int sendsz, const u_int recvsz,
 			__func__, fd);
 		return (NULL);
 	}
+
+	atomic_clear_uint16_t_bits(&xprt->xp_flags, SVC_XPRT_FLAG_INITIAL);
+
 	rec = REC_XPRT(xprt);
 
 	xp_flags = atomic_postset_uint16_t_bits(&xprt->xp_flags,
@@ -376,7 +379,7 @@ svc_fd_ncreatef(const int fd, const u_int sendsize, const u_int recvsize,
 			   (flags & SVC_XPRT_FLAG_CLOSE) |
 			   (flags & SVC_XPRT_FLAG_LOOKUP_ONLY));
 
-	if ((!xprt) || (!(xprt->xp_flags & SVC_XPRT_FLAG_INITIAL)))
+	if (!xprt)
 		return (xprt);
 
 	svc_vc_override_ops(xprt, NULL);
@@ -542,6 +545,12 @@ svc_vc_rendezvous(SVCXPRT *xprt)
 
 	SVC_REF(xprt, SVC_REF_FLAG_NONE);
 	newxprt->xp_parent = xprt;
+
+	/* Clear INITIAL here, as calling register and adding recv hook might
+	 * cause a race with a new thread handling the recv and looking for the
+	 * xprt before the flag is unset. */
+	atomic_clear_uint16_t_bits(&newxprt->xp_flags, SVC_XPRT_FLAG_INITIAL);
+
 	if (xprt->xp_dispatch.rendezvous_cb(newxprt)
 	 || svc_rqst_xprt_register(newxprt, xprt)) {
 		// Note xp_parent is released in svc_vc_destroy_task

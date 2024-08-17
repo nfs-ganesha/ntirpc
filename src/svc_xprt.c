@@ -224,20 +224,20 @@ svc_xprt_lookup(int fd, svc_xprt_setup_t setup)
 			__func__, fd, xprt);
 	}
 
+	/* check the race where this is a call from previous fd event */
+	if (xprt->xp_flags & SVC_XPRT_FLAG_INITIAL) {
+		__warnx(TIRPC_DEBUG_FLAG_WARN,
+			"%s: fd %d xprt %p, called when xprt in not fully initialized. report not found.",
+			__func__, fd, xprt, xprt->xp_flags);
+		rwlock_unlock(&t->lock);
+		return (NULL);
+	}
+
 	/* lookup reference before unlock ensures shutdown cannot release */
 	SVC_REF(xprt, SVC_REF_FLAG_NONE);
 	rwlock_unlock(&t->lock);
 
-	/* unlocked window here permits shutdown to destroy without release;
-	 * then duplex lock is required to match allocation return,
-	 * ensuring SVC_XPRT_FLAG_INITIAL cleared in this thread only
-	 * (obviating extra atomic fetch).
-	 */
-	rpc_dplx_rli(rec);
-	xp_flags = atomic_clear_uint16_t_bits(&xprt->xp_flags,
-					      SVC_XPRT_FLAG_INITIAL);
-	rpc_dplx_rui(rec);
-
+	xp_flags = xprt->xp_flags;
 	if (!(xp_flags & SVC_XPRT_FLAG_DESTROYED)) {
 		/* do not return destroyed xprts */
 		return (xprt);
