@@ -148,6 +148,7 @@ svc_xprt_lookup(int fd, svc_xprt_setup_t setup)
 	struct opr_rbtree_node *nv;
 	SVCXPRT *xprt = NULL;
 	uint16_t xp_flags;
+	static uint32_t xprt_unique_id = 1;
 
 	if (svc_xprt_init_failure())
 		return (NULL);
@@ -189,6 +190,8 @@ svc_xprt_lookup(int fd, svc_xprt_setup_t setup)
 			xprt->xp_fd_send = -1;
 			xprt->xp_flags = SVC_XPRT_FLAG_INITIAL;
 			xprt->xp_dispatch.remote_addr_set_cb = NULL;
+			xprt->xp_unique_id =
+					atomic_inc_uint32_t(&xprt_unique_id);
 
 			/* Get ref for caller */
 			SVC_REF(xprt, SVC_REF_FLAG_NONE);
@@ -208,6 +211,14 @@ svc_xprt_lookup(int fd, svc_xprt_setup_t setup)
 				__warnx(TIRPC_DEBUG_FLAG_WARN,
 					"%s: fd %d xprt WAS NOT created!",
 					__func__, fd);
+			} else {
+				XPRT_AUTO_TRACEPOINT(xprt, xprt_created,
+						TRACE_INFO,
+						"xprt was created with xp_unique_id {}",
+						xprt->xp_unique_id);
+				__warnx(TIRPC_DEBUG_FLAG_SVC_XPRT,
+					"%s: fd %d xprt %p created with xp_unique_id %" PRIu32,
+					__func__, fd, xprt, xprt->xp_unique_id);
 			}
 			rwlock_unlock(&t->lock);
 			metrics_libntirpc_update_tcp_connection_count(atomic_fetch_uint32_t(&svc_xprt_fd.connections));
@@ -282,9 +293,12 @@ svc_xprt_clear(SVCXPRT *xprt)
 			atomic_dec_uint32_t(&svc_xprt_fd.connections);
 #endif
 
+		XPRT_AUTO_TRACEPOINT(xprt, xprt_cleared, TRACE_INFO,
+				"xprt with xp_unique_id {} is cleared",
+				xprt->xp_unique_id);
 		__warnx(TIRPC_DEBUG_FLAG_SVC_XPRT,
-			"Clearing xprts at %p: size %d",
-			xprt, t->t.size);
+			"Clearing xprts at %p: size %d and unique_id %" PRIu32,
+			xprt, t->t.size, xprt->xp_unique_id);
 
 		uint16_t xp_flags = atomic_postclear_uint16_t_bits(
 			&xprt->xp_flags, SVC_XPRT_TREE_LOCKED);
