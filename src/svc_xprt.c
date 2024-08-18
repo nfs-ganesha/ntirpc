@@ -62,6 +62,7 @@
 #define SVC_XPRT_PARTITIONS 193
 
 static bool initialized;
+static uint32_t xprt_unique_id = 0;
 
 struct svc_xprt_fd {
 	mutex_t lock;
@@ -189,6 +190,8 @@ svc_xprt_lookup(int fd, svc_xprt_setup_t setup)
 			xprt->xp_fd_send = -1;
 			xprt->xp_flags = SVC_XPRT_FLAG_INITIAL;
 			xprt->xp_dispatch.remote_addr_set_cb = NULL;
+			xprt->xp_unique_id =
+					atomic_inc_uint32_t(&xprt_unique_id);
 
 			/* Get ref for caller */
 			SVC_REF(xprt, SVC_REF_FLAG_NONE);
@@ -208,6 +211,10 @@ svc_xprt_lookup(int fd, svc_xprt_setup_t setup)
 				__warnx(TIRPC_DEBUG_FLAG_WARN,
 					"%s: fd %d xprt WAS NOT created!",
 					__func__, fd);
+			} else {
+				__warnx(TIRPC_DEBUG_FLAG_SVC_XPRT,
+					"%s: fd %d xprt %p created with xp_unique_id %" PRIu32,
+					__func__, fd, xprt, xprt->xp_unique_id);
 			}
 			rwlock_unlock(&t->lock);
 			metrics_libntirpc_update_tcp_connection_count(atomic_fetch_uint32_t(&svc_xprt_fd.connections));
