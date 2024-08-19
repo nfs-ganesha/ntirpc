@@ -50,6 +50,7 @@
 #include <intrinsic.h>
 #include <misc/abstract_atomic.h>
 #include "rpc_com.h"
+#include "gsh_rpc.h"
 
 #ifdef USE_RPC_RDMA
 #include "rpc_rdma.h"
@@ -858,11 +859,64 @@ xdr_ioq_getbytes(XDR *xdrs, char *addr, u_int len)
 
 #ifdef USE_RPC_RDMA
 
+/*
+ * Destroy rdma buffers
+ */
 static void
 xdr_ioq_destroy_internal_rdma(XDR *xdrs)
 {
 	__warnx(TIRPC_DEBUG_FLAG_XDR, "%s: no op for rdma",
 	    __func__);
+}
+
+/*
+ * Get start position for rdma data
+ */
+static u_int
+xdr_ioq_getstartdatapos_rdma(XDR *xdrs, u_int start, u_int datalen)
+{
+	u_int offset = 0;
+	struct xdr_ioq *xioq = XIOQ(xdrs);
+	struct xdr_ioq_uv *uv = IOQV(xioq->xdrs[0].x_base);
+
+	assert(xioq->rdma_ioq);
+	assert(ioquv_size(uv) == RDMA_HDR_CHUNK_SZ);
+
+	/* Check if data is not inline.
+	 * If data is inline, it should be part of nfs_buffer itself.
+	 * If data is not inline, then rdma_read buffers will be placed after
+	 * nfs_buffer, so calculate offset for end of nfs_buffer */
+	if (datalen > ((uintptr_t)xdrs->x_v.vio_tail - (uintptr_t)xdrs->x_data)) {
+		offset = (uintptr_t)xdrs->x_v.vio_tail - (uintptr_t)xdrs->x_data;
+	}
+
+	return start + offset;
+
+}
+
+/*
+ * Get end position for rdma data
+ */
+static u_int
+xdr_ioq_getenddatapos_rdma(XDR *xdrs, u_int start, u_int datalen)
+{
+	u_int offset = 0;
+	struct xdr_ioq *xioq = XIOQ(xdrs);
+	struct xdr_ioq_uv *uv = IOQV(xioq->xdrs[0].x_base);
+
+	assert(xioq->rdma_ioq);
+	assert(ioquv_size(uv) == RDMA_HDR_CHUNK_SZ);
+
+	/* Check if data is not inline.
+	 * If data is inline, it should be part of nfs_buffer itself.
+	 * If data is not inline, then rdma_read buffers will be placed after
+	 * nfs_buffer, so we need to set start within nfs_buffer itself to read
+	 * next nfs header in compound op. */
+	if (datalen > ((uintptr_t)xdrs->x_v.vio_tail - (uintptr_t)xdrs->x_data)) {
+		offset = (uintptr_t)xdrs->x_v.vio_tail - (uintptr_t)xdrs->x_data;
+	}
+
+	return start - offset;
 }
 
 static bool
@@ -1130,6 +1184,24 @@ xdr_ioq_getpos(XDR *xdrs)
 	return (XIOQ(xdrs)->ioq_uv.plength
 		+ ((uintptr_t)xdrs->x_data
 		   - (uintptr_t)xdrs->x_v.vio_head));
+}
+
+/*
+ * Get position for start of data
+ */
+static u_int
+xdr_ioq_getstartdatapos(XDR *xdrs, u_int start, u_int datalen)
+{
+	return start;
+}
+
+/*
+ * Get position for end of data
+ */
+static u_int
+xdr_ioq_getenddatapos(XDR *xdrs, u_int start, u_int datalen)
+{
+	return start + datalen;
 }
 
 /*
@@ -1716,6 +1788,8 @@ const struct xdr_ops xdr_ioq_ops = {
 	xdr_ioq_getbytes,
 	xdr_ioq_putbytes,
 	xdr_ioq_getpos,
+	xdr_ioq_getstartdatapos,
+	xdr_ioq_getenddatapos,
 	xdr_ioq_setpos,
 	xdr_ioq_destroy_internal,
 	xdr_ioq_control,
@@ -1734,6 +1808,8 @@ const struct xdr_ops xdr_ioq_ops_rdma = {
 	xdr_ioq_getbytes_rdma,
 	xdr_ioq_putbytes,
 	xdr_ioq_getpos,
+	xdr_ioq_getstartdatapos_rdma,
+	xdr_ioq_getenddatapos_rdma,
 	xdr_ioq_setpos,
 	xdr_ioq_destroy_internal_rdma,
 	xdr_ioq_control,

@@ -193,6 +193,10 @@ typedef struct rpc_xdr {
 		bool (*x_putbytes)(struct rpc_xdr *, const char *, u_int);
 		/* returns bytes off from beginning */
 		u_int (*x_getpostn)(struct rpc_xdr *);
+		/* return bytes off from beginning for start of data */
+		u_int (*x_getstartdatapos)(struct rpc_xdr *, u_int, u_int);
+		/* return bytes off from beginning for end of data */
+		u_int (*x_getenddatapos)(struct rpc_xdr *, u_int, u_int);
 		/* lets you reposition the stream */
 		bool (*x_setpostn)(struct rpc_xdr *, u_int);
 		/* free private resources of this xdr_stream */
@@ -327,6 +331,16 @@ xdr_putlong(XDR *xdrs, const long *lp)
 	(*(xdrs)->x_ops->x_getpostn)(xdrs)
 #define xdr_getpos(xdrs)			\
 	(*(xdrs)->x_ops->x_getpostn)(xdrs)
+
+#define XDR_GETSTARTDATAPOS(xdrs, start, datalen)	\
+	(*(xdrs)->x_ops->x_getstartdatapos)(xdrs, start, datalen)
+#define xdr_getstartdatapos(xdrs, start, datalen)	\
+	(*(xdrs)->x_ops->x_getstartdatapos)(xdrs, start, datalen)
+
+#define XDR_GETENDDATAPOS(xdrs, start, datalen)		\
+	(*(xdrs)->x_ops->x_getenddatapos)(xdrs, start, datalen)
+#define xdr_getenddatapos(xdrs, start, datalen)		\
+	(*(xdrs)->x_ops->x_getenddatapos)(xdrs, start, datalen)
 
 #define XDR_SETPOS(xdrs, pos)			\
 	(*(xdrs)->x_ops->x_setpostn)(xdrs, pos)
