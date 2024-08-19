@@ -149,6 +149,18 @@ xdrmem_getpos(XDR *xdrs)
 	return ((uintptr_t)xdrs->x_data - (uintptr_t)xdrs->x_v.vio_head);
 }
 
+static u_int
+xdrmem_getstartdatapos(XDR *xdrs, u_int start, u_int datalen)
+{
+	return start;
+}
+
+static u_int
+xdrmem_getenddatapos(XDR *xdrs, u_int start, u_int datalen)
+{
+	return start + datalen;
+}
+
 static bool
 xdrmem_setpos(XDR *xdrs, u_int pos)
 {
@@ -292,6 +304,8 @@ static const struct xdr_ops xdrmem_ops_aligned = {
 	xdrmem_getbytes,
 	xdrmem_putbytes,
 	xdrmem_getpos,
+	xdrmem_getstartdatapos,
+	xdrmem_getenddatapos,
 	xdrmem_setpos,
 	xdrmem_destroy,
 	(dummyfunc3) xdrmem_noop,	/* x_control */
