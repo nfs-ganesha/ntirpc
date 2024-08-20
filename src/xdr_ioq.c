@@ -50,7 +50,6 @@
 #include <intrinsic.h>
 #include <misc/abstract_atomic.h>
 #include "rpc_com.h"
-#include "gsh_rpc.h"
 
 #ifdef USE_RPC_RDMA
 #include "rpc_rdma.h"
