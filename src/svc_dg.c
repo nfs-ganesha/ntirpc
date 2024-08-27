@@ -255,7 +255,7 @@ svc_dg_rendezvous(SVCXPRT *xprt)
 	su->su_dr.maxrec = req_su->su_dr.maxrec;
 	svc_dg_override_ops(newxprt, xprt);
 
- again:
+again:
 	iov.iov_base = &su[1];
 	iov.iov_len = su->su_dr.maxrec;
 	mesgp = &su->su_msghdr;
@@ -281,21 +281,21 @@ svc_dg_rendezvous(SVCXPRT *xprt)
 		return (XPRT_DIED);
 	}
 
-        if (sp->sa_family == (sa_family_t) 0xffff) {
-                __warnx(TIRPC_DEBUG_FLAG_ERROR,
+	if (sp->sa_family == (sa_family_t) 0xffff) {
+		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s: xprt(%p) newxprt(%p) fd %d Bad message sa_family is 0xffff",
 			__func__, xprt, newxprt, newxprt->xp_fd);
 		svc_dg_xprt_free(su);
-                return SVC_STAT(xprt);
-        }
+		return SVC_STAT(xprt);
+	}
 
-        if (rlen == -1 || (rlen < (ssize_t) (4 * sizeof(u_int32_t)))) {
-                __warnx(TIRPC_DEBUG_FLAG_ERROR,
+	if (rlen == -1 || (rlen < (ssize_t) (4 * sizeof(u_int32_t)))) {
+		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 				"%s: xprt(%p) newxprt(%p) fd %d Bad message rlen: %d",
 				__func__, xprt, newxprt, newxprt->xp_fd, rlen);
 		svc_dg_xprt_free(su);
-                return SVC_STAT(xprt);
-        }
+		return SVC_STAT(xprt);
+	}
 
 	__rpc_address_setup(&newxprt->xp_local);
 	__rpc_address_setup(&newxprt->xp_remote);
@@ -315,13 +315,13 @@ svc_dg_rendezvous(SVCXPRT *xprt)
 #endif
 
 	xdrmem_create(su->su_dr.ioq.xdrs, iov.iov_base, iov.iov_len,
-		      XDR_DECODE);
+		XDR_DECODE);
 
 	SVC_REF(xprt, SVC_REF_FLAG_NONE);
 	newxprt->xp_parent = xprt;
 
 	atomic_set_uint16_t_bits(&newxprt->xp_flags,
-	    SVC_XPRT_FLAG_READY);
+		SVC_XPRT_FLAG_READY);
 
 	return (xprt->xp_dispatch.rendezvous_cb(newxprt));
 }

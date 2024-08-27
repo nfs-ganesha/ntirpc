@@ -565,9 +565,12 @@ static inline void svc_destroy_it(SVCXPRT *xprt,
 		(*(xprt)->xp_ops->xp_unref_user_data)(xprt);
 	}
 
-	/* Let's shutdown the sockets so that FIN-ACK
-	 * could be sent to the client immediately */
-	if (xprt->xp_fd != RPC_ANYFD) {
+	/* Check if the connection was already set as dead or closed,
+	 * If set, let's cleanup and close the FDs, so that FIN-ACK
+	 * could be sent to the client immediately.
+	 * Also for UDP xprt, this is never set, needn't enter here */
+	if ((atomic_fetch_uint16_t(&xprt->xp_flags) & SVC_XPRT_FLAG_CLOSE)
+	    && xprt->xp_fd != RPC_ANYFD) {
 		(void)shutdown(xprt->xp_fd, SHUT_RDWR);
 		if (xprt->xp_fd_send != RPC_ANYFD)
 			(void)shutdown(xprt->xp_fd_send, SHUT_RDWR);
