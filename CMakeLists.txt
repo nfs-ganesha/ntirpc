@@ -60,14 +60,6 @@ include_directories(
   ${PROJECT_SOURCE_DIR}/../monitoring/include/
 )
 
-# setup paths of elfs dependencies (traces) of libntirpc
-LIST(APPEND CMAKE_LIBRARY_PATH "${PROJECT_SOURCE_DIR}/../elfs/bazel-bin/infra/traces")
-LINK_DIRECTORIES("${PROJECT_SOURCE_DIR}/../elfs/bazel-bin/infra/traces")
-# TODO: b/302440026 - Use specific includes of traces and their dependencies from elfs
-include_directories(
-  ${PROJECT_SOURCE_DIR}/../elfs/
-)
-
 # Allow overriding of prefix
 if (OVERRIDE_INSTALL_PREFIX)
   set(CMAKE_INSTALL_PREFIX ${OVERRIDE_INSTALL_PREFIX} CACHE PATH

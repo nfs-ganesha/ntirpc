@@ -132,7 +132,7 @@ svc_init(svc_init_params *params)
 	struct work_pool_params work_pool_params = {0,};
 	uint32_t channels = params->channels ? params->channels : 8;
 
-	/* Initialize gtraces for libntirpc */
+	/* Initialize metrics for libntirpc */
 	metrics_libntirpc_init();
 
 	mutex_lock(&__svc_params->mtx);

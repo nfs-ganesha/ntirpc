@@ -86,7 +86,6 @@ NTIRPC_${NTIRPC_VERSION_BASE} {
     getrpcent;
     getrpcbynumber;
     getrpcbyname;
-    gtraces_print_trace_info;
 
     # n*
     nc_perror;

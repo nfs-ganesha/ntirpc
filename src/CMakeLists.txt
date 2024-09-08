@@ -106,8 +106,6 @@ target_link_libraries(ntirpc
   ${SYSTEM_LIBRARIES}
   ${CMAKE_THREAD_LIBS_INIT}
   ${MONITORING_LIBRARIES}
-  elfstraces
-  generate_trace_info
 )
 
 if(USE_LTTNG)
@@ -122,15 +120,5 @@ set_target_properties(ntirpc PROPERTIES LINK_FLAGS
   )
 
 install(TARGETS ntirpc DESTINATION ${LIB_INSTALL_DIR})
-
-########### install files ###############
-
-install(
-  FILES
-    ${PROJECT_SOURCE_DIR}/../elfs/bazel-bin/infra/traces/libelfstraces.so
-    ${PROJECT_SOURCE_DIR}/../elfs/bazel-bin/infra/traces/libgenerate_trace_info.so
-  DESTINATION ${LIB_INSTALL_DIR}
-  PERMISSIONS OWNER_WRITE OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
-)
 
 # We are still missing the install of docs and stuff
