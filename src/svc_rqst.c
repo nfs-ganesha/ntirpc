@@ -665,7 +665,7 @@ svc_rqst_rearm_events_locked(SVCXPRT *xprt, uint16_t ev_flags)
 		is_rec_shutdown                      ? "sr_rec->ev_flags SHUTDOWN" : "");
 
 	if (is_xprt_destroyed || is_rec_shutdown)
-		return (0);
+		return (1);
 
 	/* Don't take a ref on the xprt.  We take a ref in hook, and release it
 	 * in unhook. */
