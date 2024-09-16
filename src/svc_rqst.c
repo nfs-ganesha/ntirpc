@@ -717,7 +717,6 @@ svc_rqst_rearm_events_locked(SVCXPRT *xprt, uint16_t ev_flags)
 					sr_rec, sr_rec->id_k, sr_rec->ev_refcnt,
 					sr_rec->ev_u.epoll.epoll_fd,
 					sr_rec->sv[0], sr_rec->sv[1], code);
-				SVC_RELEASE(xprt, SVC_RELEASE_FLAG_NONE);
 			} else {
 				__warnx(TIRPC_DEBUG_FLAG_SVC_RQST |
 					TIRPC_DEBUG_FLAG_REFCNT,
@@ -757,7 +756,6 @@ svc_rqst_rearm_events_locked(SVCXPRT *xprt, uint16_t ev_flags)
 					sr_rec, sr_rec->id_k, sr_rec->ev_refcnt,
 					sr_rec->ev_u.epoll.epoll_fd,
 					sr_rec->sv[0], sr_rec->sv[1], code);
-				SVC_RELEASE(xprt, SVC_RELEASE_FLAG_NONE);
 			} else {
 				__warnx(TIRPC_DEBUG_FLAG_SVC_RQST |
 					TIRPC_DEBUG_FLAG_REFCNT,
