@@ -186,6 +186,7 @@ svc_vc_ncreatef(const int fd, const u_int sendsz, const u_int recvsz,
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s: fd %d could not get transport information",
 			__func__, fd);
+		SVC_RELEASE(xprt, SVC_RELEASE_FLAG_NONE);
 		return (NULL);
 	}
 
@@ -196,6 +197,7 @@ svc_vc_ncreatef(const int fd, const u_int sendsz, const u_int recvsz,
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s: fd %d could not get network information",
 			__func__, fd);
+		SVC_RELEASE(xprt, SVC_RELEASE_FLAG_NONE);
 		return (NULL);
 	}
 
@@ -239,6 +241,7 @@ svc_vc_ncreatef(const int fd, const u_int sendsz, const u_int recvsz,
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s: fd %d getsockname failed (%d)",
 			 __func__, fd, rc);
+		SVC_RELEASE(xprt, SVC_RELEASE_FLAG_NONE);
 		return (NULL);
 	}
 
@@ -316,6 +319,7 @@ makefd_xprt(const int fd, const u_int sendsz, const u_int recvsz,
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s: fd %d could not get transport information",
 			__func__, fd);
+		SVC_RELEASE(xprt, SVC_RELEASE_FLAG_NONE);
 		return (NULL);
 	}
 
@@ -326,6 +330,7 @@ makefd_xprt(const int fd, const u_int sendsz, const u_int recvsz,
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s: fd %d could not get network information",
 			__func__, fd);
+		SVC_RELEASE(xprt, SVC_RELEASE_FLAG_NONE);
 		return (NULL);
 	}
 
@@ -387,6 +392,7 @@ svc_fd_ncreatef(const int fd, const u_int sendsize, const u_int recvsize,
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s: fd %d getsockname failed (%d)",
 			 __func__, fd, rc);
+		SVC_RELEASE(xprt, SVC_RELEASE_FLAG_NONE);
 		return (NULL);
 	}
 
@@ -398,6 +404,7 @@ svc_fd_ncreatef(const int fd, const u_int sendsize, const u_int recvsize,
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s: fd %d getpeername failed (%d)",
 			 __func__, fd, rc);
+		SVC_RELEASE(xprt, SVC_RELEASE_FLAG_NONE);
 		return (NULL);
 	}
 	XPRT_TRACE(xprt, __func__, __func__, __LINE__);
