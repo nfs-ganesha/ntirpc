@@ -244,6 +244,7 @@ clnt_vc_ncreatef(const int fd,	/* open file descriptor */
 			__func__, fd);
 		clnt->cl_error.re_status = RPC_CANTENCODEARGS;
 		XDR_DESTROY(ct_xdrs);
+		SVC_RELEASE(xprt, SVC_RELEASE_FLAG_NONE);
 		goto err;
 	}
 	ct->ct_cx.cx_mpos = XDR_GETPOS(ct_xdrs);
