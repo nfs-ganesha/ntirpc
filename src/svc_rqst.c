@@ -154,17 +154,26 @@ void svc_rqst_rec_destroy(struct svc_rqst_rec *sr_rec)
 #endif
 
 	if (sr_rec->sv[0] >= 0) {
+		__warnx(TIRPC_DEBUG_FLAG_SVC_RQST,
+			"%s: sr_rec %p sv[0]=%d close",
+			__func__, sr_rec, sr_rec->sv[0]);
 		close(sr_rec->sv[0]);
 		sr_rec->sv[0] = -1;
 	}
 
 	if (sr_rec->sv[1] >= 0) {
+		__warnx(TIRPC_DEBUG_FLAG_SVC_RQST,
+			"%s: sr_rec %p sv[1]=%d close",
+			__func__, sr_rec, sr_rec->sv[1]);
 		close(sr_rec->sv[1]);
 		sr_rec->sv[1] = -1;
 	}
 
 #if defined(TIRPC_EPOLL)
 	if (sr_rec->ev_u.epoll.epoll_fd > 0) {
+		__warnx(TIRPC_DEBUG_FLAG_SVC_RQST,
+			"%s: sr_rec %p epoll_fd=%d close",
+			__func__, sr_rec, sr_rec->ev_u.epoll.epoll_fd);
 		close(sr_rec->ev_u.epoll.epoll_fd);
 		sr_rec->ev_u.epoll.epoll_fd = -1;
 	}
@@ -560,7 +569,7 @@ svc_rqst_unhook_events(struct rpc_dplx_rec *rec, struct svc_rqst_rec *sr_rec,
 				__warnx(TIRPC_DEBUG_FLAG_WARN,
 					"%s: %p fd %d xp_refcnt %" PRId32
 					" sr_rec %p evchan %d ev_refcnt %" PRId32
-					" epoll_fd %d control fd pair (%d:%d) unhook failed (%d)",
+					" epoll_fd %d control fd pair (%d:%d) unhook recv failed (%d)",
 					__func__, rec, rec->xprt.xp_fd,
 					rec->xprt.xp_refcnt,
 					sr_rec, sr_rec->id_k, sr_rec->ev_refcnt,
@@ -571,7 +580,7 @@ svc_rqst_unhook_events(struct rpc_dplx_rec *rec, struct svc_rqst_rec *sr_rec,
 					TIRPC_DEBUG_FLAG_REFCNT,
 					"%s: %p fd %d xp_refcnt %" PRId32
 					" sr_rec %p evchan %d ev_refcnt %" PRId32
-					" epoll_fd %d control fd pair (%d:%d) unhook event %p",
+					" epoll_fd %d control fd pair (%d:%d) unhook recv event %p",
 					__func__, rec, rec->xprt.xp_fd,
 					rec->xprt.xp_refcnt,
 					sr_rec, sr_rec->id_k, sr_rec->ev_refcnt,
@@ -596,7 +605,7 @@ svc_rqst_unhook_events(struct rpc_dplx_rec *rec, struct svc_rqst_rec *sr_rec,
 				__warnx(TIRPC_DEBUG_FLAG_WARN,
 					"%s: %p fd %d xp_refcnt %" PRId32
 					" sr_rec %p evchan %d ev_refcnt %" PRId32
-					" epoll_fd %d control fd pair (%d:%d) unhook failed (%d)",
+					" epoll_fd %d control fd pair (%d:%d) unhook send failed (%d)",
 					__func__, rec, rec->xprt.xp_fd,
 					rec->xprt.xp_refcnt,
 					sr_rec, sr_rec->id_k, sr_rec->ev_refcnt,
@@ -607,7 +616,7 @@ svc_rqst_unhook_events(struct rpc_dplx_rec *rec, struct svc_rqst_rec *sr_rec,
 					TIRPC_DEBUG_FLAG_REFCNT,
 					"%s: %p fd %d xp_refcnt %" PRId32
 					" sr_rec %p evchan %d ev_refcnt %" PRId32
-					" epoll_fd %d control fd pair (%d:%d) unhook event %p",
+					" epoll_fd %d control fd pair (%d:%d) unhook send event %p",
 					__func__, rec, rec->xprt.xp_fd,
 					rec->xprt.xp_refcnt,
 					sr_rec, sr_rec->id_k, sr_rec->ev_refcnt,
@@ -664,8 +673,14 @@ svc_rqst_rearm_events_locked(SVCXPRT *xprt, uint16_t ev_flags)
 		ev_flags & SVC_XPRT_FLAG_UREG        ? " UREG" : "",
 		is_rec_shutdown                      ? "sr_rec->ev_flags SHUTDOWN" : "");
 
-	if (is_xprt_destroyed || is_rec_shutdown)
+	if (is_xprt_destroyed || is_rec_shutdown) {
+		__warnx(TIRPC_DEBUG_FLAG_WARN,
+			"%s: %p fd %d, xp_flags %x, xp_refcnt %" PRId32
+			"is xprt destroyed = %d, is_rec_shutdown = %d",
+			__func__, rec, rec->xprt.xp_fd, rec->xprt.xp_flags,
+			rec->xprt.xp_refcnt, is_xprt_destroyed, is_rec_shutdown);
 		return (1);
+	}
 
 	/* Don't take a ref on the xprt.  We take a ref in hook, and release it
 	 * in unhook. */
@@ -1484,6 +1499,11 @@ svc_rqst_epoll_event(struct svc_rqst_rec *sr_rec, struct epoll_event *ev)
 	/* Do not return destroyed transports.
 	 * Probably log non-fatal "WARNING! already destroying!"
 	 */
+	__warnx(TIRPC_DEBUG_FLAG_ERROR,
+		"%s: %p fd %d already destroying. prev flags %x, curr flags %x, ev_flag %x,"
+		"ref_count = %" PRId32,
+		__func__, &rec->xprt, rec->xprt.xp_fd, xp_flags, xprt->xp_flags,
+		ev_flag, xprt->xp_refcnt);
 	SVC_RELEASE(&rec->xprt, SVC_RELEASE_FLAG_NONE);
 	return (NULL);
 }
