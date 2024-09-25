@@ -44,12 +44,13 @@
  * string itself. */
 #define NTIRPC_AUTO_TRACEPOINT(prov_name, event_name, log_level, format, ...)  \
   AUTO_TRACEPOINT(prov_name, event_name, log_level,                            \
-                  __FILE__ ":" LINE_AS_STRING " | " format, ##__VA_ARGS__);
+                  __FILE__ ":" LINE_AS_STRING " | {fnc} | " format,            \
+		  ##__VA_ARGS__);
 
 #define NTIRPC_UNIQUE_AUTO_TRACEPOINT(prov_name, event_name, log_level,        \
                                       format, ...)                             \
   UNIQUE_AUTO_TRACEPOINT(prov_name, event_name, log_level,                     \
-                         __FILE__ ":" LINE_AS_STRING " | " format,             \
+                         __FILE__ ":" LINE_AS_STRING " | {fnc} | " format,     \
                          ##__VA_ARGS__);
 
 #else // USE_LTTNG_NTIRPC
