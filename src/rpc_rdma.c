@@ -2209,9 +2209,15 @@ rpc_rdma_accept_timedwait(RDMAXPRT *l_rdma_xprt, struct timespec *abstime)
 		__func__, l_rdma_xprt, l_rdma_xprt->state);
 
 	if (!l_rdma_xprt || l_rdma_xprt->state != RDMAXS_LISTENING) {
-		__warnx(TIRPC_DEBUG_FLAG_ERROR,
-			"%s() %p[%u] isn't listening (after bind_server)?",
-			__func__, l_rdma_xprt, l_rdma_xprt->state);
+		if (!l_rdma_xprt) {
+                        __warnx(TIRPC_DEBUG_FLAG_ERROR,
+                                "%s() listening (parent) transport is NULL",
+                                __func__);
+                } else {
+                        __warnx(TIRPC_DEBUG_FLAG_ERROR,
+                                "%s() %p[%u] isn't listening (after bind_server)?",
+                                __func__, l_rdma_xprt, l_rdma_xprt->state);
+                }
 		return (NULL);
 	}
 
