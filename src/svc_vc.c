@@ -1067,6 +1067,7 @@ again:
 					return SVC_STAT(xprt);
 				}
 				/* Now look to see if there's more... */
+	                        xd->sx_fbtbc = 0;
 				hap_again = true;
 				goto again;
 			case HAPROXY_RET_CODE__FAILURE:
