@@ -326,7 +326,10 @@ void svc_ioq_write(SVCXPRT *xprt)
 
 	/* Process the xioq from the head of the xprt queue */
 	have = TAILQ_FIRST(&rec->writeq.qh);
-
+	if (have) {
+		/* Dequeue the in progress request */
+		TAILQ_REMOVE(&rec->writeq.qh, have, q);
+	}
 	XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, mutex_unlock, TRACE_DEBUG,
 		"Unlocking mutex");
 	mutex_unlock(&rec->writeq.qmutex);
@@ -345,11 +348,6 @@ void svc_ioq_write(SVCXPRT *xprt)
 			/* all systems are go! */
 			rc = svc_ioq_flushv(xprt, xioq);
 		}
-
-		mutex_lock(&rec->writeq.qmutex);
-		XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, mutex_lock,
-			TRACE_DEBUG, "Locked mutex");
-
 		if (rc < 0) {
 			/* IO failed, destroy the XPRT but continue the loop in order to
 			   release resources */
@@ -357,7 +355,9 @@ void svc_ioq_write(SVCXPRT *xprt)
 				"%s: %p fd %d About to destroy - rc = %d",
 				__func__, xprt, xprt->xp_fd, rc);
 			SVC_DESTROY(xprt);
-		} else if (rc == EWOULDBLOCK){
+		}
+
+	        if (rc == EWOULDBLOCK){
 			__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
 				"%s: %p fd %d EWOULDBLOCK",
 				__func__, xprt, xprt->xp_fd);
@@ -368,17 +368,27 @@ void svc_ioq_write(SVCXPRT *xprt)
 				TRACE_INFO, "Write got EWOULDBLOCK.");
 
 			code = svc_rqst_evchan_write(xprt, xioq, has_blocked);
-			if (unlikely(code)){
+			mutex_lock(&rec->writeq.qmutex);
+			XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, mutex_lock,
+				TRACE_DEBUG, "Locked mutex");
+			if (unlikely(code) || (xprt->xp_flags & SVC_XPRT_FLAG_DESTROYED)) {
+				/* if poll register failed or xprt is already destroyed,
+				 * epoll might not notify again so we need to clean all
+				 * resources. later destroy is fine as we return the
+				 * resource to queue under lock */
 				XPRT_AUTO_TRACEPOINT(
 					xprt, req_requeue_fail,
 					TRACE_INFO, "Request requeue failed {}",code);
+				mutex_unlock(&rec->writeq.qmutex);
 			} else {
 				XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, mutex_unlock,
 						TRACE_INFO, "Unlocking mutex");
+				/* requeue uncompleted in progress request */
+				TAILQ_INSERT_HEAD(&rec->writeq.qh, have, q);
 				mutex_unlock(&rec->writeq.qmutex);
 				break;
 			}
-		} else {
+		} else if (rc >= 0) {
 			if (xioq->has_blocked) {
 				__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
 					"%s: %p fd %d COMPLETED AFTER BLOCKING",
@@ -402,12 +412,15 @@ void svc_ioq_write(SVCXPRT *xprt)
 					xioq->has_blocked);
 			}
 		}
-
-		/* Dequeue the completed request */
-		TAILQ_REMOVE(&rec->writeq.qh, have, q);
-
+		mutex_lock(&rec->writeq.qmutex);
+		XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, mutex_lock,
+			TRACE_DEBUG, "Locked mutex");
 		/* Fetch the next request */
 		have = TAILQ_FIRST(&rec->writeq.qh);
+		if (have) {
+			/* Dequeue the in progress request */
+			TAILQ_REMOVE(&rec->writeq.qh, have, q);
+		}
 		mutex_unlock(&rec->writeq.qmutex);
 
 		__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
