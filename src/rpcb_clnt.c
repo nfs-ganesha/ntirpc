@@ -1193,7 +1193,7 @@ char *rpcb_taddr2uaddr(struct netconfig *nconf, struct netbuf *taddr)
 	client = local_rpcb(__func__);
 	if (CLNT_FAILURE(client)) {
 		CLNT_DESTROY(client);
-		return (false);
+		return (NULL);
 	}
 
 	cc = mem_alloc(sizeof(*cc));
@@ -1242,7 +1242,7 @@ struct netbuf *rpcb_uaddr2taddr(struct netconfig *nconf, char *uaddr)
 	client = local_rpcb(__func__);
 	if (CLNT_FAILURE(client)) {
 		CLNT_DESTROY(client);
-		return (false);
+		return (NULL);
 	}
 
 	cc = mem_alloc(sizeof(*cc));
