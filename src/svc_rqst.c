@@ -1140,6 +1140,9 @@ void clear_requests(struct rpc_dplx_rec *rec) {
 
 		SVC_RELEASE(&rec->xprt, SVC_RELEASE_FLAG_NONE);
 		XDR_DESTROY(xioq->xdrs);
+
+		TAILQ_REMOVE(&rec->writeq.qh, have, q);
+		have = TAILQ_FIRST(&rec->writeq.qh);
 	}
 	mutex_unlock(&rec->writeq.qmutex);
 }
