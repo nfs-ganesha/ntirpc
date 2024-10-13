@@ -1133,18 +1133,22 @@ void clear_requests(struct rpc_dplx_rec *rec) {
 	struct poolq_entry *have;
 	struct xdr_ioq *xioq;
 
+	int release_count = 0;
 	mutex_lock(&rec->writeq.qmutex);
 	have = TAILQ_FIRST(&rec->writeq.qh);
 	while(have != NULL) {
 		xioq = _IOQ(have);
 
-		SVC_RELEASE(&rec->xprt, SVC_RELEASE_FLAG_NONE);
+		release_count++;
 		XDR_DESTROY(xioq->xdrs);
-
 		TAILQ_REMOVE(&rec->writeq.qh, have, q);
 		have = TAILQ_FIRST(&rec->writeq.qh);
 	}
 	mutex_unlock(&rec->writeq.qmutex);
+
+	for(int i = 0; i < release_count; i++) {
+		SVC_RELEASE(&rec->xprt, SVC_RELEASE_FLAG_NONE);
+	}
 }
 
 /*
