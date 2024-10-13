@@ -69,7 +69,8 @@
 #define LAST_FRAG_XDR_UNITS ((LAST_FRAG - 1) & ~(BYTES_PER_XDR_UNIT - 1))
 #define MAXALLOCA (256)
 
-/* Returns 0 on success, EWOULDBLOCK if would block, <0 on error */
+/* Returns 0 on success, EWOULDBLOCK if would block, <0 on error.
+ * This function cannot be called concurrently for the same XPRT */
 static inline int
 svc_ioq_flushv(SVCXPRT *xprt, struct xdr_ioq *xioq)
 {
@@ -324,11 +325,19 @@ void svc_ioq_write(SVCXPRT *xprt)
 	XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, mutex_lock, TRACE_DEBUG,
 		"Locked mutex");
 
+	if (rec->write_queue_handled) {
+		XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, mutex_unlock, TRACE_DEBUG,
+				"Unlocking mutex, another thread is handling queue");
+		mutex_unlock(&rec->writeq.qmutex);
+		return;
+	}
+
 	/* Process the xioq from the head of the xprt queue */
 	have = TAILQ_FIRST(&rec->writeq.qh);
 	if (have) {
 		/* Dequeue the in progress request */
 		TAILQ_REMOVE(&rec->writeq.qh, have, q);
+		rec->write_queue_handled = true;
 	}
 	XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, mutex_unlock, TRACE_DEBUG,
 		"Unlocking mutex");
@@ -392,6 +401,7 @@ void svc_ioq_write(SVCXPRT *xprt)
 						TRACE_INFO, "Unlocking mutex");
 				/* requeue uncompleted in progress request */
 				TAILQ_INSERT_HEAD(&rec->writeq.qh, have, q);
+				rec->write_queue_handled = false;
 				mutex_unlock(&rec->writeq.qmutex);
 				break;
 			}
@@ -427,6 +437,8 @@ void svc_ioq_write(SVCXPRT *xprt)
 		if (have) {
 			/* Dequeue the in progress request */
 			TAILQ_REMOVE(&rec->writeq.qh, have, q);
+		}else{
+			rec->write_queue_handled = false;
 		}
 		mutex_unlock(&rec->writeq.qmutex);
 
@@ -450,29 +462,21 @@ void
 svc_ioq_write_now(SVCXPRT *xprt, struct xdr_ioq *xioq)
 {
 	struct rpc_dplx_rec *rec = REC_XPRT(xprt);
-	bool was_empty;
-
 	SVC_REF(xprt, SVC_REF_FLAG_NONE);
-
+	bool should_handle;
 
 	XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, mutex_lock,
 		TRACE_DEBUG, "Locking mutex");
 	mutex_lock(&rec->writeq.qmutex);
-
-	was_empty = TAILQ_FIRST(&rec->writeq.qh) == NULL;
 
 	/* always queue output requests on the duplex record's writeq */
 	TAILQ_INSERT_TAIL(&rec->writeq.qh, &(xioq->ioq_s), q);
 
 	XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, mutex_unlock,
 		TRACE_DEBUG, "Unlocking mutex");
+	should_handle = !rec->write_queue_handled;
 	mutex_unlock(&rec->writeq.qmutex);
-
-	if (was_empty) {
-		/* handle this output request without queuing, then any
-		 * additional output requests without a task switch (using this
-		 * thread).
-		 */
+	if(should_handle) {
 		svc_ioq_write(xprt);
 	}
 }
@@ -488,7 +492,7 @@ void
 svc_ioq_write_submit(SVCXPRT *xprt, struct xdr_ioq *xioq)
 {
 	struct rpc_dplx_rec *rec = REC_XPRT(xprt);
-	bool was_empty;
+	bool should_handle;
 
 	SVC_REF(xprt, SVC_REF_FLAG_NONE);
 
@@ -496,7 +500,7 @@ svc_ioq_write_submit(SVCXPRT *xprt, struct xdr_ioq *xioq)
 	XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, mutex_lock, TRACE_DEBUG,
 		"Locked mutex");
 
-	was_empty = TAILQ_FIRST(&rec->writeq.qh) == NULL;
+	should_handle = !rec->write_queue_handled;
 
 	/* always queue output requests on the duplex record's writeq */
 	TAILQ_INSERT_TAIL(&rec->writeq.qh, &(xioq->ioq_s), q);
@@ -505,7 +509,7 @@ svc_ioq_write_submit(SVCXPRT *xprt, struct xdr_ioq *xioq)
 		TRACE_DEBUG, "Unlocking mutex");
 	mutex_unlock(&rec->writeq.qmutex);
 
-	if (was_empty) {
+	if (should_handle) {
 		/* Schedule work to process output for this duplex record. */
 		xioq->ioq_wpe.fun = svc_ioq_write_callback;
 		work_pool_submit(&svc_work_pool, &xioq->ioq_wpe);
