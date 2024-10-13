@@ -368,11 +368,18 @@ void svc_ioq_write(SVCXPRT *xprt)
 				TRACE_INFO, "Write got EWOULDBLOCK.");
 
 			code = svc_rqst_evchan_write(xprt, xioq, has_blocked);
+			if (unlikely(code)) {
+				/* Add to epoll failed, destroying xprt as this is an undefined state */
+				__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
+					"%s: %p fd %d About to destroy - rc = %d",
+					__func__, xprt, xprt->xp_fd, rc);
+				SVC_DESTROY(xprt);
+			}
 			mutex_lock(&rec->writeq.qmutex);
 			XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, mutex_lock,
 				TRACE_DEBUG, "Locked mutex");
-			if (unlikely(code) || (xprt->xp_flags & SVC_XPRT_FLAG_DESTROYED)) {
-				/* if poll register failed or xprt is already destroyed,
+			if (xprt->xp_flags & SVC_XPRT_FLAG_DESTROYED) {
+				/* if xprt is already destroyed,
 				 * epoll might not notify again so we need to clean all
 				 * resources. later destroy is fine as we return the
 				 * resource to queue under lock */
