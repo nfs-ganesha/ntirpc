@@ -226,15 +226,35 @@ get_parent_chunk(struct poolq_entry *have)
 	return uv->u.uio_u1;
 }
 
+/* We shrink only data bufs which are alloctaed on deamand */
+static bool_t is_shrink_buf(struct rpc_io_bufs *io_buf, RDMAXPRT *rdma_xprt)
+{
+	if ((io_buf != rdma_xprt->first_io_buf) &&
+	    ((io_buf->type == IO_INBUF_DATA) ||
+	    (io_buf->type == IO_OUTBUF_DATA))) {
+		return true;
+	}
+	return false;
+}
+
+static bool_t check_data_io_buf_free(struct rpc_io_bufs *io_buf,
+    RDMAXPRT *rdma_xprt)
+{
+
+	if (is_shrink_buf(io_buf, rdma_xprt) && io_buf->ready &&
+	    (io_buf->refs == 0)) {
+		return true;
+	}
+	return false;
+}
+
 static int
 chunk_ref_locked(struct poolq_entry *have)
 {
 	struct rpc_io_bufs *io_buf = get_parent_chunk(have);
 	RDMAXPRT *rdma_xprt = (RDMAXPRT *)io_buf->ctx;
 
-	if ((io_buf != rdma_xprt->first_io_buf) &&
-	    ((io_buf->type == IO_INBUF_DATA) ||
-	    (io_buf->type == IO_OUTBUF_DATA))) {
+	if (is_shrink_buf(io_buf, rdma_xprt)) {
 		atomic_inc_uint64_t(&rdma_xprt->total_extra_buf_allocations);
 		clock_gettime(CLOCK_MONOTONIC_FAST,
 		    &rdma_xprt->last_extra_buf_allocation_time);
@@ -243,8 +263,8 @@ chunk_ref_locked(struct poolq_entry *have)
 	return atomic_inc_uint32_t(&io_buf->refs);
 }
 
-static void
-do_shrink(RDMAXPRT *rdma_xprt, struct rpc_io_bufs *io_buf)
+static struct poolq_head *
+get_data_poolq_head(struct rpc_io_bufs *io_buf, RDMAXPRT *rdma_xprt)
 {
 	struct poolq_head *ioqh = NULL;
 
@@ -263,7 +283,13 @@ do_shrink(RDMAXPRT *rdma_xprt, struct rpc_io_bufs *io_buf)
 			assert(io_buf->type == IO_BUF_ALL);
 	}
 
-	assert(ioqh);
+	return ioqh;
+}
+
+static void
+do_shrink(RDMAXPRT *rdma_xprt, struct rpc_io_bufs *io_buf, bool_t unlock)
+{
+	struct poolq_head *ioqh = get_data_poolq_head(io_buf, rdma_xprt);
 
 	__warnx(TIRPC_DEBUG_FLAG_EVENT, "%s: Start shrinking xprt %p "
 	    "io_buf %p refs %d ioqh %p count %d",
@@ -271,13 +297,25 @@ do_shrink(RDMAXPRT *rdma_xprt, struct rpc_io_bufs *io_buf)
 	    ioqh->qcount);
 
 	xdr_rdma_buf_pool_destroy_locked(ioqh, io_buf);
+	if (unlock)
+		pthread_mutex_unlock(&ioqh->qmutex);
 }
 
 #define NSEC_IN_SEC (1000ULL*1000ULL*1000ULL)
 #define SHRINK_WAIT_TIME_NS (NSEC_IN_SEC * 60ULL)
 
+/* Check parent bufflist */
+static bool
+is_same_buflist(struct rpc_io_bufs *io_buf1, struct rpc_io_bufs *io_buf2,
+    RDMAXPRT *rdma_xprt)
+{
+	struct poolq_head *ioqh1 = get_data_poolq_head(io_buf1, rdma_xprt);
+	struct poolq_head *ioqh2 = get_data_poolq_head(io_buf2, rdma_xprt);
+	return (ioqh1 == ioqh2);
+}
+
 static struct rpc_io_bufs *
-get_lru_chunk(RDMAXPRT *rdma_xprt)
+get_lru_chunk_with_lock(RDMAXPRT *rdma_xprt, struct rpc_io_bufs *cur_io_buf)
 {
 	struct timespec ts_end, ts_start;
 	uint64_t diff_ns = 0;
@@ -295,12 +333,49 @@ get_lru_chunk(RDMAXPRT *rdma_xprt)
 		while (have) {
 			io_buf = opr_containerof(have, struct rpc_io_bufs, q);
 
-			/* We are with ioqh_lock so no other thread can allocated
-			 * from thi ioqh and get io_buf ref */
-			if (io_buf->ready && (io_buf != rdma_xprt->first_io_buf) &&
-			    (io_buf->refs == 0) && ((io_buf->type == IO_INBUF_DATA) ||
-			    (io_buf->type == IO_OUTBUF_DATA)))
-				break;
+			/* If we are with ioqh_lock so no other thread allocate
+			 * from the ioqh and get io_buf ref */
+			if (check_data_io_buf_free(io_buf, rdma_xprt)) {
+				struct poolq_head *ioqh =
+				    get_data_poolq_head(io_buf, rdma_xprt);
+				/* If io_buf is not for current ioqh io_buf
+				 * then reconfirm with the lock */
+				if (!is_same_buflist(io_buf, cur_io_buf,
+				    rdma_xprt)) {
+					__warnx(TIRPC_DEBUG_FLAG_XDR,
+					    "%s: current io_buf %p io_buf %p "
+					    "xprt %p recheck shrink io_buf %p "
+					    "refs %d io_bufs count %d %d",
+					    __func__, cur_io_buf, io_buf,
+					    rdma_xprt, io_buf, io_buf->refs,
+					    rdma_xprt->io_bufs_count,
+					    rdma_xprt->io_bufs.qcount);
+					if (pthread_mutex_trylock(&ioqh->qmutex)) {
+						/* Lock could be already taken,
+						   try next io_buf. */
+						__warnx(TIRPC_DEBUG_FLAG_XDR,
+						    "%s: current io_buf %p "
+						    "io_buf %p xprt %p can't "
+						    "shrink io_buf %prefs %d "
+						    "io_bufs count %d %d",
+						    __func__, cur_io_buf,
+						    io_buf, rdma_xprt, io_buf,
+						    io_buf->refs,
+						    rdma_xprt->io_bufs_count,
+						    rdma_xprt->io_bufs.qcount);
+					} else {
+						/* Lock to shrink this io_buf
+						 * caller will unlock */
+						if (check_data_io_buf_free(
+						    io_buf, rdma_xprt))
+							break;
+						pthread_mutex_unlock(
+						    &ioqh->qmutex);
+					}
+				} else {
+					break;
+				}
+			}
 			struct poolq_entry *next = TAILQ_NEXT(have, q);
 			have = next;
 			io_buf = NULL;
@@ -310,10 +385,11 @@ get_lru_chunk(RDMAXPRT *rdma_xprt)
 			rdma_xprt->io_bufs_count--;
 			rdma_xprt->io_bufs.qcount--;
 
-			__warnx(TIRPC_DEBUG_FLAG_EVENT, "%s: xprt %p shrink io_buf %p"
-			    "refs %d io_bufs count %d %d",
+			__warnx(TIRPC_DEBUG_FLAG_EVENT, "%s: xprt %p shrink "
+			    "io_buf %p refs %d io_bufs count %d %d",
 			    __func__, rdma_xprt, io_buf, io_buf->refs,
-			    rdma_xprt->io_bufs_count, rdma_xprt->io_bufs.qcount);
+			    rdma_xprt->io_bufs_count,
+			    rdma_xprt->io_bufs.qcount);
 		}
 		pthread_mutex_unlock(&rdma_xprt->io_bufs.qmutex);
 	}
@@ -328,15 +404,20 @@ chunk_unref_locked(struct poolq_entry *have)
 	uint32_t refs = atomic_dec_uint32_t(&io_buf->refs);
 	RDMAXPRT *rdma_xprt = (RDMAXPRT *)io_buf->ctx;
 
-	if ((io_buf != rdma_xprt->first_io_buf) &&
-	    ((io_buf->type == IO_INBUF_DATA) ||
-	    (io_buf->type == IO_OUTBUF_DATA)))
+	/* Check if its on on demand allocated data buf */
+	if (is_shrink_buf(io_buf, rdma_xprt)) {
 		atomic_dec_uint64_t(&rdma_xprt->total_extra_buf_allocations);
-
-	io_buf = get_lru_chunk(rdma_xprt);
-	if (io_buf) {
-		do_shrink(rdma_xprt, io_buf);
 	}
+
+	/* Check if we can get any on demand allocated data buf to shrink */
+	struct rpc_io_bufs *new_io_buf = get_lru_chunk_with_lock(rdma_xprt,
+	    io_buf);
+	if (new_io_buf) {
+		/* We need to unlock if lock taken by get_lru_chunk */
+		do_shrink(rdma_xprt, new_io_buf,
+		    !is_same_buflist(io_buf, new_io_buf, rdma_xprt));
+	}
+
 	return refs;
 }
 
