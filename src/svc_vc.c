@@ -491,7 +491,10 @@ svc_vc_rendezvous(SVCXPRT *xprt)
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s: %p fd %d with xp_refcnt %" PRId32 ", failed (will set dead)",
 			__func__, newxprt, newxprt->xp_fd, newxprt->xp_refcnt);
-		assert(false);
+		SVC_DESTROY(newxprt);
+		/* Was never added to epoll */
+		SVC_RELEASE(newxprt, SVC_RELEASE_FLAG_NONE);
+		return (XPRT_DIED);
 	}
 
 	svc_vc_override_ops(newxprt, xprt);

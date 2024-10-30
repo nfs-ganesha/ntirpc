@@ -311,7 +311,6 @@ struct svc_xprt {
 
 	int32_t xp_refcnt;	/* handle reference count */
 	uint16_t xp_flags;	/* flags */
-	uint32_t xp_unique_id;
 
 	union {
 		struct in_pktinfo in;

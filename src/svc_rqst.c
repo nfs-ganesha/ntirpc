@@ -76,18 +76,6 @@
 #define SVC_RQST_LOCKED		0x01000000
 #define SVC_RQST_UNLOCK		0x02000000
 
-/* svc_event_data is used as the data for svc fd event in epoll.
- * It enables a direct access to the fd and unique_id, and to
- * serialize/deserialize the struct into the event format.
- */
-union svc_event_data {
-	struct {
-		int fd;
-		uint32_t unique_id;
-	};
-	uint64_t u64;
-};
-
 static uint32_t round_robin;
 /*static*/ uint32_t wakeups;
 
@@ -406,9 +394,6 @@ svc_rqst_new_evchan(uint32_t *chan_id /* OUT */, void *u_data, uint32_t flags)
 	int code = 0, i;
 	work_pool_fun_t fun = NULL;
 	int32_t ref_rec;
-	union svc_event_data ev_data;
-	static_assert(sizeof(union svc_event_data) == sizeof(union epoll_data),
-			"incorrect size for svc_event_data");
 
 	mutex_lock(&svc_rqst_set.mtx);
 	if (!svc_rqst_set.next_id) {
@@ -481,9 +466,7 @@ svc_rqst_new_evchan(uint32_t *chan_id /* OUT */, void *u_data, uint32_t flags)
 		/* permit wakeup of threads blocked in epoll_wait, with a
 		 * couple of possible semantics */
 		sr_rec->ev_u.epoll.ctrl_ev.events = EPOLLIN | EPOLLRDHUP;
-		ev_data.fd = sr_rec->sv[1];
-		ev_data.unique_id = 0; /* channel event has no xprt unique id */
-		sr_rec->ev_u.epoll.ctrl_ev.data.u64 = ev_data.u64;
+		sr_rec->ev_u.epoll.ctrl_ev.data.fd = sr_rec->sv[1];
 		code = epoll_ctl(sr_rec->ev_u.epoll.epoll_fd, EPOLL_CTL_ADD,
 				 sr_rec->sv[1], &sr_rec->ev_u.epoll.ctrl_ev);
 		if (code == -1) {
@@ -806,7 +789,6 @@ svc_rqst_hook_events(struct rpc_dplx_rec *rec, struct svc_rqst_rec *sr_rec,
 		     uint16_t ev_flags)
 {
 	int code = EINVAL;
-	union svc_event_data ev_data;
 
 	XPRT_AUTO_TRACEPOINT(&rec->xprt, hook, TRACE_DEBUG,
 		"Hook. ev_flags: {}", ev_flags);
@@ -843,9 +825,7 @@ svc_rqst_hook_events(struct rpc_dplx_rec *rec, struct svc_rqst_rec *sr_rec,
 			ev = &rec->ev_u.epoll.event_recv;
 
 			/* set up epoll user data */
-			ev_data.fd = rec->xprt.xp_fd;
-			ev_data.unique_id = rec->xprt.xp_unique_id;
-			ev->data.u64 = ev_data.u64;
+			ev->data.fd = rec->xprt.xp_fd;
 
 			/* wait for read events, level triggered, oneshot */
 			ev->events = EPOLLONESHOT | EPOLLIN;
@@ -885,9 +865,7 @@ svc_rqst_hook_events(struct rpc_dplx_rec *rec, struct svc_rqst_rec *sr_rec,
 			ev = &rec->ev_u.epoll.event_send;
 
 			/* set up epoll user data.  Lookup needs the primary FD */
-			ev_data.fd = rec->xprt.xp_fd;
-			ev_data.unique_id = rec->xprt.xp_unique_id;
-			ev->data.u64 = ev_data.u64;
+			ev->data.fd = rec->xprt.xp_fd;
 
 			/* wait for write events, edge triggered, oneshot */
 			ev->events = EPOLLONESHOT | EPOLLOUT | EPOLLET;
@@ -1432,12 +1410,8 @@ svc_rqst_epoll_event(struct svc_rqst_rec *sr_rec, struct epoll_event *ev)
 	uint16_t xp_flags, ev_flag = 0;
 	struct xdr_ioq *ioq = NULL;
 	work_pool_fun_t fun;
-	union svc_event_data ev_data;
 
-
-	ev_data.u64 = ev->data.u64;
-
-	if (unlikely(ev_data.fd == sr_rec->sv[1])) {
+	if (unlikely(ev->data.fd == sr_rec->sv[1])) {
 		/* signalled -- there was a wakeup on ctrl_ev (see
 		 * top-of-loop) */
 		__warnx(TIRPC_DEBUG_FLAG_SVC_RQST,
@@ -1452,25 +1426,15 @@ svc_rqst_epoll_event(struct svc_rqst_rec *sr_rec, struct epoll_event *ev)
 		return (NULL);
 	}
 
-	xprt = svc_xprt_lookup(ev_data.fd, NULL);
+	xprt = svc_xprt_lookup(ev->data.fd, NULL);
 	if (!xprt) {
 		NTIRPC_AUTO_TRACEPOINT(xprt, epoll_fail_lookup, TRACE_INFO, "no xprt found fd = {}",ev->data.fd);
 		__warnx(TIRPC_DEBUG_FLAG_SVC_RQST,
 			"%s: fd %d no associated xprt",
-			__func__, ev_data.fd);
+			__func__, ev->data.fd);
 		return (NULL);
 	}
 	/* At this point, we have a ref on the xprt, and know it's valid */
-	/* verify that indeed this is the xprt as of the event. */
-	if (ev_data.unique_id != xprt->xp_unique_id) {
-		__warnx(TIRPC_DEBUG_FLAG_ERROR,
-			"%s: event fd %d with xp_unique_id %" PRIu32
-			" differs from of xp_unique_id %" PRIu32 " of xprt %p. Release and ignore",
-			__func__, ev_data.fd, ev_data.unique_id, xprt->xp_unique_id, xprt);
-		SVC_RELEASE(xprt, SVC_RELEASE_FLAG_NONE);
-		return (NULL);
-	}
-
 	rec = REC_XPRT(xprt);
 
 	__warnx(TIRPC_DEBUG_FLAG_SVC_RQST,
