@@ -318,7 +318,6 @@ void svc_ioq_write(SVCXPRT *xprt)
 	struct rpc_dplx_rec *rec = REC_XPRT(xprt);
 	struct xdr_ioq *xioq;
 	struct poolq_entry *have;
-	int code;
 
 	mutex_lock(&rec->writeq.qmutex);
 	XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, mutex_lock, TRACE_DEBUG,
@@ -367,17 +366,12 @@ void svc_ioq_write(SVCXPRT *xprt)
 				xprt, write_would_block,
 				TRACE_DEBUG, "Write got EWOULDBLOCK.");
 
-			code = svc_rqst_evchan_write(xprt, xioq, has_blocked);
-			if (unlikely(code)){
-				XPRT_AUTO_TRACEPOINT(
-					xprt, req_requeue_fail,
-					TRACE_DEBUG, "Request requeue failed {}",code);
-			} else {
-				XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, mutex_unlock,
-					TRACE_DEBUG, "Unlocking mutex");
-				mutex_unlock(&rec->writeq.qmutex);
-				break;
-			}
+			svc_rqst_evchan_write(xprt, xioq, has_blocked);
+
+			XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, mutex_unlock,
+				TRACE_DEBUG, "Unlocking mutex");
+			mutex_unlock(&rec->writeq.qmutex);
+			break;
 		} else {
 			if (xioq->has_blocked) {
 				__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
