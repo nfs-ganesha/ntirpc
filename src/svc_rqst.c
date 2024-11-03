@@ -1141,25 +1141,6 @@ svc_rqst_xprt_register(SVCXPRT *newxprt, SVCXPRT *xprt)
 }
 
 /*
- *  need to clear these requests as they are waiting for epoll, which will
- *   never be triggered after destroy as it unregisters all events
- */
-void clear_requests(struct rpc_dplx_rec *rec) {
-	struct poolq_entry *have;
-	struct xdr_ioq *xioq;
-
-	mutex_lock(&rec->writeq.qmutex);
-	have = TAILQ_FIRST(&rec->writeq.qh);
-	while(have != NULL) {
-		xioq = _IOQ(have);
-
-		SVC_RELEASE(&rec->xprt, SVC_RELEASE_FLAG_NONE);
-		XDR_DESTROY(xioq->xdrs);
-	}
-	mutex_unlock(&rec->writeq.qmutex);
-}
-
-/*
  * flags indicate locking state
  *
  * @note Locking
@@ -1183,7 +1164,6 @@ svc_rqst_xprt_unregister(SVCXPRT *xprt, uint32_t flags)
 	if (!(flags & RPC_DPLX_LOCKED))
 		rpc_dplx_rui(rec);
 
-	clear_requests(rec);
 	if (!sr_rec) {
 		/* not currently registered */
 		return;
