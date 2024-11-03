@@ -55,9 +55,6 @@ struct rpc_dplx_rec {
 	struct svc_xprt xprt;		/**< Transport Independent handle */
 	struct xdr_ioq ioq;
 	struct poolq_head writeq;	/**< poolq for write requests */
-	/** Queue is already handled by another thread, handling of the
-	 * queue by more then one thread can cause undefined behavior */
-	bool write_queue_handled;
 	struct opr_rbtree call_replies;
 	struct opr_rbtree_node fd_node;
 	struct {
@@ -125,7 +122,6 @@ rpc_dplx_rec_init(struct rpc_dplx_rec *rec)
 	TAILQ_INIT(&rec->writeq.qh);
 	mutex_init(&rec->writeq.qmutex, NULL);
 	rec->writeq.qcount = 0;
-	rec->write_queue_handled = false;
 	/* Stop this xprt being cleaned immediately */
 	(void)clock_gettime(CLOCK_MONOTONIC_FAST, &(rec->recv.ts));
 
