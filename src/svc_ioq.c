@@ -365,16 +365,16 @@ void svc_ioq_write(SVCXPRT *xprt)
 
 			XPRT_AUTO_TRACEPOINT(
 				xprt, write_would_block,
-				TRACE_INFO, "Write got EWOULDBLOCK.");
+				TRACE_DEBUG, "Write got EWOULDBLOCK.");
 
 			code = svc_rqst_evchan_write(xprt, xioq, has_blocked);
 			if (unlikely(code)){
 				XPRT_AUTO_TRACEPOINT(
 					xprt, req_requeue_fail,
-					TRACE_INFO, "Request requeue failed {}",code);
+					TRACE_DEBUG, "Request requeue failed {}",code);
 			} else {
 				XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, mutex_unlock,
-						TRACE_INFO, "Unlocking mutex");
+					TRACE_DEBUG, "Unlocking mutex");
 				mutex_unlock(&rec->writeq.qmutex);
 				break;
 			}

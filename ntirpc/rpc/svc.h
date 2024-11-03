@@ -531,7 +531,7 @@ static inline void svc_destroy_it(SVCXPRT *xprt,
 
 	XPRT_TRACE(xprt, __func__, tag, line);
 
-	XPRT_AUTO_TRACEPOINT(xprt, destroy_it, TRACE_INFO, "Destroy XPRT");
+	XPRT_AUTO_TRACEPOINT(xprt, destroy_it, TRACE_DEBUG, "Destroy XPRT");
 
 	if (flags & SVC_XPRT_FLAG_DESTROYING) {
 		/* previously set, do nothing */
