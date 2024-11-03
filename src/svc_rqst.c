@@ -1401,6 +1401,7 @@ svc_rqst_epoll_event(struct svc_rqst_rec *sr_rec, struct epoll_event *ev)
 
 	xprt = svc_xprt_lookup(ev->data.fd, NULL);
 	if (!xprt) {
+		NTIRPC_AUTO_TRACEPOINT(xprt, epoll_fail_lookup, TRACE_INFO, "no xprt found fd = {}",ev->data.fd);
 		__warnx(TIRPC_DEBUG_FLAG_SVC_RQST,
 			"%s: fd %d no associated xprt",
 			__func__, ev->data.fd);
@@ -1427,6 +1428,8 @@ svc_rqst_epoll_event(struct svc_rqst_rec *sr_rec, struct epoll_event *ev)
 		ioq = rec->ev_u.epoll.xioq_send;
 		fun = svc_rqst_xprt_task_send;
 	} else {
+		XPRT_UNIQUE_AUTO_TRACEPOINT(&rec->xprt, epoll_event, TRACE_INFO,
+			"Unhandled epoll event. ev_flag: {}", ev->events);
 		/* This is some other event... */
 		SVC_RELEASE(&rec->xprt, SVC_RELEASE_FLAG_NONE);
 		return NULL;
@@ -1448,7 +1451,7 @@ svc_rqst_epoll_event(struct svc_rqst_rec *sr_rec, struct epoll_event *ev)
 		ev_flag & SVC_XPRT_FLAG_ADDED_RECV ? " ADDED_RECV" : "",
 		ev_flag & SVC_XPRT_FLAG_ADDED_SEND ? " ADDED_SEND" : "");
 
-	XPRT_AUTO_TRACEPOINT(&rec->xprt, epoll_event, TRACE_DEBUG,
+	XPRT_UNIQUE_AUTO_TRACEPOINT(&rec->xprt, epoll_event, TRACE_DEBUG,
 		"Epoll event. ev_flag: {}", ev_flag);
 
 	if (rec->xprt.xp_refcnt > 1
@@ -1464,7 +1467,8 @@ svc_rqst_epoll_event(struct svc_rqst_rec *sr_rec, struct epoll_event *ev)
 		ioq->rec = rec;
 		return ioq;
 	}
-
+	XPRT_UNIQUE_AUTO_TRACEPOINT(&rec->xprt, epoll_event, TRACE_INFO,
+		"irrelevant epoll event. ev_flag: {}", ev_flag);
 	/* Do not return destroyed transports.
 	 * Probably log non-fatal "WARNING! already destroying!"
 	 */

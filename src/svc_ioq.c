@@ -364,7 +364,7 @@ void svc_ioq_write(SVCXPRT *xprt)
 
 			XPRT_AUTO_TRACEPOINT(
 				xprt, write_would_block,
-				TRACE_DEBUG, "Write got EWOULDBLOCK.");
+				TRACE_INFO, "Write got EWOULDBLOCK.");
 
 			svc_rqst_evchan_write(xprt, xioq, has_blocked);
 
