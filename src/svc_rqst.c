@@ -1153,6 +1153,14 @@ static void clear_requests(struct rpc_dplx_rec *rec) {
 		.tv_nsec = 0,
 	};
 
+	while (atomic_postset_uint16_t_bits(&rec->xprt.xp_flags,
+			SVC_XPRT_FLAG_IOQ_WRITING)
+	       & SVC_XPRT_FLAG_IOQ_WRITING) {
+		nanosleep(&ts, NULL);
+		XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, IOQ_WORKING, TRACE_INFO,
+			"xprt is being transmitted by another thread, can't clear");
+	}
+
 	int release_count = 0;
 	mutex_lock(&rec->writeq.qmutex);
 	have = TAILQ_FIRST(&rec->writeq.qh);

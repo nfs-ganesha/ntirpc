@@ -320,6 +320,23 @@ void svc_ioq_write(SVCXPRT *xprt)
 	struct xdr_ioq *xioq;
 	struct poolq_entry *have;
 	bool destroy_xprt = false;
+	struct timespec ts = {
+		.tv_sec = 0,
+		.tv_nsec = 0,
+	};
+	while (atomic_postset_uint16_t_bits(&xprt->xp_flags,
+				SVC_XPRT_FLAG_IOQ_WRITING)
+		       & SVC_XPRT_FLAG_IOQ_WRITING) {
+			nanosleep(&ts, NULL);
+			if (xprt->xp_flags & SVC_XPRT_FLAG_DESTROYED) {
+				XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, IOQ_WORKING, TRACE_INFO,
+					"xprt is being cleared, no need for transmit");
+				return;
+			}
+			XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, IOQ_WORKING, TRACE_INFO,
+				"xprt is being transmitted by another thread ");
+
+	}
 
 	mutex_lock(&rec->writeq.qmutex);
 	XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, mutex_lock, TRACE_DEBUG,
@@ -416,6 +433,9 @@ void svc_ioq_write(SVCXPRT *xprt)
 		SVC_RELEASE(xprt, SVC_RELEASE_FLAG_NONE);
 		XDR_DESTROY(xioq->xdrs);
 	}
+	atomic_postclear_uint16_t_bits(&xprt->xp_flags,
+				SVC_XPRT_FLAG_IOQ_WRITING);
+
 	if (destroy_xprt) {
 		SVC_DESTROY(xprt);
 	}
