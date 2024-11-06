@@ -1157,7 +1157,7 @@ static void clear_requests(struct rpc_dplx_rec *rec) {
 			SVC_XPRT_FLAG_IOQ_WRITING)
 	       & SVC_XPRT_FLAG_IOQ_WRITING) {
 		nanosleep(&ts, NULL);
-		XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, IOQ_WORKING, TRACE_INFO,
+		XPRT_UNIQUE_AUTO_TRACEPOINT(&rec->xprt, IOQ_WORKING, TRACE_INFO,
 			"xprt is being transmitted by another thread, can't clear");
 	}
 
