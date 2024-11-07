@@ -1157,7 +1157,7 @@ static void clear_requests(struct rpc_dplx_rec *rec) {
 			SVC_XPRT_FLAG_IOQ_WRITING)
 	       & SVC_XPRT_FLAG_IOQ_WRITING) {
 		nanosleep(&ts, NULL);
-		XPRT_UNIQUE_AUTO_TRACEPOINT(&rec->xprt, IOQ_WORKING, TRACE_INFO,
+		XPRT_UNIQUE_AUTO_TRACEPOINT(&rec->xprt, ioq_clearing, TRACE_INFO,
 			"xprt is being transmitted by another thread, can't clear");
 	}
 
@@ -1566,7 +1566,7 @@ svc_rqst_epoll_events(struct svc_rqst_rec *sr_rec, int n_events)
 
 static void svc_rqst_epoll_loop(struct work_pool_entry *wpe)
 {
-	struct svc_rqst_rec *sr_rec = 
+	struct svc_rqst_rec *sr_rec =
 		opr_containerof(wpe, struct svc_rqst_rec, ev_wpe);
 	struct clnt_req *cc;
 	struct opr_rbtree_node *n;

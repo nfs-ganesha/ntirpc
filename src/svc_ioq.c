@@ -329,11 +329,11 @@ void svc_ioq_write(SVCXPRT *xprt)
 		       & SVC_XPRT_FLAG_IOQ_WRITING) {
 			nanosleep(&ts, NULL);
 			if (xprt->xp_flags & SVC_XPRT_FLAG_DESTROYED) {
-				XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, IOQ_WORKING, TRACE_INFO,
+				XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, ioq_working, TRACE_INFO,
 					"xprt is being cleared, no need for transmit");
 				return;
 			}
-			XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, IOQ_WORKING, TRACE_INFO,
+			XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, ioq_working, TRACE_INFO,
 				"xprt is being transmitted by another thread ");
 
 	}
