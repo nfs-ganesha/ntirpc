@@ -238,12 +238,13 @@ getnetconfig(void *handlep)
 	/*
 	 * Verify that handle is valid
 	 */
+	mutex_lock(&nc_mtx);
+
 	if (ncp == NULL || nc_file == NULL) {
 		nc_error = NC_NOTINIT;
+		mutex_unlock(&nc_mtx);
 		return (NULL);
 	}
-
-	mutex_lock(&nc_mtx);
 
 	switch (ncp->valid) {
 	case NC_VALID:
