@@ -142,7 +142,7 @@ public:
 
     if (argType_->isPointerType()) {
       return std::string("ctf_integer_hex(") + "intptr_t" + ", " + argName_ +
-             ", " + argName_ + ")";
+             ", (intptr_t)" + argName_ + ")";
     }
 
     auto enumType = llvm::dyn_cast<clang::EnumType>(argType_);
