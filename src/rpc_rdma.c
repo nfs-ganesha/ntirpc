@@ -1972,7 +1972,14 @@ rpc_rdma_bind_server(RDMAXPRT *rdma_xprt)
 	struct rdma_addrinfo hints;
 	int rc;
 
-	if (!rdma_xprt || rdma_xprt->state != RDMAXS_INITIAL) {
+	if (!rdma_xprt) {
+                __warnx(TIRPC_DEBUG_FLAG_ERROR,
+                        "%s() rdma_xprt is NULL",
+                        __func__);
+                return EINVAL;
+        }
+
+	if (rdma_xprt->state != RDMAXS_INITIAL) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s() %p[%u] must be initialized first!",
 			__func__, rdma_xprt, rdma_xprt->state);
@@ -2164,7 +2171,14 @@ rpc_rdma_accept_finalize(RDMAXPRT *rdma_xprt)
 	struct rdma_conn_param conn_param;
 	int rc;
 
-	if (!rdma_xprt || rdma_xprt->state != RDMAXS_CONNECT_REQUEST) {
+	if (!rdma_xprt) {
+                __warnx(TIRPC_DEBUG_FLAG_ERROR,
+                        "%s() rdma_xprt is NULL",
+                        __func__);
+                return EINVAL;
+        }
+
+	if (rdma_xprt->state != RDMAXS_CONNECT_REQUEST) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s() %p[%u] isn't from a connection request?",
 			__func__, rdma_xprt, rdma_xprt->state);
@@ -2356,7 +2370,14 @@ rpc_rdma_connect_finalize(RDMAXPRT *rdma_xprt)
 	struct rdma_conn_param conn_param;
 	int rc;
 
-	if (!rdma_xprt || rdma_xprt->state != RDMAXS_ROUTE_RESOLVED) {
+	if (!rdma_xprt) {
+                __warnx(TIRPC_DEBUG_FLAG_ERROR,
+                        "%s() rdma_xprt is NULL",
+                        __func__);
+                return EINVAL;
+        }
+
+	if (rdma_xprt->state != RDMAXS_ROUTE_RESOLVED) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s() %p[%u] isn't half-connected?",
 			__func__, rdma_xprt, rdma_xprt->state);
@@ -2392,7 +2413,14 @@ rpc_rdma_connect(RDMAXPRT *rdma_xprt)
 {
 	int rc;
 
-	if (!rdma_xprt || rdma_xprt->state != RDMAXS_INITIAL) {
+	if (!rdma_xprt) {
+		__warnx(TIRPC_DEBUG_FLAG_ERROR,
+                        "%s() rdma_xprt is NULL",
+                        __func__);
+                return EINVAL;
+	}
+
+	if (rdma_xprt->state != RDMAXS_INITIAL) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s() %p[%u] must be initialized first!",
 			__func__, rdma_xprt, rdma_xprt->state);
