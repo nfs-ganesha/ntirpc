@@ -149,6 +149,9 @@ svc_rdma_rendezvous(SVCXPRT *xprt)
 		return (XPRT_DESTROYED);
 	}
 
+	atomic_set_uint16_t_bits(&rdma_xprt->sm_dr.xprt.xp_flags,
+	    SVC_XPRT_FLAG_READY);
+
 	__warnx(TIRPC_DEBUG_FLAG_EVENT,
 		"%s:%u New RDMA client connected xprt %p, xp_fd %d, "
 		"qp_num %d, xp_fd %d is_rdma_enabled %d to local port %d "

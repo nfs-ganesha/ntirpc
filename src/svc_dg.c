@@ -213,6 +213,8 @@ svc_dg_ncreatef(const int fd, const u_int sendsz, const u_int recvsz,
 				    RPC_DPLX_LOCKED |
 				    SVC_RQST_FLAG_CHAN_AFFINITY);
 
+	atomic_set_uint16_t_bits(&xprt->xp_flags, SVC_XPRT_FLAG_READY);
+
 	/* release */
 	rpc_dplx_rui(rec);
 	XPRT_TRACE(xprt, __func__, __func__, __LINE__);
@@ -317,6 +319,10 @@ svc_dg_rendezvous(SVCXPRT *xprt)
 
 	SVC_REF(xprt, SVC_REF_FLAG_NONE);
 	newxprt->xp_parent = xprt;
+
+	atomic_set_uint16_t_bits(&newxprt->xp_flags,
+	    SVC_XPRT_FLAG_READY);
+
 	return (xprt->xp_dispatch.rendezvous_cb(newxprt));
 }
 

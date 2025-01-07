@@ -1398,7 +1398,9 @@ svc_rqst_clean_func(SVCXPRT *xprt, void *arg)
 	if (xprt->xp_flags & (SVC_XPRT_FLAG_DESTROYED | SVC_XPRT_FLAG_UREG))
 		return (false);
 
-	if ((acc->ts.tv_sec - REC_XPRT(xprt)->recv.ts.tv_sec) < acc->timeout)
+	/* Make sure recv.ts is initialized */
+	if (REC_XPRT(xprt)->recv.ts.tv_sec &&
+	    ((acc->ts.tv_sec - REC_XPRT(xprt)->recv.ts.tv_sec) < acc->timeout))
 		return (false);
 
 	SVC_DESTROY(xprt);

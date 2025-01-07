@@ -255,6 +255,9 @@ svc_vc_ncreatef(const int fd, const u_int sendsz, const u_int recvsz,
 				    RPC_DPLX_LOCKED |
 				    SVC_RQST_FLAG_CHAN_AFFINITY);
 
+	atomic_set_uint16_t_bits(&xprt->xp_flags,
+	    SVC_XPRT_FLAG_READY);
+
 	/* release */
 	rpc_dplx_rui(rec);
 	XPRT_TRACE(xprt, __func__, __func__, __LINE__);
@@ -550,6 +553,9 @@ svc_vc_rendezvous(SVCXPRT *xprt)
 		SVC_RELEASE(newxprt, SVC_RELEASE_FLAG_NONE);
 		return (XPRT_DESTROYED);
 	}
+
+	atomic_set_uint16_t_bits(&newxprt->xp_flags,
+	    SVC_XPRT_FLAG_READY);
 
 	__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
 		"New client connected "

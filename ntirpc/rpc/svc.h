@@ -178,7 +178,8 @@ typedef struct svc_init_params {
 #define SVC_XPRT_FLAG_UREG		0x0080
 #define SVC_XPRT_TREE_LOCKED		0x0100
 #define SVC_XPRT_FLAG_REMOTE_ADDR_SET	0x0200	/* remote addr was final set */
-#define SVC_XPRT_FLAG_IOQ_WRITING	0x0400	/* xprt is used by svc_ioq_write */
+#define SVC_XPRT_FLAG_READY		0x0400	/* ready to use */
+#define SVC_XPRT_FLAG_IOQ_WRITING	0x0800	/* xprt is used by svc_ioq_write */
 
 #define SVC_XPRT_FLAG_DESTROYED (SVC_XPRT_FLAG_DESTROYING \
 				| SVC_XPRT_FLAG_RELEASING)
@@ -549,7 +550,8 @@ static inline void svc_destroy_it(SVCXPRT *xprt,
 	 * initialization to be done
 	 */
 	retry = 0;
-	while (xprt->xp_ops == NULL && retry < SVC_DESTROY_RETRY) {
+	while (!(xprt->xp_flags & SVC_XPRT_FLAG_READY)
+	    && (retry < SVC_DESTROY_RETRY)) {
 		sched_yield();
 		retry += 1;
 	};
