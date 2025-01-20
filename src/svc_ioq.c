@@ -318,6 +318,24 @@ void svc_ioq_write(SVCXPRT *xprt)
 	struct rpc_dplx_rec *rec = REC_XPRT(xprt);
 	struct xdr_ioq *xioq;
 	struct poolq_entry *have;
+	bool destroy_xprt = false;
+	struct timespec ts = {
+		.tv_sec = 0,
+		.tv_nsec = 0,
+	};
+	while (atomic_postset_uint16_t_bits(&xprt->xp_flags,
+				SVC_XPRT_FLAG_IOQ_WRITING)
+		       & SVC_XPRT_FLAG_IOQ_WRITING) {
+			nanosleep(&ts, NULL);
+			if (xprt->xp_flags & SVC_XPRT_FLAG_DESTROYED) {
+				XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, ioq_working, TRACE_INFO,
+					"xprt is being cleared, no need for transmit");
+				return;
+			}
+			XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, ioq_working, TRACE_INFO,
+				"xprt is being transmitted by another thread ");
+
+	}
 
 	mutex_lock(&rec->writeq.qmutex);
 	XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, mutex_lock, TRACE_DEBUG,
@@ -349,13 +367,17 @@ void svc_ioq_write(SVCXPRT *xprt)
 		XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, mutex_lock,
 			TRACE_DEBUG, "Locked mutex");
 
-		if (rc < 0) {
+		if (rc < 0 || (xprt->xp_flags & SVC_XPRT_FLAG_DESTROYED)) {
 			/* IO failed, destroy the XPRT but continue the loop in order to
 			   release resources */
 			__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
 				"%s: %p fd %d About to destroy - rc = %d",
 				__func__, xprt, xprt->xp_fd, rc);
-			SVC_DESTROY(xprt);
+			destroy_xprt = true;
+			XPRT_AUTO_TRACEPOINT(xprt, destroy_xprt,
+				TRACE_INFO, "IO failed, destroy xprt.");
+			mutex_unlock(&rec->writeq.qmutex);
+			break;
 		} else if (rc == EWOULDBLOCK){
 			__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
 				"%s: %p fd %d EWOULDBLOCK",
@@ -410,6 +432,12 @@ void svc_ioq_write(SVCXPRT *xprt)
 		SVC_RELEASE(xprt, SVC_RELEASE_FLAG_NONE);
 		XDR_DESTROY(xioq->xdrs);
 	}
+	atomic_postclear_uint16_t_bits(&xprt->xp_flags,
+				SVC_XPRT_FLAG_IOQ_WRITING);
+
+	if (destroy_xprt) {
+		SVC_DESTROY(xprt);
+	}
 }
 
 static void
@@ -420,33 +448,38 @@ svc_ioq_write_callback(struct work_pool_entry *wpe)
 	svc_ioq_write(xioq->xdrs[0].x_lib[1]);
 }
 
-void
-svc_ioq_write_now(SVCXPRT *xprt, struct xdr_ioq *xioq)
-{
+
+static bool add_ioq_to_write_queue(SVCXPRT *xprt, struct xdr_ioq *xioq) {
 	struct rpc_dplx_rec *rec = REC_XPRT(xprt);
-	bool was_empty;
-
-	SVC_REF(xprt, SVC_REF_FLAG_NONE);
-
+	bool need_processing;
 
 	XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, mutex_lock,
 		TRACE_DEBUG, "Locking mutex");
 	mutex_lock(&rec->writeq.qmutex);
-
-	was_empty = TAILQ_FIRST(&rec->writeq.qh) == NULL;
-
+	if (xprt->xp_flags & SVC_XPRT_FLAG_DESTROYED) {
+		//Queue already cleared, do not add more requests
+		XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, mutex_unlock,
+			TRACE_DEBUG, "Unlocking mutex");
+		mutex_unlock(&rec->writeq.qmutex);
+		XDR_DESTROY(xioq->xdrs);
+		return false;
+	}
+	SVC_REF(xprt, SVC_REF_FLAG_NONE);
+	need_processing = TAILQ_FIRST(&rec->writeq.qh) == NULL;
 	/* always queue output requests on the duplex record's writeq */
 	TAILQ_INSERT_TAIL(&rec->writeq.qh, &(xioq->ioq_s), q);
 
 	XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, mutex_unlock,
 		TRACE_DEBUG, "Unlocking mutex");
 	mutex_unlock(&rec->writeq.qmutex);
+	return need_processing;
+}
 
-	if (was_empty) {
-		/* handle this output request without queuing, then any
-		 * additional output requests without a task switch (using this
-		 * thread).
-		 */
+void
+svc_ioq_write_now(SVCXPRT *xprt, struct xdr_ioq *xioq)
+{
+	const bool need_processing = add_ioq_to_write_queue(xprt, xioq);
+	if (need_processing) {
 		svc_ioq_write(xprt);
 	}
 }
@@ -461,25 +494,9 @@ svc_ioq_write_now(SVCXPRT *xprt, struct xdr_ioq *xioq)
 void
 svc_ioq_write_submit(SVCXPRT *xprt, struct xdr_ioq *xioq)
 {
-	struct rpc_dplx_rec *rec = REC_XPRT(xprt);
-	bool was_empty;
+	const bool need_processing = add_ioq_to_write_queue(xprt, xioq);
 
-	SVC_REF(xprt, SVC_REF_FLAG_NONE);
-
-	mutex_lock(&rec->writeq.qmutex);
-	XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, mutex_lock, TRACE_DEBUG,
-		"Locked mutex");
-
-	was_empty = TAILQ_FIRST(&rec->writeq.qh) == NULL;
-
-	/* always queue output requests on the duplex record's writeq */
-	TAILQ_INSERT_TAIL(&rec->writeq.qh, &(xioq->ioq_s), q);
-
-	XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, mutex_unlock,
-		TRACE_DEBUG, "Unlocking mutex");
-	mutex_unlock(&rec->writeq.qmutex);
-
-	if (was_empty) {
+	if (need_processing) {
 		/* Schedule work to process output for this duplex record. */
 		xioq->ioq_wpe.fun = svc_ioq_write_callback;
 		work_pool_submit(&svc_work_pool, &xioq->ioq_wpe);

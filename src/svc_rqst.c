@@ -1125,6 +1125,51 @@ svc_rqst_xprt_register(SVCXPRT *newxprt, SVCXPRT *xprt)
 	return svc_rqst_evchan_reg(sr_rec->id_k, newxprt, SVC_RQST_FLAG_NONE);
 }
 
+
+/*
+ *  need to clear these requests as they are waiting for epoll, which will
+ *   never be triggered after destroy as it unregisters all events
+ */
+static void clear_requests(struct rpc_dplx_rec *rec) {
+	struct poolq_entry *have;
+	struct xdr_ioq *xioq;
+	struct timespec ts = {
+		.tv_sec = 0,
+		.tv_nsec = 0,
+	};
+
+	while (atomic_postset_uint16_t_bits(&rec->xprt.xp_flags,
+			SVC_XPRT_FLAG_IOQ_WRITING)
+	       & SVC_XPRT_FLAG_IOQ_WRITING) {
+		nanosleep(&ts, NULL);
+		XPRT_UNIQUE_AUTO_TRACEPOINT(&rec->xprt, ioq_clearing, TRACE_INFO,
+			"xprt is being transmitted by another thread, can't clear");
+	}
+
+	int release_count = 0;
+	mutex_lock(&rec->writeq.qmutex);
+	have = TAILQ_FIRST(&rec->writeq.qh);
+	while(have != NULL) {
+		xioq = _IOQ(have);
+		while (atomic_postset_uint16_t_bits(&(xioq->ioq_s.qflags),
+						    IOQ_FLAG_WORKING)
+		       & IOQ_FLAG_WORKING) {
+			nanosleep(&ts, NULL);
+			/* We can't clear request when it is in work pool */
+		}
+
+		release_count++;
+		TAILQ_REMOVE(&rec->writeq.qh, have, q);
+		XDR_DESTROY(xioq->xdrs);
+		have = TAILQ_FIRST(&rec->writeq.qh);
+	}
+	mutex_unlock(&rec->writeq.qmutex);
+
+	for(int i = 0; i < release_count; i++) {
+		SVC_RELEASE(&rec->xprt, SVC_RELEASE_FLAG_NONE);
+	}
+}
+
 /*
  * flags indicate locking state
  *
@@ -1154,6 +1199,7 @@ svc_rqst_xprt_unregister(SVCXPRT *xprt, uint32_t flags)
 		return;
 	}
 	svc_rqst_unreg(rec, sr_rec);
+	clear_requests(rec);
 }
 
 #if defined(USE_RPC_RDMA)
@@ -1396,6 +1442,7 @@ svc_rqst_epoll_event(struct svc_rqst_rec *sr_rec, struct epoll_event *ev)
 
 	xprt = svc_xprt_lookup(ev->data.fd, NULL);
 	if (!xprt) {
+		NTIRPC_AUTO_TRACEPOINT(xprt, epoll_fail_lookup, TRACE_INFO, "no xprt found fd = {}",ev->data.fd);
 		__warnx(TIRPC_DEBUG_FLAG_SVC_RQST,
 			"%s: fd %d no associated xprt",
 			__func__, ev->data.fd);
@@ -1422,6 +1469,8 @@ svc_rqst_epoll_event(struct svc_rqst_rec *sr_rec, struct epoll_event *ev)
 		ioq = rec->ev_u.epoll.xioq_send;
 		fun = svc_rqst_xprt_task_send;
 	} else {
+		XPRT_UNIQUE_AUTO_TRACEPOINT(&rec->xprt, epoll_event, TRACE_INFO,
+			"Unhandled epoll event. ev_flag: {}", ev->events);
 		/* This is some other event... */
 		SVC_RELEASE(&rec->xprt, SVC_RELEASE_FLAG_NONE);
 		return NULL;
@@ -1443,7 +1492,7 @@ svc_rqst_epoll_event(struct svc_rqst_rec *sr_rec, struct epoll_event *ev)
 		ev_flag & SVC_XPRT_FLAG_ADDED_RECV ? " ADDED_RECV" : "",
 		ev_flag & SVC_XPRT_FLAG_ADDED_SEND ? " ADDED_SEND" : "");
 
-	XPRT_AUTO_TRACEPOINT(&rec->xprt, epoll_event, TRACE_DEBUG,
+	XPRT_UNIQUE_AUTO_TRACEPOINT(&rec->xprt, epoll_event, TRACE_DEBUG,
 		"Epoll event. ev_flag: {}", ev_flag);
 
 	if (rec->xprt.xp_refcnt > 1
@@ -1459,7 +1508,8 @@ svc_rqst_epoll_event(struct svc_rqst_rec *sr_rec, struct epoll_event *ev)
 		ioq->rec = rec;
 		return ioq;
 	}
-
+	XPRT_UNIQUE_AUTO_TRACEPOINT(&rec->xprt, epoll_event, TRACE_INFO,
+		"irrelevant epoll event. ev_flag: {}", ev_flag);
 	/* Do not return destroyed transports.
 	 * Probably log non-fatal "WARNING! already destroying!"
 	 */
