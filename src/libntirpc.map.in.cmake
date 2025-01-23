@@ -167,6 +167,7 @@ NTIRPC_${NTIRPC_VERSION_BASE} {
     svcerr_progvers;
     svcerr_systemerr;
     svcerr_weakauth;
+    svc_work_pool;
 
     # t*
     taddr2uaddr;
