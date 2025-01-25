@@ -57,7 +57,6 @@
 #include <errno.h>
 #include <intrinsic.h>
 #include <urcu-bp.h>
-#include <assert.h>
 
 #include <rpc/work_pool.h>
 
