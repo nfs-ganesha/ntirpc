@@ -268,6 +268,7 @@ clnt_vc_get_client_xprt(const struct rpc_client *clnt)
 		return NULL;
 
 	struct cx_data *cx = CX_DATA(clnt);
+
 	if (cx->cx_rec)
 		return &(cx->cx_rec->xprt);
 	return NULL;
