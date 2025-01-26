@@ -26,6 +26,7 @@
 #ifndef LTTNG_GENERATOR_H
 #define LTTNG_GENERATOR_H
 
+#include <stdbool.h>
 #include <lttng/tracepoint.h>
 
 #define LTTNG_GENERATOR_CONCAT_IMPL(x, y) x##y
