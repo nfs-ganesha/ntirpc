@@ -168,7 +168,7 @@ typedef void *(*mem_p_size_t) (void *, size_t,
 typedef void (*mem_free_size_t) (void *, size_t);
 typedef void (*mem_format_t) (const char *fmt, ...);
 typedef void (*mem_char_t) (const char *);
-
+typedef void (*mem_int_t) (uint32_t ,int32_t );
 /*
  * Package params support
  */
@@ -182,6 +182,8 @@ typedef struct tirpc_pkg_params {
 	mem_2_size_t	aligned_;
 	mem_2_size_t	calloc_;
 	mem_p_size_t	realloc_;
+	mem_int_t       mon_thread_name_;
+
 } tirpc_pkg_params;
 
 extern tirpc_pkg_params __ntirpc_pkg_params;

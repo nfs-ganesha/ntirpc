@@ -77,6 +77,10 @@ tirpc_thread_name(const char *p)
 	/* do nothing */
 }
 
+void tirpc_mon_thread_name(uint32_t p,int32_t q)
+{
+	/* do nothing */
+}
 static void
 tirpc_free(void *p, size_t unused)
 {
@@ -137,6 +141,7 @@ tirpc_pkg_params __ntirpc_pkg_params = {
 	tirpc_aligned,
 	tirpc_calloc,
 	tirpc_realloc,
+	tirpc_mon_thread_name,
 };
 
 bool
