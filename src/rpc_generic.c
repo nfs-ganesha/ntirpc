@@ -77,7 +77,7 @@ tirpc_thread_name(const char *p)
 	/* do nothing */
 }
 
-void tirpc_mon_thread_name(uint32_t p,int32_t q)
+void tirpc_mon_thread_name(uint32_t p, int32_t q)
 {
 	/* do nothing */
 }

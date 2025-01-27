@@ -174,7 +174,7 @@ work_pool_thread(void *arg)
 			      && pool->n_threads < pool->params.thrd_max;
 			if (spawn)
 				pool->n_threads++;
-			__ntirpc_pkg_params.mon_thread_name_(pool->n_threads,pool->params.thrd_max);
+			__ntirpc_pkg_params.monitor_threads(pool->n_threads, pool->params.thrd_max);
 			pthread_mutex_unlock(&pool->pqh.qmutex);
 
 			if (spawn) {

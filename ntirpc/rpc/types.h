@@ -182,7 +182,7 @@ typedef struct tirpc_pkg_params {
 	mem_2_size_t	aligned_;
 	mem_2_size_t	calloc_;
 	mem_p_size_t	realloc_;
-	mem_int_t       mon_thread_name_;
+	mem_int_t       monitor_threads;
 
 } tirpc_pkg_params;
 
