@@ -313,7 +313,6 @@ again:
 	return error;
 }
 
-
 void svc_ioq_write(SVCXPRT *xprt)
 {
 	struct rpc_dplx_rec *rec = REC_XPRT(xprt);
