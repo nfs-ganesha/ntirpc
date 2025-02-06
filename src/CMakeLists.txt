@@ -93,6 +93,12 @@ if(USE_LTTNG_NTIRPC)
   add_subdirectory(lttng)
 endif(USE_LTTNG_NTIRPC)
 
+# Monitoring stack.
+LIST(APPEND CMAKE_LIBRARY_PATH "${CMAKE_CURRENT_SOURCE_DIR}/monitoring/")
+LINK_DIRECTORIES("${CMAKE_CURRENT_SOURCE_DIR}/monitoring/")
+include_directories("${CMAKE_CURRENT_SOURCE_DIR}/monitoring/include")
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/monitoring/")
+
 # declares the library
 add_library(ntirpc SHARED
   ${ntirpc_common_SRCS}
@@ -105,7 +111,7 @@ add_library(ntirpc SHARED
 target_link_libraries(ntirpc
   ${SYSTEM_LIBRARIES}
   ${CMAKE_THREAD_LIBS_INIT}
-  ${MONITORING_LIBRARIES}
+  ntirpcmonitoring
 )
 
 if(USE_LTTNG)

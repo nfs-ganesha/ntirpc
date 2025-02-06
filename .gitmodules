@@ -1,0 +1,3 @@
+[submodule "src/monitoring/prometheus-cpp-lite"]
+	path = src/monitoring/prometheus-cpp-lite
+	url = sso://elastifile-internal/prometheus-cpp-lite
