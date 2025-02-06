@@ -10,7 +10,7 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/modules/")
 
 include(${CMAKE_SOURCE_DIR}/cmake/maintainer_mode.cmake)
 
-project(NTIRPC C)
+project(NTIRPC C CXX)
 
 # version numbers
 set(NTIRPC_MAJOR_VERSION 6)
@@ -76,6 +76,8 @@ if (USE_GSS)
     set(USE_GSS OFF)
   endif(KRB5_FOUND)
 endif (USE_GSS)
+
+option(USE_MONITORING "Enable monitoring stack" ON)
 
 option(USE_RPC_RDMA "platform supports RDMA" OFF)
 if (USE_RPC_RDMA)
@@ -260,6 +262,7 @@ message(STATUS "USE_RPC_RDMA = ${USE_RPC_RDMA}")
 message(STATUS "USE_GSS = ${USE_GSS}")
 message(STATUS "USE_PROFILE = ${USE_PROFILE}")
 message(STATUS "USE_LTTNG_NTIRPC = ${USE_LTTNG_NTIRPC}")
+message(STATUS "USE_MONITORING = ${USE_MONITORING}")
 
 #force command line options to be stored in cache
 set(_MSPAC_SUPPORT ${_MSPAC_SUPPORT}

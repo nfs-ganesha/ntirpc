@@ -92,6 +92,12 @@ if(USE_LTTNG_NTIRPC)
   add_subdirectory(lttng)
 endif(USE_LTTNG_NTIRPC)
 
+# Monitoring stack.
+LIST(APPEND CMAKE_LIBRARY_PATH "${CMAKE_CURRENT_SOURCE_DIR}/monitoring/")
+LINK_DIRECTORIES("${CMAKE_CURRENT_SOURCE_DIR}/monitoring/")
+include_directories("${CMAKE_CURRENT_SOURCE_DIR}/monitoring/include")
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/monitoring/")
+
 # declares the library
 add_library(ntirpc SHARED
   ${ntirpc_common_SRCS}
@@ -101,7 +107,11 @@ add_library(ntirpc SHARED
 
 # add required libraries--for Ganesha build, it's ok for them to
 # propagate (i.e., omit PRIVATE)
-target_link_libraries(ntirpc ${SYSTEM_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT})
+target_link_libraries(ntirpc
+  ${SYSTEM_LIBRARIES}
+  ${CMAKE_THREAD_LIBS_INIT}
+  ntirpcmonitoring
+)
 
 if(USE_LTTNG)
 target_link_libraries(ntirpc ntirpc_lttng)
