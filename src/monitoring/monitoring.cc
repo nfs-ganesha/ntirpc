@@ -178,7 +178,7 @@ void monitoring__histogram_observe(histogram_metric_handle_t handle,
 	convert_from_handle<HistogramInt>(handle)->Observe(value);
 }
 
-prometheus_registry_handle_t monitoring__get_registry_handle()
+prometheus_registry_handle_t monitoring__get_registry_handle(void)
 {
 	void *const registry_ptr = static_cast<void *>(&registry);
 	return { registry_ptr };
@@ -187,82 +187,5 @@ prometheus_registry_handle_t monitoring__get_registry_handle()
 } /* extern "C" */
 
 } /* namespace ntirpc_monitoring */
-
-#else /* USE_MONITORING */
-
-#define UNUSED_ATTR __attribute__((unused))
-#define UNUSED(x) UNUSED_ATTR x
-
-extern "C" {
-
-histogram_buckets_t monitoring__buckets_exp2(void)
-{
-	histogram_buckets_t dummy_ret = {};
-	return dummy_ret;
-}
-
-histogram_buckets_t monitoring__buckets_exp2_compact(void)
-{
-	histogram_buckets_t dummy_ret = {};
-	return dummy_ret;
-}
-
-counter_metric_handle_t monitoring__register_counter(
-	UNUSED(const char *name), UNUSED(metric_metadata_t metadata),
-	UNUSED(const metric_label_t *labels), UNUSED(uint16_t num_labels))
-{
-	counter_metric_handle_t dummy_ret = {};
-	return dummy_ret;
-}
-
-gauge_metric_handle_t monitoring__register_gauge(
-	UNUSED(const char *name), UNUSED(metric_metadata_t metadata),
-	UNUSED(const metric_label_t *labels), UNUSED(uint16_t num_labels))
-{
-	gauge_metric_handle_t dummy_ret = {};
-	return dummy_ret;
-}
-
-histogram_metric_handle_t monitoring__register_histogram(
-	UNUSED(const char *name), UNUSED(metric_metadata_t metadata),
-	UNUSED(const metric_label_t *labels), UNUSED(uint16_t num_labels),
-	UNUSED(histogram_buckets_t buckets))
-{
-	histogram_metric_handle_t dummy_ret = {};
-	return dummy_ret;
-}
-
-void monitoring__counter_inc(UNUSED(counter_metric_handle_t handle),
-			     UNUSED(int64_t value))
-{
-}
-
-void monitoring__gauge_inc(UNUSED(gauge_metric_handle_t handle),
-			   UNUSED(int64_t value))
-{
-}
-
-void monitoring__gauge_dec(UNUSED(gauge_metric_handle_t handle),
-			   UNUSED(int64_t value))
-{
-}
-
-void monitoring__gauge_set(UNUSED(gauge_metric_handle_t handle),
-			   UNUSED(int64_t value))
-{
-}
-
-void monitoring__histogram_observe(UNUSED(histogram_metric_handle_t handle),
-				   UNUSED(int64_t value))
-{
-}
-
-prometheus_registry_handle_t monitoring__get_registry_handle()
-{
-	prometheus_registry_handle_t dummy_ret = {};
-	return dummy_ret;
-}
-
-} /* extern "C" */
 
 #endif /* USE_MONITORING */

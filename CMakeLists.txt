@@ -53,13 +53,6 @@ include(GetGitRevisionDescription)
 get_git_head_revision(GIT_REFSPEC _GIT_HEAD_COMMIT)
 git_describe(_GIT_DESCRIBE)
 
-# setup paths of gmonitoring dependency of libntirpc
-LIST(APPEND CMAKE_LIBRARY_PATH "${PROJECT_SOURCE_DIR}/../monitoring/")
-LINK_DIRECTORIES("${PROJECT_SOURCE_DIR}/../monitoring/")
-include_directories(
-  ${PROJECT_SOURCE_DIR}/../monitoring/include/
-)
-
 # Allow overriding of prefix
 if (OVERRIDE_INSTALL_PREFIX)
   set(CMAKE_INSTALL_PREFIX ${OVERRIDE_INSTALL_PREFIX} CACHE PATH
