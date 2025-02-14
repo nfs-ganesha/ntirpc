@@ -246,8 +246,17 @@ svc_xprt_lookup(int fd, svc_xprt_setup_t setup)
 	 * (obviating extra atomic fetch).
 	 */
 	rpc_dplx_rli(rec);
-	xp_flags = atomic_clear_uint16_t_bits(&xprt->xp_flags,
-					      SVC_XPRT_FLAG_INITIAL);
+
+	/* We could end up here while xprt is not initialized yet,
+	 * So clear SVC_XPRT_FLAG_INITIAL only if xprt is initialized */
+
+	xp_flags = atomic_fetch_uint16_t(&xprt->xp_flags);
+
+	if (xp_flags & SVC_XPRT_FLAG_READY) {
+		xp_flags = atomic_clear_uint16_t_bits(&xprt->xp_flags,
+		    SVC_XPRT_FLAG_INITIAL);
+	}
+
 	rpc_dplx_rui(rec);
 
 	if (!(xp_flags & SVC_XPRT_FLAG_DESTROYED)) {
