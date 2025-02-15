@@ -589,19 +589,22 @@ svcauth_gss_is_seq_num_valid(struct svc_rpc_gss_data *gd, u_int32_t seq_num)
 	/* Handle sequence number lesser than the max seen sequence number */
 	if (seq_num < gd->seqlast) {
 
-		/* Return false if current sequence number is outside the window */
+		/* Return false if current sequence number is outside the
+		 * window
+		 */
 		if ((gd->seqlast - seq_num) >= SVC_GSS_SEQ_WIN_INTERNAL) {
 			__warnx(TIRPC_DEBUG_FLAG_AUTH,
-				"%s: sequence number: %u is outside the sequence window. Max seen "
-				"sequence number: %u Sequence window: %d", __func__, seq_num,
-				gd->seqlast, SVC_GSS_SEQ_WIN_INTERNAL);
+				"%s: sequence number: %u is outside the sequence window. Max seen sequence number: %u Sequence window: %d",
+				__func__, seq_num, gd->seqlast,
+				SVC_GSS_SEQ_WIN_INTERNAL);
 			return false;
 		}
 
 		/* Return false if current sequence number is already seen */
 		if (isset(gd->seqmask, seq_num_bit_in_window)) {
 			__warnx(TIRPC_DEBUG_FLAG_AUTH,
-				"%s: sequence number: %u is already seen. ", __func__, seq_num);
+				"%s: sequence number: %u is already seen. ",
+				__func__, seq_num);
 			return false;
 		}
 
@@ -612,19 +615,20 @@ svcauth_gss_is_seq_num_valid(struct svc_rpc_gss_data *gd, u_int32_t seq_num)
 
 	/* Handle sequence number greater than the max seen sequence number */
 
-	/* Unset the sequence mask if the current sequence number is greater than
+	/* Unset the sequence mask if current sequence number is greater than
 	 * the max seen sequence number by N (where N >= sequence-window)
 	 */
 	if ((seq_num - gd->seqlast) >= SVC_GSS_SEQ_WIN_INTERNAL) {
 		memset(gd->seqmask, 0, sizeof(gd->seqmask));
 		gd->seqlast = seq_num;
 	} else {
-		/* In this case, we clear the next unseen sequence number bits upto the
-		 * new max sequence number
+		/* In this case, we clear the next unseen sequence number bits
+		 * up to the new max sequence number
 		 */
 		while (gd->seqlast < seq_num) {
 			gd->seqlast++;
-			next_unseen_seq_num_bit = gd->seqlast % SVC_GSS_SEQ_WIN_INTERNAL;
+			next_unseen_seq_num_bit =
+				gd->seqlast % SVC_GSS_SEQ_WIN_INTERNAL;
 			clrbit(gd->seqmask, next_unseen_seq_num_bit);
 		}
 	}
@@ -778,7 +782,8 @@ _svcauth_gss(struct svc_req *req, bool *no_dispatch)
 
 		/* Fail new INIT / CONTINUE_INIT requests if svcauth_gss is disabled */
 		if (!svcauth_gss_enabled) {
-			__warnx(TIRPC_DEBUG_FLAG_AUTH, "%s: auth-gss disabled. Failing", __func__);
+			__warnx(TIRPC_DEBUG_FLAG_AUTH, "%s: auth-gss disabled. Failing",
+				__func__);
 			rc = AUTH_REJECTEDCRED;
 			goto gd_free;
 		}

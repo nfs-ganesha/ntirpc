@@ -221,7 +221,8 @@ svc_xprt_lookup(int fd, svc_xprt_setup_t setup)
 					__func__, fd, xprt, xprt->xp_unique_id);
 			}
 			rwlock_unlock(&t->lock);
-			metrics_libntirpc_update_tcp_connection_count(atomic_fetch_uint32_t(&svc_xprt_fd.connections));
+			metrics_libntirpc_update_tcp_connection_count(
+				atomic_fetch_uint32_t(&svc_xprt_fd.connections));
 			return (xprt);
 		}
 		/* raced, fallthru */
@@ -310,7 +311,8 @@ svc_xprt_clear(SVCXPRT *xprt)
 			opr_rbtree_remove(&t->t, &REC_XPRT(xprt)->fd_node);
 			rwlock_unlock(&t->lock);
 		}
-		metrics_libntirpc_update_tcp_connection_count(atomic_fetch_uint32_t(&svc_xprt_fd.connections));
+		metrics_libntirpc_update_tcp_connection_count(
+			atomic_fetch_uint32_t(&svc_xprt_fd.connections));
 	}
 }
 

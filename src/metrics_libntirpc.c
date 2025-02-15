@@ -6,7 +6,7 @@
 #include <misc/timespec.h>
 #include <rpc/auth.h>
 
-#define ARRAY_SIZE(a) (sizeof(a)/sizeof(a[0]))
+#define ARRAY_SIZE(a) (sizeof(a) / sizeof(a[0]))
 
 /* Generic enum to represent commonly used operation status */
 typedef enum generic_op_status {
@@ -15,8 +15,8 @@ typedef enum generic_op_status {
 	GENERIC_OP_STATUS_COUNT,
 } generic_op_status_t;
 
-static inline const char *get_generic_op_status_name(
-	generic_op_status_t op_status)
+static inline const char *
+get_generic_op_status_name(generic_op_status_t op_status)
 {
 	switch (op_status) {
 	case GENERIC_SUCCESS_STATUS:
@@ -38,9 +38,8 @@ static bool initialized = false;
  * will have the default `0` value in the array. Such entries will not be
  * represented in the metrics array.
  */
-static const uint8_t sec_flavors_idx[] = {
-	[AUTH_NONE] = 1, [AUTH_SYS] = 2, [RPCSEC_GSS] = 3
-};
+static const uint8_t
+	sec_flavors_idx[] = { [AUTH_NONE] = 1, [AUTH_SYS] = 2, [RPCSEC_GSS] = 3 };
 
 /* For each auth-stat as an array index, assign a serial number to be
  * represented as the index in the metrics array.
@@ -48,15 +47,20 @@ static const uint8_t sec_flavors_idx[] = {
  * will have the default `0` value in the array. Such entries will not be
  * represented in the metrics array.
  */
-static const uint8_t auth_stats_idx[] = {
-	[AUTH_OK] = 1, [AUTH_BADCRED] = 2, [AUTH_REJECTEDCRED] = 3,
-	[AUTH_BADVERF] = 4, [AUTH_REJECTEDVERF] = 5, [AUTH_TOOWEAK] = 6,
-	[AUTH_INVALIDRESP] = 7, [AUTH_FAILED] = 8, [RPCSEC_GSS_CREDPROBLEM] = 9,
-	[RPCSEC_GSS_CTXPROBLEM] = 10 };
+static const uint8_t auth_stats_idx[] = { [AUTH_OK] = 1,
+					  [AUTH_BADCRED] = 2,
+					  [AUTH_REJECTEDCRED] = 3,
+					  [AUTH_BADVERF] = 4,
+					  [AUTH_REJECTEDVERF] = 5,
+					  [AUTH_TOOWEAK] = 6,
+					  [AUTH_INVALIDRESP] = 7,
+					  [AUTH_FAILED] = 8,
+					  [RPCSEC_GSS_CREDPROBLEM] = 9,
+					  [RPCSEC_GSS_CTXPROBLEM] = 10 };
 
 /* Latency of authentication requests for each sec-flavor and auth-status */
-static histogram_metric_handle_t
-	svc_auth_request_latency[ARRAY_SIZE(sec_flavors_idx)][ARRAY_SIZE(auth_stats_idx)];
+static histogram_metric_handle_t svc_auth_request_latency[ARRAY_SIZE(
+	sec_flavors_idx)][ARRAY_SIZE(auth_stats_idx)];
 
 #ifdef _HAVE_GSSAPI
 /* For each RPCSEC_GSS-service as an array index, assign a serial number to be
@@ -65,14 +69,13 @@ static histogram_metric_handle_t
  * services will have the default `0` value in the array. Such entries will
  * not be represented in the metrics array.
  */
-static const uint8_t gss_svcs_idx[] = {
-	[RPCSEC_GSS_SVC_NONE] = 1, [RPCSEC_GSS_SVC_INTEGRITY] = 2,
-	[RPCSEC_GSS_SVC_PRIVACY] = 3
-};
+static const uint8_t gss_svcs_idx[] = { [RPCSEC_GSS_SVC_NONE] = 1,
+					[RPCSEC_GSS_SVC_INTEGRITY] = 2,
+					[RPCSEC_GSS_SVC_PRIVACY] = 3 };
 
 /* Latency of gss svc-auth steps */
-static histogram_metric_handle_t
-	gss_svc_auth_steps_latency[ARRAY_SIZE(gss_svcs_idx)][GSS_SVC_AUTH_STEPS_COUNT][GENERIC_OP_STATUS_COUNT];
+static histogram_metric_handle_t gss_svc_auth_steps_latency[ARRAY_SIZE(
+	gss_svcs_idx)][GSS_SVC_AUTH_STEPS_COUNT][GENERIC_OP_STATUS_COUNT];
 
 /* Latency of gss svc-auth ops */
 static histogram_metric_handle_t
@@ -115,8 +118,8 @@ static const char *get_sec_flavor_string(int sec_flavor)
 		return "RPCSEC_GSS";
 	default:
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
-			"%s: Unsupported security flavor value: %d",
-			__func__, sec_flavor);
+			"%s: Unsupported security flavor value: %d", __func__,
+			sec_flavor);
 		abort();
 	}
 }
@@ -147,8 +150,8 @@ static const char *get_auth_stat_string(enum auth_stat auth_status)
 		return "RPCSEC_GSS_CTXPROBLEM";
 	default:
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
-			"%s: Unsupported auth-stat value: %d",
-			__func__, auth_status);
+			"%s: Unsupported auth-stat value: %d", __func__,
+			auth_status);
 		abort();
 	}
 }
@@ -167,8 +170,8 @@ static const char *get_gss_svc_auth_step_string(gss_svc_auth_step_t step)
 		return "SEND_CLIENT_REPLY";
 	default:
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
-			"%s: Unsupported gss svc-auth step value: %d",
-			__func__, step);
+			"%s: Unsupported gss svc-auth step value: %d", __func__,
+			step);
 		abort();
 	}
 }
@@ -207,13 +210,13 @@ static const char *get_svc_auth_op_string(svc_auth_op_t op)
 		return "DESTROY";
 	default:
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
-			"%s: Unsupported svc-auth op value: %d",
-			__func__, op);
+			"%s: Unsupported svc-auth op value: %d", __func__, op);
 		abort();
 	}
 }
 
-static void register_svc_auth_request_latency_metric(void) {
+static void register_svc_auth_request_latency_metric(void)
+{
 	int sf, as;
 
 	for (sf = 0; sf < ARRAY_SIZE(sec_flavors_idx); sf++) {
@@ -226,7 +229,8 @@ static void register_svc_auth_request_latency_metric(void) {
 		const char *const sec_flavor = get_sec_flavor_string(sf);
 
 		for (as = 0; as < ARRAY_SIZE(auth_stats_idx); as++) {
-			const int as_idx = get_auth_stat_idx_in_metrics_array(as);
+			const int as_idx =
+				get_auth_stat_idx_in_metrics_array(as);
 
 			/* Do not register un-mentioned values in auth-stats array */
 			if (as_idx < 0)
@@ -234,7 +238,8 @@ static void register_svc_auth_request_latency_metric(void) {
 
 			const metric_label_t labels[] = {
 				METRIC_LABEL("sec_flavor", sec_flavor),
-				METRIC_LABEL("auth_status", get_auth_stat_string(as))
+				METRIC_LABEL("auth_status",
+					     get_auth_stat_string(as))
 			};
 
 			svc_auth_request_latency[sf_idx][as_idx] =
@@ -243,14 +248,14 @@ static void register_svc_auth_request_latency_metric(void) {
 					METRIC_METADATA(
 						"Distribution of time taken by an authentication request to complete",
 						METRIC_UNIT_MICROSECOND),
-					labels,
-					ARRAY_SIZE(labels),
+					labels, ARRAY_SIZE(labels),
 					monitoring__buckets_exp2_compact());
 		}
 	}
 }
 
-static void register_gss_svc_auth_steps_latency_metric(void) {
+static void register_gss_svc_auth_steps_latency_metric(void)
+{
 #ifdef _HAVE_GSSAPI
 	int svc, as, status;
 
@@ -263,14 +268,18 @@ static void register_gss_svc_auth_steps_latency_metric(void) {
 		const char *const svc_str = get_gss_svc_string(svc);
 
 		for (as = 0; as < GSS_SVC_AUTH_STEPS_COUNT; as++) {
-			const char *const auth_step_str = get_gss_svc_auth_step_string(as);
+			const char *const auth_step_str =
+				get_gss_svc_auth_step_string(as);
 
-			for (status = 0; status < GENERIC_OP_STATUS_COUNT; status++) {
+			for (status = 0; status < GENERIC_OP_STATUS_COUNT;
+			     status++) {
 				const metric_label_t labels[] = {
 					METRIC_LABEL("svc", svc_str),
-					METRIC_LABEL("auth_step", auth_step_str),
+					METRIC_LABEL("auth_step",
+						     auth_step_str),
 					METRIC_LABEL("step_status",
-						get_generic_op_status_name(status))
+						     get_generic_op_status_name(
+							     status))
 				};
 				gss_svc_auth_steps_latency[svc_idx][as][status] =
 					monitoring__register_histogram(
@@ -278,8 +287,7 @@ static void register_gss_svc_auth_steps_latency_metric(void) {
 						METRIC_METADATA(
 							"Distribution of time taken by gss service-auth steps to complete",
 							METRIC_UNIT_MICROSECOND),
-						labels,
-						ARRAY_SIZE(labels),
+						labels, ARRAY_SIZE(labels),
 						monitoring__buckets_exp2_compact());
 			}
 		}
@@ -287,7 +295,8 @@ static void register_gss_svc_auth_steps_latency_metric(void) {
 #endif
 }
 
-static void register_gss_svc_auth_ops_latency_metric(void) {
+static void register_gss_svc_auth_ops_latency_metric(void)
+{
 #ifdef _HAVE_GSSAPI
 	int svc, i;
 
@@ -310,23 +319,23 @@ static void register_gss_svc_auth_ops_latency_metric(void) {
 					METRIC_METADATA(
 						"Distribution of time taken by gss service-auth ops to complete",
 						METRIC_UNIT_MICROSECOND),
-					labels,
-					ARRAY_SIZE(labels),
+					labels, ARRAY_SIZE(labels),
 					monitoring__buckets_exp2_compact());
 		}
 	}
 #endif
 }
 
-void metrics_libntirpc_observe_svc_auth_request_latency(int sec_flavor,
-	enum auth_stat auth_status, const struct timespec *latency)
+void metrics_libntirpc_observe_svc_auth_request_latency(
+	int sec_flavor, enum auth_stat auth_status,
+	const struct timespec *latency)
 {
 	const int sf_idx = get_sec_flavor_idx_in_metrics_array(sec_flavor);
 	assert(sf_idx >= 0);
 	const int as_idx = get_auth_stat_idx_in_metrics_array(auth_status);
 	assert(as_idx >= 0);
-	monitoring__histogram_observe(
-		svc_auth_request_latency[sf_idx][as_idx], timespec_us(latency));
+	monitoring__histogram_observe(svc_auth_request_latency[sf_idx][as_idx],
+				      timespec_us(latency));
 }
 
 #ifdef _HAVE_GSSAPI
@@ -337,19 +346,20 @@ void metrics_libntirpc_observe_gss_svc_auth_step_latency(
 	const int svc_idx = get_gss_svc_idx_in_metrics_array(svc);
 	assert(svc_idx >= 0);
 	const generic_op_status_t step_status = step_succeeded ?
-		GENERIC_SUCCESS_STATUS : GENERIC_FAILURE_STATUS;
+							GENERIC_SUCCESS_STATUS :
+							GENERIC_FAILURE_STATUS;
 	monitoring__histogram_observe(
 		gss_svc_auth_steps_latency[svc_idx][step][step_status],
 		timespec_us(latency));
 }
 
-void metrics_libntirpc_observe_gss_svc_auth_op_latency(svc_auth_op_t op,
-	rpc_gss_svc_t svc, const struct timespec *latency)
+void metrics_libntirpc_observe_gss_svc_auth_op_latency(
+	svc_auth_op_t op, rpc_gss_svc_t svc, const struct timespec *latency)
 {
 	const int svc_idx = get_gss_svc_idx_in_metrics_array(svc);
 	assert(svc_idx >= 0);
-	monitoring__histogram_observe(
-		gss_svc_auth_ops_latency[svc_idx][op], timespec_us(latency));
+	monitoring__histogram_observe(gss_svc_auth_ops_latency[svc_idx][op],
+				      timespec_us(latency));
 }
 #endif
 
@@ -358,13 +368,14 @@ void metrics_libntirpc_update_tcp_connection_count(int connection_count)
 	monitoring__gauge_set(concurrent_tcp_metric, connection_count);
 }
 
-void metrics_libntirpc_init(void){
+void metrics_libntirpc_init(void)
+{
 	const metric_label_t empty_labels[] = {};
 	assert(initialized == false);
 	concurrent_tcp_metric = monitoring__register_gauge(
-			"libntirpc__tcp_connections_count",
-			METRIC_METADATA("TCP connections count", METRIC_UNIT_NONE), empty_labels,
-			ARRAY_SIZE(empty_labels));
+		"libntirpc__tcp_connections_count",
+		METRIC_METADATA("TCP connections count", METRIC_UNIT_NONE),
+		empty_labels, ARRAY_SIZE(empty_labels));
 
 	register_svc_auth_request_latency_metric();
 	register_gss_svc_auth_steps_latency_metric();
