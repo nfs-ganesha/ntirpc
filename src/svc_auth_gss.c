@@ -330,12 +330,14 @@ static void
 observe_gss_auth_op_latency(svc_auth_op_t op, rpc_gss_svc_t gss_svc,
 	const struct timespec *op_start)
 {
+#ifdef USE_MONITORING
 	struct timespec op_end, latency;
 
-	clock_gettime(CLOCK_MONOTONIC, &op_end);
+	metrics_libntirpc_clock_gettime(&op_end);
 	timespecsub(&op_end, op_start, &latency);
 	metrics_libntirpc_observe_gss_svc_auth_op_latency(op, gss_svc,
 		&latency);
+#endif
 }
 
 static void
@@ -344,7 +346,7 @@ observe_gss_auth_step_latency(gss_svc_auth_step_t step, rpc_gss_svc_t gss_svc,
 {
 	struct timespec step_end, latency;
 
-	clock_gettime(CLOCK_MONOTONIC, &step_end);
+	metrics_libntirpc_clock_gettime(&step_end);
 	timespecsub(&step_end, step_start, &latency);
 	metrics_libntirpc_observe_gss_svc_auth_step_latency(step, gss_svc,
 		step_succeeded, &latency);
@@ -495,7 +497,7 @@ svcauth_gss_validate(struct svc_req *req,
 	u_char rpchdr[RPCHDR_LEN];
 	struct timespec start_time;
 
-	clock_gettime(CLOCK_MONOTONIC, &start_time);
+	metrics_libntirpc_clock_gettime(&start_time);
 	memset(rpchdr, 0, RPCHDR_LEN);
 
 	/* XXX - Reconstruct RPC header for signing (from xdr_callmsg). */
@@ -553,7 +555,7 @@ svcauth_gss_nextverf(struct svc_req *req, struct svc_rpc_gss_data *gd,
 	signbuf.value = &num;
 	signbuf.length = sizeof(num);
 
-	clock_gettime(CLOCK_MONOTONIC, &start_time);
+	metrics_libntirpc_clock_gettime(&start_time);
 	maj_stat =
 	    gss_get_mic(&min_stat, gd->ctx, gd->sec.qop, &signbuf, &checksum);
 
@@ -646,7 +648,7 @@ send_reply_to_client(struct svc_req *req)
 	struct timespec start_time;
 	int res = true;
 
-	clock_gettime(CLOCK_MONOTONIC, &start_time);
+	metrics_libntirpc_clock_gettime(&start_time);
 	call_stat = svc_sendreply(req);
 	if (call_stat >= XPRT_DIED) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
@@ -794,7 +796,7 @@ _svcauth_gss(struct svc_req *req, bool *no_dispatch)
 			goto gd_free;
 		}
 
-		clock_gettime(CLOCK_MONOTONIC, &start_time);
+		metrics_libntirpc_clock_gettime(&start_time);
 		res = svcauth_gss_accept_sec_context(req, gd, &gr);
 		observe_gss_auth_step_latency(ACCEPT_SECURITY_CONTEXT, gc->gc_svc,
 			res, &start_time);
@@ -971,7 +973,7 @@ svcauth_gss_destroy(SVCAUTH *auth)
 
 	if (gd_established) {
 		/* gd->sec.svc will only be valid if gd->established is true */
-		clock_gettime(CLOCK_MONOTONIC, &start_time);
+		metrics_libntirpc_clock_gettime(&start_time);
 		gss_svc = gd->sec.svc;
 	}
 
@@ -1008,7 +1010,7 @@ svcauth_gss_wrap(struct svc_req *req, XDR *xdrs)
 	bool result;
 	struct timespec start_time;
 
-	clock_gettime(CLOCK_MONOTONIC, &start_time);
+	metrics_libntirpc_clock_gettime(&start_time);
 
 	__warnx(TIRPC_DEBUG_FLAG_RPCSEC_GSS, "%s() %d %s", __func__,
 		!gd->established ? 0 : gc->gc_svc,
@@ -1043,7 +1045,7 @@ svcauth_gss_unwrap(struct svc_req *req)
 	bool result;
 	struct timespec start_time;
 
-	clock_gettime(CLOCK_MONOTONIC, &start_time);
+	metrics_libntirpc_clock_gettime(&start_time);
 
 	if (!gd->established || gd->sec.svc == RPCSEC_GSS_SVC_NONE) {
 		result = (svc_auth_none.svc_ah_ops->svc_ah_unwrap(req));
@@ -1078,7 +1080,7 @@ svcauth_gss_checksum(struct svc_req *req)
 	bool result;
 	struct timespec start_time;
 
-	clock_gettime(CLOCK_MONOTONIC, &start_time);
+	metrics_libntirpc_clock_gettime(&start_time);
 
 	if (!gd->established || gd->sec.svc == RPCSEC_GSS_SVC_NONE) {
 		result = (svc_auth_none.svc_ah_ops->svc_ah_checksum(req));

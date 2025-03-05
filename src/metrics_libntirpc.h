@@ -34,4 +34,15 @@ void metrics_libntirpc_observe_gss_svc_auth_op_latency(
 #endif
 void metrics_libntirpc_init(void);
 
+static inline int metrics_libntirpc_clock_gettime(struct timespec *tp)
+{
+#ifdef USE_MONITORING
+	return clock_gettime(CLOCK_MONOTONIC, tp);
+#else
+	tp->tv_sec = 0;
+	tp->tv_nsec = 0;
+	return 0;
+#endif
+}
+
 #endif // METRICS_LIBNTIRPC_H

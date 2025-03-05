@@ -91,7 +91,7 @@ svc_auth_authenticate(struct svc_req *req, bool *no_dispatch)
 	extern mutex_t authsvc_lock;
 	struct timespec start, end, latency;
 
-	clock_gettime(CLOCK_MONOTONIC, &start);
+	metrics_libntirpc_clock_gettime(&start);
 
 	/* VARIABLES PROTECTED BY authsvc_lock: asp, Auths */
 	req->rq_msg.RPCM_ack.ar_verf = _null_auth;
@@ -136,7 +136,7 @@ svc_auth_authenticate(struct svc_req *req, bool *no_dispatch)
 	return (AUTH_REJECTEDCRED);
 
 out:
-	clock_gettime(CLOCK_MONOTONIC, &end);
+	metrics_libntirpc_clock_gettime(&end);
 	timespecsub(&end, &start, &latency);
 	metrics_libntirpc_observe_svc_auth_request_latency(cred_flavor,
 		rslt, &latency);
