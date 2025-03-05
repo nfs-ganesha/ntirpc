@@ -281,16 +281,16 @@ svc_dg_rendezvous(SVCXPRT *xprt)
 
         if (sp->sa_family == (sa_family_t) 0xffff) {
                 __warnx(TIRPC_DEBUG_FLAG_ERROR,
-                        "%s: Bad message sa_family is 0xffff",
-                        __func__);
+			"%s: xprt(%p) newxprt(%p) fd %d Bad message sa_family is 0xffff",
+			__func__, xprt, newxprt, newxprt->xp_fd);
 		svc_dg_xprt_free(su);
                 return SVC_STAT(xprt);
         }
 
         if (rlen == -1 || (rlen < (ssize_t) (4 * sizeof(u_int32_t)))) {
                 __warnx(TIRPC_DEBUG_FLAG_ERROR,
-                        "%s: Bad message rlen: %d",
-                        __func__, rlen);
+				"%s: xprt(%p) newxprt(%p) fd %d Bad message rlen: %d",
+				__func__, xprt, newxprt, newxprt->xp_fd, rlen);
 		svc_dg_xprt_free(su);
                 return SVC_STAT(xprt);
         }
