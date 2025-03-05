@@ -1610,7 +1610,7 @@ svc_rqst_epoll_events(struct svc_rqst_rec *sr_rec, int n_events)
 
 static void svc_rqst_epoll_loop(struct work_pool_entry *wpe)
 {
-	struct svc_rqst_rec *sr_rec =
+	struct svc_rqst_rec *sr_rec = 
 		opr_containerof(wpe, struct svc_rqst_rec, ev_wpe);
 	struct clnt_req *cc;
 	struct opr_rbtree_node *n;

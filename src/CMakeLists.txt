@@ -127,4 +127,6 @@ set_target_properties(ntirpc PROPERTIES LINK_FLAGS
 
 install(TARGETS ntirpc DESTINATION ${LIB_INSTALL_DIR})
 
+########### install files ###############
+
 # We are still missing the install of docs and stuff
