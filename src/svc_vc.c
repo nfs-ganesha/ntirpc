@@ -114,16 +114,14 @@ static void svc_vc_override_ops(SVCXPRT *, SVCXPRT *);
  * original function with flags SVC_CREATE_FLAG_CLOSE.
  *
  */
-static void
-svc_vc_xprt_free(struct svc_vc_xprt *xd)
+static void svc_vc_xprt_free(struct svc_vc_xprt *xd)
 {
 	XDR_DESTROY(xd->sx_dr.ioq.xdrs);
 	rpc_dplx_rec_destroy(&xd->sx_dr);
 	mem_free(xd, sizeof(struct svc_vc_xprt));
 }
 
-static struct svc_vc_xprt *
-svc_vc_xprt_zalloc(void)
+static struct svc_vc_xprt *svc_vc_xprt_zalloc(void)
 {
 	struct svc_vc_xprt *xd = mem_zalloc(sizeof(struct svc_vc_xprt));
 
@@ -133,8 +131,7 @@ svc_vc_xprt_zalloc(void)
 	return (xd);
 }
 
-void
-svc_vc_xprt_setup(SVCXPRT **sxpp)
+void svc_vc_xprt_setup(SVCXPRT **sxpp)
 {
 	if (unlikely(*sxpp)) {
 		svc_vc_xprt_free(VC_DR(REC_XPRT(*sxpp)));
@@ -146,9 +143,8 @@ svc_vc_xprt_setup(SVCXPRT **sxpp)
 	}
 }
 
-SVCXPRT *
-svc_vc_ncreatef(const int fd, const u_int sendsz, const u_int recvsz,
-		const uint32_t flags)
+SVCXPRT *svc_vc_ncreatef(const int fd, const u_int sendsz, const u_int recvsz,
+			 const uint32_t flags)
 {
 	struct __rpc_sockinfo si;
 	SVCXPRT *xprt;
@@ -164,15 +160,14 @@ svc_vc_ncreatef(const int fd, const u_int sendsz, const u_int recvsz,
 	xprt = svc_xprt_lookup(fd, svc_vc_xprt_setup);
 	if (!xprt) {
 		__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
-			"%s: fd %d svc_xprt_lookup failed",
-			__func__, fd);
+			"%s: fd %d svc_xprt_lookup failed", __func__, fd);
 		return (NULL);
 	}
 	rec = REC_XPRT(xprt);
 
-	xp_flags = atomic_postset_uint16_t_bits(&xprt->xp_flags,
-						(flags & SVC_XPRT_FLAG_CLOSE)
-						| SVC_XPRT_FLAG_INITIALIZED);
+	xp_flags = atomic_postset_uint16_t_bits(
+		&xprt->xp_flags,
+		(flags & SVC_XPRT_FLAG_CLOSE) | SVC_XPRT_FLAG_INITIALIZED);
 	if (xp_flags & SVC_XPRT_FLAG_INITIALIZED) {
 		rpc_dplx_rui(rec);
 		XPRT_TRACE(xprt, __func__, __func__, __LINE__);
@@ -195,8 +190,8 @@ svc_vc_ncreatef(const int fd, const u_int sendsz, const u_int recvsz,
 					   SVC_XPRT_FLAG_INITIALIZED);
 		rpc_dplx_rui(rec);
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
-			"%s: fd %d could not get network information",
-			__func__, fd);
+			"%s: fd %d could not get network information", __func__,
+			fd);
 		SVC_RELEASE(xprt, SVC_RELEASE_FLAG_NONE);
 		return (NULL);
 	}
@@ -221,14 +216,13 @@ svc_vc_ncreatef(const int fd, const u_int sendsz, const u_int recvsz,
 	svc_vc_rendezvous_ops(xprt);
 #ifdef RPC_VSOCK
 	if (si.si_af == AF_VSOCK)
-		 xprt->xp_type = XPRT_VSOCK_RENDEZVOUS;
+		xprt->xp_type = XPRT_VSOCK_RENDEZVOUS;
 #endif /* VSOCK */
 
 	/* caller should know what it's doing */
 	if (flags & SVC_CREATE_FLAG_LISTEN) {
-		__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
-			"%s: fd %d listen",
-			 __func__, fd);
+		__warnx(TIRPC_DEBUG_FLAG_SVC_VC, "%s: fd %d listen", __func__,
+			fd);
 		listen(fd, SOMAXCONN);
 	}
 
@@ -239,8 +233,7 @@ svc_vc_ncreatef(const int fd, const u_int sendsz, const u_int recvsz,
 					   SVC_XPRT_FLAG_INITIALIZED);
 		rpc_dplx_rui(rec);
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
-			"%s: fd %d getsockname failed (%d)",
-			 __func__, fd, rc);
+			"%s: fd %d getsockname failed (%d)", __func__, fd, rc);
 		SVC_RELEASE(xprt, SVC_RELEASE_FLAG_NONE);
 		return (NULL);
 	}
@@ -248,15 +241,14 @@ svc_vc_ncreatef(const int fd, const u_int sendsz, const u_int recvsz,
 	xprt->xp_netid = mem_strdup(netid);
 
 	/* Conditional register */
-	if ((!(__svc_params->flags & SVC_FLAG_NOREG_XPRTS)
-	     && !(flags & SVC_CREATE_FLAG_XPRT_NOREG))
-	    || (flags & SVC_CREATE_FLAG_XPRT_DOREG))
+	if ((!(__svc_params->flags & SVC_FLAG_NOREG_XPRTS) &&
+	     !(flags & SVC_CREATE_FLAG_XPRT_NOREG)) ||
+	    (flags & SVC_CREATE_FLAG_XPRT_DOREG))
 		svc_rqst_evchan_reg(__svc_params->ev_u.evchan.id, xprt,
 				    RPC_DPLX_LOCKED |
-				    SVC_RQST_FLAG_CHAN_AFFINITY);
+					    SVC_RQST_FLAG_CHAN_AFFINITY);
 
-	atomic_set_uint16_t_bits(&xprt->xp_flags,
-	    SVC_XPRT_FLAG_READY);
+	atomic_set_uint16_t_bits(&xprt->xp_flags, SVC_XPRT_FLAG_READY);
 
 	/* release */
 	rpc_dplx_rui(rec);
@@ -269,9 +261,9 @@ svc_vc_ncreatef(const int fd, const u_int sendsz, const u_int recvsz,
 	return (xprt);
 }
 
-static SVCXPRT *
-makefd_xprt(const int fd, const u_int sendsz, const u_int recvsz,
-	    struct __rpc_sockinfo *si, u_int flags)
+static SVCXPRT *makefd_xprt(const int fd, const u_int sendsz,
+			    const u_int recvsz, struct __rpc_sockinfo *si,
+			    u_int flags)
 {
 	SVCXPRT *xprt;
 	struct svc_vc_xprt *xd;
@@ -297,15 +289,14 @@ makefd_xprt(const int fd, const u_int sendsz, const u_int recvsz,
 
 	if (!xprt) {
 		__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
-			"%s: fd %d svc_xprt_lookup failed",
-			__func__, fd);
+			"%s: fd %d svc_xprt_lookup failed", __func__, fd);
 		return (NULL);
 	}
 
 	rec = REC_XPRT(xprt);
 
-	xp_flags = atomic_postset_uint16_t_bits(&xprt->xp_flags, flags
-						| SVC_XPRT_FLAG_INITIALIZED);
+	xp_flags = atomic_postset_uint16_t_bits(
+		&xprt->xp_flags, flags | SVC_XPRT_FLAG_INITIALIZED);
 	if (xp_flags & SVC_XPRT_FLAG_INITIALIZED) {
 		rpc_dplx_rui(rec);
 		XPRT_TRACE(xprt, __func__, __func__, __LINE__);
@@ -328,8 +319,8 @@ makefd_xprt(const int fd, const u_int sendsz, const u_int recvsz,
 					   SVC_XPRT_FLAG_INITIALIZED);
 		rpc_dplx_rui(rec);
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
-			"%s: fd %d could not get network information",
-			__func__, fd);
+			"%s: fd %d could not get network information", __func__,
+			fd);
 		SVC_RELEASE(xprt, SVC_RELEASE_FLAG_NONE);
 		return (NULL);
 	}
@@ -350,7 +341,7 @@ makefd_xprt(const int fd, const u_int sendsz, const u_int recvsz,
 
 #ifdef RPC_VSOCK
 	if (si->si_af == AF_VSOCK)
-		 xprt->xp_type = XPRT_VSOCK;
+		xprt->xp_type = XPRT_VSOCK;
 #endif /* VSOCK */
 
 	xprt->xp_netid = mem_strdup(netid);
@@ -365,9 +356,8 @@ makefd_xprt(const int fd, const u_int sendsz, const u_int recvsz,
 /*
  * Like sv_fd_ncreate(), except export flags for additional control.
  */
-SVCXPRT *
-svc_fd_ncreatef(const int fd, const u_int sendsize, const u_int recvsize,
-		const uint32_t flags)
+SVCXPRT *svc_fd_ncreatef(const int fd, const u_int sendsize,
+			 const u_int recvsize, const uint32_t flags)
 {
 	SVCXPRT *xprt;
 	struct __rpc_sockinfo si;
@@ -377,7 +367,7 @@ svc_fd_ncreatef(const int fd, const u_int sendsize, const u_int recvsize,
 
 	xprt = makefd_xprt(fd, sendsize, recvsize, &si,
 			   (flags & SVC_XPRT_FLAG_CLOSE) |
-			   (flags & SVC_XPRT_FLAG_LOOKUP_ONLY));
+				   (flags & SVC_XPRT_FLAG_LOOKUP_ONLY));
 
 	if ((!xprt) || (!(xprt->xp_flags & SVC_XPRT_FLAG_INITIAL)))
 		return (xprt);
@@ -390,8 +380,7 @@ svc_fd_ncreatef(const int fd, const u_int sendsize, const u_int recvsize,
 		xprt->xp_local.nb.len = sizeof(struct sockaddr_storage);
 		memset(xprt->xp_local.nb.buf, 0xfe, xprt->xp_local.nb.len);
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
-			"%s: fd %d getsockname failed (%d)",
-			 __func__, fd, rc);
+			"%s: fd %d getsockname failed (%d)", __func__, fd, rc);
 		SVC_RELEASE(xprt, SVC_RELEASE_FLAG_NONE);
 		return (NULL);
 	}
@@ -402,17 +391,16 @@ svc_fd_ncreatef(const int fd, const u_int sendsize, const u_int recvsize,
 		xprt->xp_remote.nb.len = sizeof(struct sockaddr_storage);
 		memset(xprt->xp_remote.nb.buf, 0xfe, xprt->xp_remote.nb.len);
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
-			"%s: fd %d getpeername failed (%d)",
-			 __func__, fd, rc);
+			"%s: fd %d getpeername failed (%d)", __func__, fd, rc);
 		SVC_RELEASE(xprt, SVC_RELEASE_FLAG_NONE);
 		return (NULL);
 	}
 	XPRT_TRACE(xprt, __func__, __func__, __LINE__);
 
 	/* Conditional register */
-	if ((!(__svc_params->flags & SVC_FLAG_NOREG_XPRTS)
-	     && !(flags & SVC_CREATE_FLAG_XPRT_NOREG))
-	    || (flags & SVC_CREATE_FLAG_XPRT_DOREG))
+	if ((!(__svc_params->flags & SVC_FLAG_NOREG_XPRTS) &&
+	     !(flags & SVC_CREATE_FLAG_XPRT_NOREG)) ||
+	    (flags & SVC_CREATE_FLAG_XPRT_DOREG))
 		svc_rqst_evchan_reg(__svc_params->ev_u.evchan.id, xprt,
 				    SVC_RQST_FLAG_CHAN_AFFINITY);
 
@@ -423,9 +411,8 @@ svc_fd_ncreatef(const int fd, const u_int sendsize, const u_int recvsize,
 	return (xprt);
 }
 
- /*ARGSUSED*/
-static enum xprt_stat
-svc_vc_rendezvous(SVCXPRT *xprt)
+/*ARGSUSED*/
+static enum xprt_stat svc_vc_rendezvous(SVCXPRT *xprt)
 {
 	struct svc_vc_xprt *req_xd = VC_DR(REC_XPRT(xprt));
 	SVCXPRT *newxprt;
@@ -439,9 +426,9 @@ svc_vc_rendezvous(SVCXPRT *xprt)
 	struct timeval timeval;
 
 	XPRT_AUTO_TRACEPOINT(xprt, rendezvous_start, TRACE_INFO,
-		"rendezvous_start");
+			     "rendezvous_start");
 
- again:
+again:
 	len = sizeof(addr);
 	fd = accept(xprt->xp_fd, (struct sockaddr *)(void *)&addr, &len);
 	if (fd < 0) {
@@ -458,9 +445,9 @@ svc_vc_rendezvous(SVCXPRT *xprt)
 				break;
 #endif
 			default:
-				abort();	/* XXX */
+				abort(); /* XXX */
 				break;
-			}	/* switch */
+			} /* switch */
 			goto again;
 		}
 		return (XPRT_DIED);
@@ -473,7 +460,7 @@ svc_vc_rendezvous(SVCXPRT *xprt)
 		return (XPRT_DIED);
 	}
 
-	(void) setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &n, sizeof(n));
+	(void)setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &n, sizeof(n));
 
 	/*
 	 * make a new transport (re-uses xprt)
@@ -489,7 +476,8 @@ svc_vc_rendezvous(SVCXPRT *xprt)
 	}
 	if (unlikely(!(newxprt->xp_flags & SVC_XPRT_FLAG_INITIAL))) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
-			"%s: %p fd %d with xp_refcnt %" PRId32 ", failed (will set dead)",
+			"%s: %p fd %d with xp_refcnt %" PRId32
+			", failed (will set dead)",
 			__func__, newxprt, newxprt->xp_fd, newxprt->xp_refcnt);
 		SVC_DESTROY(newxprt);
 		/* Was never added to epoll */
@@ -507,8 +495,8 @@ svc_vc_rendezvous(SVCXPRT *xprt)
 	/* XXX fvdl - is this useful? (Yes.  Matt) */
 	if (si.si_proto == IPPROTO_TCP) {
 		len = 1;
-		(void) setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &len,
-				  sizeof(len));
+		(void)setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &len,
+				 sizeof(len));
 	}
 
 	/* set SO_SNDTIMEO to deal with bad clients */
@@ -517,8 +505,8 @@ svc_vc_rendezvous(SVCXPRT *xprt)
 	if (setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeval,
 		       sizeof(timeval))) {
 		__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
-			"%s: fd %d SO_SNDTIMEO failed (%d)",
-			 __func__, fd, errno);
+			"%s: fd %d SO_SNDTIMEO failed (%d)", __func__, fd,
+			errno);
 	}
 
 	__rpc_address_setup(&newxprt->xp_local);
@@ -529,8 +517,7 @@ svc_vc_rendezvous(SVCXPRT *xprt)
 		memset(newxprt->xp_local.nb.buf, 0xfe,
 		       newxprt->xp_local.nb.len);
 		__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
-			"%s: fd %d getsockname failed (%d)",
-			 __func__, fd, rc);
+			"%s: fd %d getsockname failed (%d)", __func__, fd, rc);
 	}
 
 #if defined(HAVE_BLKIN)
@@ -545,8 +532,8 @@ svc_vc_rendezvous(SVCXPRT *xprt)
 
 	SVC_REF(xprt, SVC_REF_FLAG_NONE);
 	newxprt->xp_parent = xprt;
-	if (xprt->xp_dispatch.rendezvous_cb(newxprt)
-	 || svc_rqst_xprt_register(newxprt, xprt)) {
+	if (xprt->xp_dispatch.rendezvous_cb(newxprt) ||
+	    svc_rqst_xprt_register(newxprt, xprt)) {
 		// Note xp_parent is released in svc_vc_destroy_task
 		SVC_DESTROY(newxprt);
 		/* Was never added to epoll */
@@ -554,8 +541,7 @@ svc_vc_rendezvous(SVCXPRT *xprt)
 		return (XPRT_DESTROYED);
 	}
 
-	atomic_set_uint16_t_bits(&newxprt->xp_flags,
-	    SVC_XPRT_FLAG_READY);
+	atomic_set_uint16_t_bits(&newxprt->xp_flags, SVC_XPRT_FLAG_READY);
 
 	__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
 		"New client connected "
@@ -575,17 +561,15 @@ __attribute__((weak)) void svc_vc_notify_xprt_destroy_for_testing(
 {
 }
 
-static void
-svc_vc_destroy_task(struct work_pool_entry *wpe)
+static void svc_vc_destroy_task(struct work_pool_entry *wpe)
 {
 	struct rpc_dplx_rec *rec =
-			opr_containerof(wpe, struct rpc_dplx_rec, ioq.ioq_wpe);
+		opr_containerof(wpe, struct rpc_dplx_rec, ioq.ioq_wpe);
 	uint16_t xp_flags;
 	bool close_fd = false;
 
 	const int32_t xp_refcnt = atomic_fetch_int32_t(&rec->xprt.xp_refcnt);
-	__warnx(TIRPC_DEBUG_FLAG_REFCNT,
-		"%s() %p fd %d xp_refcnt %" PRId32,
+	__warnx(TIRPC_DEBUG_FLAG_REFCNT, "%s() %p fd %d xp_refcnt %" PRId32,
 		__func__, rec, rec->xprt.xp_fd, xp_refcnt);
 
 	if (xp_refcnt > 0) {
@@ -602,25 +586,25 @@ svc_vc_destroy_task(struct work_pool_entry *wpe)
 	xp_flags = atomic_postclear_uint16_t_bits(&rec->xprt.xp_flags,
 						  SVC_XPRT_FLAG_CLOSE);
 	__warnx(TIRPC_DEBUG_FLAG_REFCNT,
-		"%s() xprt: %p fd %d xp_refcnt %" PRId32 ", DESTROYING=%d RELEASING=%d",
+		"%s() xprt: %p fd %d xp_refcnt %" PRId32
+		", DESTROYING=%d RELEASING=%d",
 		__func__, &rec->xprt, rec->xprt.xp_fd, xp_refcnt,
-		((xp_flags & SVC_XPRT_FLAG_DESTROYING) !=  0),
+		((xp_flags & SVC_XPRT_FLAG_DESTROYING) != 0),
 		((xp_flags & SVC_XPRT_FLAG_RELEASING) != 0));
 	close_fd = ((xp_flags & SVC_XPRT_FLAG_CLOSE) &&
-		rec->xprt.xp_fd != RPC_ANYFD);
+		    rec->xprt.xp_fd != RPC_ANYFD);
 	if (close_fd) {
 		/* Shutting down without releasing the fd, since
 		 * xp_free_user_data() might be using it */
 		(void)shutdown(rec->xprt.xp_fd, SHUT_RDWR);
-		__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
-			"%s: fd %d shutdown",
-			 __func__, rec->xprt.xp_fd);
+		__warnx(TIRPC_DEBUG_FLAG_SVC_VC, "%s: fd %d shutdown", __func__,
+			rec->xprt.xp_fd);
 		if (rec->xprt.xp_fd_send != RPC_ANYFD)
 			(void)shutdown(rec->xprt.xp_fd_send, SHUT_RDWR);
 	} else {
 		__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
 			"%s: called for xprt %p, no close_fd, fd %d flags %x",
-			 __func__, &rec->xprt, rec->xprt.xp_fd, xp_flags);
+			__func__, &rec->xprt, rec->xprt.xp_fd, xp_flags);
 	}
 
 	if (rec->xprt.xp_ops->xp_free_user_data)
@@ -630,13 +614,12 @@ svc_vc_destroy_task(struct work_pool_entry *wpe)
 	 * It's safe to release the FD at this point (by calling close), since
 	 * there are no references left to this XPRT. */
 	if (close_fd) {
-		__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
-			"%s: fd %d xprt %p: fd close",
+		__warnx(TIRPC_DEBUG_FLAG_SVC_VC, "%s: fd %d xprt %p: fd close",
 			__func__, rec->xprt.xp_fd, &rec->xprt);
 		if (rec->xprt.xp_refcnt > 0) {
 			__warnx(TIRPC_DEBUG_FLAG_ERROR,
 				"%s: fd %d before close has ref_count %" PRId32,
-				 __func__, rec->xprt.xp_fd, rec->xprt.xp_refcnt);
+				__func__, rec->xprt.xp_fd, rec->xprt.xp_refcnt);
 			assert(false);
 		}
 		(void)close(rec->xprt.xp_fd);
@@ -660,17 +643,17 @@ svc_vc_destroy_task(struct work_pool_entry *wpe)
 	svc_vc_notify_xprt_destroy_for_testing(&remote_address);
 }
 
-static void
-svc_vc_unlink_it(SVCXPRT *xprt, u_int flags, const char *tag, const int line)
+static void svc_vc_unlink_it(SVCXPRT *xprt, u_int flags, const char *tag,
+			     const int line)
 {
 	__warnx(TIRPC_DEBUG_FLAG_REFCNT,
-		"%s() %p fd %d xp_refcnt %" PRId32 " @%s:%d",
-		__func__, xprt, xprt->xp_fd, xprt->xp_refcnt, tag, line);
+		"%s() %p fd %d xp_refcnt %" PRId32 " @%s:%d", __func__, xprt,
+		xprt->xp_fd, xprt->xp_refcnt, tag, line);
 	svc_rqst_xprt_unregister(xprt, flags);
 }
 
-static void
-svc_vc_destroy_it(SVCXPRT *xprt, u_int flags, const char *tag, const int line)
+static void svc_vc_destroy_it(SVCXPRT *xprt, u_int flags, const char *tag,
+			      const int line)
 {
 	struct timespec ts = {
 		.tv_sec = 0,
@@ -678,12 +661,12 @@ svc_vc_destroy_it(SVCXPRT *xprt, u_int flags, const char *tag, const int line)
 	};
 
 	__warnx(TIRPC_DEBUG_FLAG_REFCNT,
-		"%s() %p fd %d xp_refcnt %" PRId32 " @%s:%d",
-		__func__, xprt, xprt->xp_fd, xprt->xp_refcnt, tag, line);
+		"%s() %p fd %d xp_refcnt %" PRId32 " @%s:%d", __func__, xprt,
+		xprt->xp_fd, xprt->xp_refcnt, tag, line);
 
 	while (atomic_postset_uint16_t_bits(&(REC_XPRT(xprt)->ioq.ioq_s.qflags),
-					    IOQ_FLAG_WORKING)
-	       & IOQ_FLAG_WORKING) {
+					    IOQ_FLAG_WORKING) &
+	       IOQ_FLAG_WORKING) {
 		nanosleep(&ts, NULL);
 	}
 
@@ -693,35 +676,34 @@ svc_vc_destroy_it(SVCXPRT *xprt, u_int flags, const char *tag, const int line)
 
 extern mutex_t ops_lock;
 
- /*ARGSUSED*/
-static bool
-svc_vc_control(SVCXPRT *xprt, const u_int rq, void *in)
+/*ARGSUSED*/
+static bool svc_vc_control(SVCXPRT *xprt, const u_int rq, void *in)
 {
 	switch (rq) {
 	case SVCGET_XP_FLAGS:
-		*(u_int *) in = xprt->xp_flags;
+		*(u_int *)in = xprt->xp_flags;
 		break;
 	case SVCSET_XP_FLAGS:
-		xprt->xp_flags = *(u_int *) in;
+		xprt->xp_flags = *(u_int *)in;
 		break;
 	case SVCGET_XP_UNREF_USER_DATA:
 		mutex_lock(&ops_lock);
-		*(svc_xprt_void_fun_t *) in = xprt->xp_ops->xp_unref_user_data;
+		*(svc_xprt_void_fun_t *)in = xprt->xp_ops->xp_unref_user_data;
 		mutex_unlock(&ops_lock);
 		break;
 	case SVCSET_XP_UNREF_USER_DATA:
 		mutex_lock(&ops_lock);
-		xprt->xp_ops->xp_unref_user_data = *(svc_xprt_void_fun_t) in;
+		xprt->xp_ops->xp_unref_user_data = *(svc_xprt_void_fun_t)in;
 		mutex_unlock(&ops_lock);
 		break;
 	case SVCGET_XP_FREE_USER_DATA:
 		mutex_lock(&ops_lock);
-		*(svc_xprt_fun_t *) in = xprt->xp_ops->xp_free_user_data;
+		*(svc_xprt_fun_t *)in = xprt->xp_ops->xp_free_user_data;
 		mutex_unlock(&ops_lock);
 		break;
 	case SVCSET_XP_FREE_USER_DATA:
 		mutex_lock(&ops_lock);
-		xprt->xp_ops->xp_free_user_data = *(svc_xprt_fun_t) in;
+		xprt->xp_ops->xp_free_user_data = *(svc_xprt_fun_t)in;
 		mutex_unlock(&ops_lock);
 		break;
 	default:
@@ -730,8 +712,7 @@ svc_vc_control(SVCXPRT *xprt, const u_int rq, void *in)
 	return (TRUE);
 }
 
-static bool
-svc_vc_rendezvous_control(SVCXPRT *xprt, const u_int rq, void *in)
+static bool svc_vc_rendezvous_control(SVCXPRT *xprt, const u_int rq, void *in)
 {
 	struct svc_vc_xprt *xd = VC_DR(REC_XPRT(xprt));
 
@@ -744,22 +725,22 @@ svc_vc_rendezvous_control(SVCXPRT *xprt, const u_int rq, void *in)
 		break;
 	case SVCGET_XP_UNREF_USER_DATA:
 		mutex_lock(&ops_lock);
-		*(svc_xprt_void_fun_t *) in = xprt->xp_ops->xp_unref_user_data;
+		*(svc_xprt_void_fun_t *)in = xprt->xp_ops->xp_unref_user_data;
 		mutex_unlock(&ops_lock);
 		break;
 	case SVCSET_XP_UNREF_USER_DATA:
 		mutex_lock(&ops_lock);
-		xprt->xp_ops->xp_unref_user_data = *(svc_xprt_void_fun_t) in;
+		xprt->xp_ops->xp_unref_user_data = *(svc_xprt_void_fun_t)in;
 		mutex_unlock(&ops_lock);
 		break;
 	case SVCGET_XP_FREE_USER_DATA:
 		mutex_lock(&ops_lock);
-		*(svc_xprt_fun_t *) in = xprt->xp_ops->xp_free_user_data;
+		*(svc_xprt_fun_t *)in = xprt->xp_ops->xp_free_user_data;
 		mutex_unlock(&ops_lock);
 		break;
 	case SVCSET_XP_FREE_USER_DATA:
 		mutex_lock(&ops_lock);
-		xprt->xp_ops->xp_free_user_data = *(svc_xprt_fun_t) in;
+		xprt->xp_ops->xp_free_user_data = *(svc_xprt_fun_t)in;
 		mutex_unlock(&ops_lock);
 		break;
 	default:
@@ -768,8 +749,7 @@ svc_vc_rendezvous_control(SVCXPRT *xprt, const u_int rq, void *in)
 	return (TRUE);
 }
 
-static enum xprt_stat
-svc_vc_stat(SVCXPRT *xprt)
+static enum xprt_stat svc_vc_stat(SVCXPRT *xprt)
 {
 	if (xprt->xp_flags & SVC_XPRT_FLAG_DESTROYED)
 		return (XPRT_DESTROYED);
@@ -786,10 +766,10 @@ static bool update_and_notify_remote_address_set(SVCXPRT *xprt)
 {
 	u_int prev_xp_flags;
 	__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
-			"%s: %p fd %d update remote address set",
-			__func__, xprt, xprt->xp_fd);
-	prev_xp_flags = atomic_postset_uint16_t_bits(&xprt->xp_flags,
-			SVC_XPRT_FLAG_REMOTE_ADDR_SET);
+		"%s: %p fd %d update remote address set", __func__, xprt,
+		xprt->xp_fd);
+	prev_xp_flags = atomic_postset_uint16_t_bits(
+		&xprt->xp_flags, SVC_XPRT_FLAG_REMOTE_ADDR_SET);
 	/* remote addr set was must be called only once for xprt */
 	assert(!(prev_xp_flags & SVC_XPRT_FLAG_REMOTE_ADDR_SET));
 	if (xprt->xp_dispatch.remote_addr_set_cb) {
@@ -805,10 +785,10 @@ static bool update_and_notify_remote_address_set(SVCXPRT *xprt)
 }
 
 enum haproxy_ret_code {
-       HAPROXY_RET_CODE__SUCCESS = 0,
-       HAPROXY_RET_CODE__FAILURE,
-       HAPROXY_RET_CODE__IGNORE_LOCAL,
-       HAPROXY_RET_CODE__NOT_HAPROXY
+	HAPROXY_RET_CODE__SUCCESS = 0,
+	HAPROXY_RET_CODE__FAILURE,
+	HAPROXY_RET_CODE__IGNORE_LOCAL,
+	HAPROXY_RET_CODE__NOT_HAPROXY
 };
 
 static enum haproxy_ret_code handle_haproxy_header(SVCXPRT *xprt)
@@ -821,8 +801,8 @@ static enum haproxy_ret_code handle_haproxy_header(SVCXPRT *xprt)
 	enum haproxy_ret_code ret;
 
 	__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
-			"%s: %p fd %d potential haproxy packet",
-			__func__, xprt, xprt->xp_fd);
+		"%s: %p fd %d potential haproxy packet", __func__, xprt,
+		xprt->xp_fd);
 
 	/* PEEK in order not to consume a non haproxy packet */
 	rlen = recv(xprt->xp_fd, rest, sizeof(rest), MSG_WAITALL | MSG_PEEK);
@@ -840,8 +820,8 @@ static enum haproxy_ret_code handle_haproxy_header(SVCXPRT *xprt)
 		__warnx(TIRPC_DEBUG_FLAG_WARN,
 			"%s: %p fd %d proxy header failed rest1=%08x rest2=%08x "
 			"(treat as regular rpc packet)",
-			__func__, xprt, xprt->xp_fd, (int) rest[0],
-			(int) rest[1]);
+			__func__, xprt, xprt->xp_fd, (int)rest[0],
+			(int)rest[1]);
 		/* The signature does not fully match.
 		 * Flow should treat the packet as a regular rpc packet.*/
 		return HAPROXY_RET_CODE__NOT_HAPROXY;
@@ -909,16 +889,13 @@ static enum haproxy_ret_code handle_haproxy_header(SVCXPRT *xprt)
 			struct sockaddr_in *ss4;
 
 			xprt->xp_proxy = xprt->xp_remote;
-			ss4 = (struct sockaddr_in *)
-					&xprt->xp_remote.ss;
+			ss4 = (struct sockaddr_in *)&xprt->xp_remote.ss;
 			ss4->sin_family = AF_INET;
-			memcpy(&ss4->sin_addr,
-			       &pa.ip4.src_addr,
+			memcpy(&ss4->sin_addr, &pa.ip4.src_addr,
 			       sizeof(struct in_addr));
 			ss4->sin_port = pa.ip4.src_port;
 
-		} else if (s.fam ==
-				   PP2_TRANS_STREAM_FAM_INET6) {
+		} else if (s.fam == PP2_TRANS_STREAM_FAM_INET6) {
 			if (unlikely(s.len < sizeof(pa.ip6))) {
 				__warnx(TIRPC_DEBUG_FLAG_ERROR,
 					"%s: %p fd %d incorrect proxy header "
@@ -929,11 +906,9 @@ static enum haproxy_ret_code handle_haproxy_header(SVCXPRT *xprt)
 			struct sockaddr_in6 *ss6;
 
 			xprt->xp_proxy = xprt->xp_remote;
-			ss6 = (struct sockaddr_in6 *)
-					&xprt->xp_remote.ss;
+			ss6 = (struct sockaddr_in6 *)&xprt->xp_remote.ss;
 			xprt->xp_remote.ss.ss_family = AF_INET6;
-			memcpy(&ss6->sin6_addr,
-			       &pa.ip6.src_addr,
+			memcpy(&ss6->sin6_addr, &pa.ip6.src_addr,
 			       sizeof(struct in6_addr));
 			ss6->sin6_port = pa.ip6.src_port;
 
@@ -944,7 +919,7 @@ static enum haproxy_ret_code handle_haproxy_header(SVCXPRT *xprt)
 			__warnx(TIRPC_DEBUG_FLAG_ERROR,
 				"%s: %p fd %d invalid proxy protocol = %0x2 "
 				"(will set dead)",
-				__func__, xprt, xprt->xp_fd, (int) s.fam);
+				__func__, xprt, xprt->xp_fd, (int)s.fam);
 			return HAPROXY_RET_CODE__FAILURE;
 		}
 
@@ -952,36 +927,33 @@ static enum haproxy_ret_code handle_haproxy_header(SVCXPRT *xprt)
 
 	} else if (s.ver_cmd == PP2_VERSION2_CMD_LOCAL) {
 		__warnx(TIRPC_DEBUG_FLAG_EVENT,
-			"%s: %p fd %d proxy ignored for local",
-			__func__, xprt, xprt->xp_fd);
+			"%s: %p fd %d proxy ignored for local", __func__, xprt,
+			xprt->xp_fd);
 		ret = HAPROXY_RET_CODE__IGNORE_LOCAL;
 	} else {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s: %p fd %d invalid proxy command = %0x2 (will set dead)",
-			__func__, xprt, xprt->xp_fd,(int) s.ver_cmd);
+			__func__, xprt, xprt->xp_fd, (int)s.ver_cmd);
 		return HAPROXY_RET_CODE__FAILURE;
 	}
 
-	if (unlikely(svc_rqst_rearm_events(xprt,
-				   SVC_XPRT_FLAG_ADDED_RECV))) {
+	if (unlikely(svc_rqst_rearm_events(xprt, SVC_XPRT_FLAG_ADDED_RECV))) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s: %p fd %d svc_rqst_rearm_events failed (will set dead)",
 			__func__, xprt, xprt->xp_fd);
 		ret = HAPROXY_RET_CODE__FAILURE;
 
-		XPRT_AUTO_TRACEPOINT(xprt, rearm_failed,
-			TRACE_ERR, "Rearm failed");
+		XPRT_AUTO_TRACEPOINT(xprt, rearm_failed, TRACE_ERR,
+				     "Rearm failed");
 	} else {
-		XPRT_UNIQUE_AUTO_TRACEPOINT(
-			xprt, recv_exit, TRACE_DEBUG,
-			"Exiting recv");
+		XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, recv_exit, TRACE_DEBUG,
+					    "Exiting recv");
 	}
 
 	return ret;
 }
 
-static enum xprt_stat
-svc_vc_recv(SVCXPRT *xprt)
+static enum xprt_stat svc_vc_recv(SVCXPRT *xprt)
 {
 	struct rpc_dplx_rec *rec = REC_XPRT(xprt);
 	struct svc_vc_xprt *xd = VC_DR(rec);
@@ -1018,22 +990,22 @@ again:
 			code = errno;
 
 			if (code == EAGAIN || code == EWOULDBLOCK) {
-				__warnx(hap_again ? TIRPC_DEBUG_FLAG_SVC_VC
-						  : TIRPC_DEBUG_FLAG_WARN,
+				__warnx(hap_again ? TIRPC_DEBUG_FLAG_SVC_VC :
+						    TIRPC_DEBUG_FLAG_WARN,
 					"%s: %p fd %d recv errno %d (try again)",
 					"svc_vc_wait", xprt, xprt->xp_fd, code);
 				if (unlikely(svc_rqst_rearm_events(
-						xprt,
-						SVC_XPRT_FLAG_ADDED_RECV))) {
+					    xprt, SVC_XPRT_FLAG_ADDED_RECV))) {
 					__warnx(TIRPC_DEBUG_FLAG_ERROR,
 						"%s: %p fd %d svc_rqst_rearm_events failed (will set dead)",
-						"svc_vc_wait",
-						xprt, xprt->xp_fd);
+						"svc_vc_wait", xprt,
+						xprt->xp_fd);
 					SVC_DESTROY(xprt);
 					code = EINVAL;
 				}
 				XPRT_AUTO_TRACEPOINT(xprt, recv_eagin,
-					TRACE_DEBUG, "recv got EAGAIN");
+						     TRACE_DEBUG,
+						     "recv got EAGAIN");
 				return SVC_STAT(xprt);
 			}
 			__warnx(TIRPC_DEBUG_FLAG_WARN,
@@ -1041,8 +1013,8 @@ again:
 				"svc_vc_wait", xprt, xprt->xp_fd, code);
 			SVC_DESTROY(xprt);
 
-			XPRT_AUTO_TRACEPOINT(xprt, recv_err,
-				TRACE_WARNING, "recv got errno: {}", code);
+			XPRT_AUTO_TRACEPOINT(xprt, recv_err, TRACE_WARNING,
+					     "recv got errno: {}", code);
 			return SVC_STAT(xprt);
 		}
 
@@ -1052,28 +1024,29 @@ again:
 				"svc_vc_wait", xprt, xprt->xp_fd);
 			SVC_DESTROY(xprt);
 
-			XPRT_AUTO_TRACEPOINT(xprt, recv_empty,
-				TRACE_DEBUG, "recv EOF");
+			XPRT_AUTO_TRACEPOINT(xprt, recv_empty, TRACE_DEBUG,
+					     "recv EOF");
 
 			return SVC_STAT(xprt);
 		}
 
 		xd->sx_fbtbc = (int32_t)ntohl((long)xd->sx_fbtbc);
 
-		__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
-			"sx_fbtbc = %08x", (int)xd->sx_fbtbc);
+		__warnx(TIRPC_DEBUG_FLAG_SVC_VC, "sx_fbtbc = %08x",
+			(int)xd->sx_fbtbc);
 
 		if (xd->sx_fbtbc == PP2_SIG_UINT32) {
 			/* HA Proxy V2? */
 			enum haproxy_ret_code ret = handle_haproxy_header(xprt);
 			switch (ret) {
 			case HAPROXY_RET_CODE__SUCCESS:
-				if (!update_and_notify_remote_address_set(xprt)) {
+				if (!update_and_notify_remote_address_set(
+					    xprt)) {
 					SVC_DESTROY(xprt);
 					return SVC_STAT(xprt);
 				}
 				/* Now look to see if there's more... */
-	                        xd->sx_fbtbc = 0;
+				xd->sx_fbtbc = 0;
 				hap_again = true;
 				goto again;
 			case HAPROXY_RET_CODE__FAILURE:
@@ -1099,8 +1072,8 @@ again:
 				__func__, xprt, xprt->xp_fd);
 			SVC_DESTROY(xprt);
 
-			XPRT_AUTO_TRACEPOINT(xprt, recv_no_record,
-				TRACE_ERR,
+			XPRT_AUTO_TRACEPOINT(
+				xprt, recv_no_record, TRACE_ERR,
 				"Recv fragmet is zero (will set dead)");
 
 			return SVC_STAT(xprt);
@@ -1125,8 +1098,7 @@ again:
 				"%s: %p fd %d recv errno %d (try again)",
 				__func__, xprt, xprt->xp_fd, code);
 			if (unlikely(svc_rqst_rearm_events(
-						xprt,
-						SVC_XPRT_FLAG_ADDED_RECV))) {
+				    xprt, SVC_XPRT_FLAG_ADDED_RECV))) {
 				__warnx(TIRPC_DEBUG_FLAG_ERROR,
 					"%s: %p fd %d svc_rqst_rearm_events failed (will set dead)",
 					__func__, xprt, xprt->xp_fd);
@@ -1134,44 +1106,44 @@ again:
 				code = EINVAL;
 			}
 
-			XPRT_AUTO_TRACEPOINT(xprt, recv_eagin2,
-					TRACE_DEBUG, "recv got EAGIN");
+			XPRT_AUTO_TRACEPOINT(xprt, recv_eagin2, TRACE_DEBUG,
+					     "recv got EAGIN");
 
 			return SVC_STAT(xprt);
 		}
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
-			"%s: %p fd %d recv errno %d (will set dead)",
-			__func__, xprt, xprt->xp_fd, code);
+			"%s: %p fd %d recv errno %d (will set dead)", __func__,
+			xprt, xprt->xp_fd, code);
 		SVC_DESTROY(xprt);
 
-		XPRT_AUTO_TRACEPOINT(xprt, recv_error,
-				TRACE_ERR, "recv got errno: {}", code);
+		XPRT_AUTO_TRACEPOINT(xprt, recv_error, TRACE_ERR,
+				     "recv got errno: {}", code);
 
 		return SVC_STAT(xprt);
 	}
 
 	if (unlikely(!rlen)) {
 		__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
-			"%s: %p fd %d recv closed (will set dead)",
-			__func__, xprt, xprt->xp_fd);
+			"%s: %p fd %d recv closed (will set dead)", __func__,
+			xprt, xprt->xp_fd);
 		SVC_DESTROY(xprt);
 
-		XPRT_AUTO_TRACEPOINT(xprt, recv_closed,
-				TRACE_INFO, "recv closed");
+		XPRT_AUTO_TRACEPOINT(xprt, recv_closed, TRACE_INFO,
+				     "recv closed");
 
 		return SVC_STAT(xprt);
 	}
 
-	XPRT_AUTO_TRACEPOINT(xprt, recv_bytes,
-		TRACE_DEBUG, "recv {} bytes in sx_fbtbc: {}", rlen,
-			xd->sx_fbtbc);
+	XPRT_AUTO_TRACEPOINT(xprt, recv_bytes, TRACE_DEBUG,
+			     "recv {} bytes in sx_fbtbc: {}", rlen,
+			     xd->sx_fbtbc);
 
 	uv->v.vio_tail += rlen;
 	xd->sx_fbtbc -= rlen;
 
 	__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
-		"%s: %p fd %d recv %zd, need %" PRIu32 ", flags %x",
-		__func__, xprt, xprt->xp_fd, rlen, xd->sx_fbtbc, flags);
+		"%s: %p fd %d recv %zd, need %" PRIu32 ", flags %x", __func__,
+		xprt, xprt->xp_fd, rlen, xd->sx_fbtbc, flags);
 
 	if (xd->sx_fbtbc || (flags & UIO_FLAG_MORE)) {
 		if (unlikely(svc_rqst_rearm_events(xprt,
@@ -1180,11 +1152,11 @@ again:
 				"%s: %p fd %d svc_rqst_rearm_events failed (will set dead)",
 				__func__, xprt, xprt->xp_fd);
 			XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, rearm_failed,
-				TRACE_ERR, "Rearm failed");
+						    TRACE_ERR, "Rearm failed");
 			SVC_DESTROY(xprt);
 		} else {
 			XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, recv_exit,
-				TRACE_DEBUG, "recv exit");
+						    TRACE_DEBUG, "recv exit");
 		}
 
 		return SVC_STAT(xprt);
@@ -1209,20 +1181,19 @@ again:
 		xdr_ioq_destroy(xioq, xioq->ioq_s.qsize);
 		SVC_DESTROY(xprt);
 
-		XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, rearm_failed,
-			TRACE_ERR, "Rearm failed");
+		XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, rearm_failed, TRACE_ERR,
+					    "Rearm failed");
 
 		return SVC_STAT(xprt);
 	}
 
-	XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, calling_svc_request,
-		TRACE_DEBUG, "Calling svc_request");
+	XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, calling_svc_request, TRACE_DEBUG,
+				    "Calling svc_request");
 
 	return svc_request(xprt, xioq->xdrs);
 }
 
-static enum xprt_stat
-svc_vc_decode(struct svc_req *req)
+static enum xprt_stat svc_vc_decode(struct svc_req *req)
 {
 	XDR *xdrs = req->rq_xdrs;
 	SVCXPRT *xprt = req->rq_xprt;
@@ -1236,8 +1207,8 @@ svc_vc_decode(struct svc_req *req)
 	if (!xdr_dplx_decode(xdrs, &req->rq_msg)) {
 		/* stream is unsynchronized beyond recovery */
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
-			"%s: %p fd %d failed (will set dead)",
-			__func__, xprt, xprt->xp_fd);
+			"%s: %p fd %d failed (will set dead)", __func__, xprt,
+			xprt->xp_fd);
 		SVC_DESTROY(xprt);
 		return SVC_STAT(xprt);
 	}
@@ -1254,20 +1225,17 @@ svc_vc_decode(struct svc_req *req)
 	}
 
 	__warnx(TIRPC_DEBUG_FLAG_WARN,
-		"%s: %p fd %d failed direction %" PRIu32
-		" (will set dead)",
-		__func__, xprt, xprt->xp_fd,
-		req->rq_msg.rm_direction);
+		"%s: %p fd %d failed direction %" PRIu32 " (will set dead)",
+		__func__, xprt, xprt->xp_fd, req->rq_msg.rm_direction);
 	SVC_DESTROY(xprt);
 	return SVC_STAT(xprt);
 }
 
-static void
-svc_vc_checksum(struct svc_req *req, void *data, size_t length)
+static void svc_vc_checksum(struct svc_req *req, void *data, size_t length)
 {
 	req->rq_cksum =
 #if 1
-	/* CithHash64 is -substantially- faster than crc32c from FreeBSD
+		/* CithHash64 is -substantially- faster than crc32c from FreeBSD
 	 * SCTP, so prefer it until fast crc32c bests it */
 		CityHash64WithSeed(data, MIN(256, length), 103);
 #else
@@ -1275,8 +1243,7 @@ svc_vc_checksum(struct svc_req *req, void *data, size_t length)
 #endif
 }
 
-static enum xprt_stat
-svc_vc_reply(struct svc_req *req)
+static enum xprt_stat svc_vc_reply(struct svc_req *req)
 {
 	SVCXPRT *xprt = req->rq_xprt;
 	struct xdr_ioq *xioq;
@@ -1296,10 +1263,9 @@ svc_vc_reply(struct svc_req *req)
 	}
 	xdr_tail_update(xioq->xdrs);
 
-	if (req->rq_msg.rm_reply.rp_stat == MSG_ACCEPTED
-	 && req->rq_msg.rm_reply.rp_acpt.ar_stat == SUCCESS
-	 && req->rq_auth
-	 && !SVCAUTH_WRAP(req, xioq->xdrs)) {
+	if (req->rq_msg.rm_reply.rp_stat == MSG_ACCEPTED &&
+	    req->rq_msg.rm_reply.rp_acpt.ar_stat == SUCCESS && req->rq_auth &&
+	    !SVCAUTH_WRAP(req, xioq->xdrs)) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s: %p fd %d SVCAUTH_WRAP failed (will set dead)",
 			__func__, xprt, xprt->xp_fd);
@@ -1312,8 +1278,7 @@ svc_vc_reply(struct svc_req *req)
 	return (XPRT_IDLE);
 }
 
-static void
-svc_vc_override_ops(SVCXPRT *xprt, SVCXPRT *rendezvous)
+static void svc_vc_override_ops(SVCXPRT *xprt, SVCXPRT *rendezvous)
 {
 	static struct xp_ops ops;
 
@@ -1329,18 +1294,17 @@ svc_vc_override_ops(SVCXPRT *xprt, SVCXPRT *rendezvous)
 		ops.xp_reply = svc_vc_reply;
 		ops.xp_checksum = svc_vc_checksum;
 		ops.xp_unlink = svc_vc_unlink_it;
-		ops.xp_unref_user_data = NULL;	/* no default */
+		ops.xp_unref_user_data = NULL; /* no default */
 		ops.xp_destroy = svc_vc_destroy_it;
 		ops.xp_control = svc_vc_control;
-		ops.xp_free_user_data = NULL;	/* no default */
+		ops.xp_free_user_data = NULL; /* no default */
 	}
 	svc_override_ops(&ops, rendezvous);
 	xprt->xp_ops = &ops;
 	mutex_unlock(&ops_lock);
 }
 
-static void
-svc_vc_rendezvous_ops(SVCXPRT *xprt)
+static void svc_vc_rendezvous_ops(SVCXPRT *xprt)
 {
 	static struct xp_ops ops;
 	extern mutex_t ops_lock;
@@ -1354,12 +1318,12 @@ svc_vc_rendezvous_ops(SVCXPRT *xprt)
 		ops.xp_stat = svc_rendezvous_stat;
 		ops.xp_decode = (svc_req_fun_t)abort;
 		ops.xp_reply = (svc_req_fun_t)abort;
-		ops.xp_checksum = NULL;		/* not used */
+		ops.xp_checksum = NULL; /* not used */
 		ops.xp_unlink = svc_vc_unlink_it;
-		ops.xp_unref_user_data = NULL;	/* no default */
+		ops.xp_unref_user_data = NULL; /* no default */
 		ops.xp_destroy = svc_vc_destroy_it;
 		ops.xp_control = svc_vc_rendezvous_control;
-		ops.xp_free_user_data = NULL;	/* no default */
+		ops.xp_free_user_data = NULL; /* no default */
 	}
 	xprt->xp_ops = &ops;
 	mutex_unlock(&ops_lock);
@@ -1369,8 +1333,7 @@ svc_vc_rendezvous_ops(SVCXPRT *xprt)
  * Get the effective UID of the sending process. Used by rpcbind, keyserv
  * and rpc.yppasswdd on AF_LOCAL.
  */
-int
-__rpc_get_local_uid(SVCXPRT *transp, uid_t *uid)
+int __rpc_get_local_uid(SVCXPRT *transp, uid_t *uid)
 {
 	int sock, ret;
 	gid_t egid;

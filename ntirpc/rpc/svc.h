@@ -94,42 +94,42 @@ enum xprt_stat {
  */
 
 /* Package init flags */
-#define SVC_INIT_DEFAULT        0x0000
-#define SVC_INIT_XPRTS          0x0001
-#define SVC_INIT_EPOLL          0x0002
-#define SVC_INIT_NOREG_XPRTS    0x0008
-#define SVC_INIT_BLKIN          0x0010
+#define SVC_INIT_DEFAULT 0x0000
+#define SVC_INIT_XPRTS 0x0001
+#define SVC_INIT_EPOLL 0x0002
+#define SVC_INIT_NOREG_XPRTS 0x0008
+#define SVC_INIT_BLKIN 0x0010
 
-#define SVC_SHUTDOWN_FLAG_NONE  0x0000
+#define SVC_SHUTDOWN_FLAG_NONE 0x0000
 
 /*
  *      Service control requests
  */
-#define SVCGET_VERSQUIET        1
-#define SVCSET_VERSQUIET        2
-#define SVCGET_CONNMAXREC       3
-#define SVCSET_CONNMAXREC       4
-#define SVCGET_XP_FLAGS         7
-#define SVCSET_XP_FLAGS         8
-#define SVCGET_XP_FREE_USER_DATA        15
-#define SVCSET_XP_FREE_USER_DATA        16
-#define SVCGET_XP_UNREF_USER_DATA        17
-#define SVCSET_XP_UNREF_USER_DATA        18
+#define SVCGET_VERSQUIET 1
+#define SVCSET_VERSQUIET 2
+#define SVCGET_CONNMAXREC 3
+#define SVCSET_CONNMAXREC 4
+#define SVCGET_XP_FLAGS 7
+#define SVCSET_XP_FLAGS 8
+#define SVCGET_XP_FREE_USER_DATA 15
+#define SVCSET_XP_FREE_USER_DATA 16
+#define SVCGET_XP_UNREF_USER_DATA 17
+#define SVCSET_XP_UNREF_USER_DATA 18
 
 /*
  * Operations for rpc_control().
  */
-#define RPC_SVC_CONNMAXREC_SET  0	/* set max rec size, enable nonblock */
-#define RPC_SVC_CONNMAXREC_GET  1
-#define RPC_SVC_XPRTS_GET       2
-#define RPC_SVC_XPRTS_SET       3
-#define RPC_SVC_FDSET_GET       4
-#define RPC_SVC_FDSET_SET       5
+#define RPC_SVC_CONNMAXREC_SET 0 /* set max rec size, enable nonblock */
+#define RPC_SVC_CONNMAXREC_GET 1
+#define RPC_SVC_XPRTS_GET 2
+#define RPC_SVC_XPRTS_SET 3
+#define RPC_SVC_FDSET_GET 4
+#define RPC_SVC_FDSET_SET 5
 
-typedef enum xprt_stat (*svc_xprt_fun_t) (SVCXPRT *);
-typedef void (*svc_xprt_void_fun_t) (SVCXPRT *);
-typedef struct svc_req *(*svc_xprt_alloc_fun_t) (SVCXPRT *, XDR *);
-typedef void (*svc_xprt_free_fun_t) (struct svc_req *, enum xprt_stat);
+typedef enum xprt_stat (*svc_xprt_fun_t)(SVCXPRT *);
+typedef void (*svc_xprt_void_fun_t)(SVCXPRT *);
+typedef struct svc_req *(*svc_xprt_alloc_fun_t)(SVCXPRT *, XDR *);
+typedef void (*svc_xprt_free_fun_t)(struct svc_req *, enum xprt_stat);
 
 typedef struct svc_init_params {
 	svc_xprt_fun_t disconnect_cb;
@@ -137,8 +137,8 @@ typedef struct svc_init_params {
 	svc_xprt_free_fun_t free_cb;
 
 	u_long flags;
-	u_int max_connections;	/* xprts */
-	u_int max_events;	/* evchan events */
+	u_int max_connections; /* xprts */
+	u_int max_events; /* evchan events */
 	u_int ioq_send_max;
 	u_int ioq_thrd_max;
 	u_int ioq_thrd_min;
@@ -156,8 +156,8 @@ typedef struct svc_init_params {
 } svc_init_params;
 
 /* Svc param flags */
-#define SVC_FLAG_NONE             0x0000
-#define SVC_FLAG_NOREG_XPRTS      0x0001
+#define SVC_FLAG_NONE 0x0000
+#define SVC_FLAG_NOREG_XPRTS 0x0001
 
 #define SVC_PARAM_HAS_THR_STACK_SIZE 1
 
@@ -165,47 +165,47 @@ typedef struct svc_init_params {
  * SVCXPRT xp_flags
  */
 
-#define SVC_XPRT_FLAG_NONE		0x0000
+#define SVC_XPRT_FLAG_NONE 0x0000
 /* uint16_t actually used */
-#define SVC_XPRT_FLAG_ADDED_RECV	0x0001
-#define SVC_XPRT_FLAG_ADDED_SEND	0x0002
+#define SVC_XPRT_FLAG_ADDED_RECV 0x0001
+#define SVC_XPRT_FLAG_ADDED_SEND 0x0002
 
-#define SVC_XPRT_FLAG_INITIAL		0x0004
-#define SVC_XPRT_FLAG_INITIALIZED	0x0008
-#define SVC_XPRT_FLAG_CLOSE		0x0010
-#define SVC_XPRT_FLAG_DESTROYING	0x0020	/* SVC_DESTROY() was called */
-#define SVC_XPRT_FLAG_RELEASING		0x0040	/* (*xp_destroy) was called */
-#define SVC_XPRT_FLAG_UREG		0x0080
-#define SVC_XPRT_TREE_LOCKED		0x0100
-#define SVC_XPRT_FLAG_REMOTE_ADDR_SET	0x0200	/* remote addr was final set */
-#define SVC_XPRT_FLAG_READY		0x0400	/* ready to use */
-#define SVC_XPRT_FLAG_IOQ_WRITING	0x0800	/* xprt is used by svc_ioq_write */
+#define SVC_XPRT_FLAG_INITIAL 0x0004
+#define SVC_XPRT_FLAG_INITIALIZED 0x0008
+#define SVC_XPRT_FLAG_CLOSE 0x0010
+#define SVC_XPRT_FLAG_DESTROYING 0x0020 /* SVC_DESTROY() was called */
+#define SVC_XPRT_FLAG_RELEASING 0x0040 /* (*xp_destroy) was called */
+#define SVC_XPRT_FLAG_UREG 0x0080
+#define SVC_XPRT_TREE_LOCKED 0x0100
+#define SVC_XPRT_FLAG_REMOTE_ADDR_SET 0x0200 /* remote addr was final set */
+#define SVC_XPRT_FLAG_READY 0x0400 /* ready to use */
+#define SVC_XPRT_FLAG_IOQ_WRITING 0x0800 /* xprt is used by svc_ioq_write */
 
-#define SVC_XPRT_FLAG_DESTROYED (SVC_XPRT_FLAG_DESTROYING \
-				| SVC_XPRT_FLAG_RELEASING)
+#define SVC_XPRT_FLAG_DESTROYED \
+	(SVC_XPRT_FLAG_DESTROYING | SVC_XPRT_FLAG_RELEASING)
 
 /* uint32_t instructions */
-#define SVC_XPRT_FLAG_LOCKED		0x00010000
-#define SVC_XPRT_FLAG_UNLOCK		0x00020000
+#define SVC_XPRT_FLAG_LOCKED 0x00010000
+#define SVC_XPRT_FLAG_UNLOCK 0x00020000
 
 /* This flag serves as an instruction during svcxprt lookup, to not
  * implicitly create a new svcxprt, if the lookup does not find one.
  */
-#define SVC_XPRT_FLAG_LOOKUP_ONLY	0x00040000
+#define SVC_XPRT_FLAG_LOOKUP_ONLY 0x00040000
 
 /*
  * SVC_REF flags
  */
 
-#define SVC_REF_FLAG_NONE		SVC_XPRT_FLAG_NONE
-#define SVC_REF_FLAG_LOCKED		SVC_XPRT_FLAG_LOCKED
+#define SVC_REF_FLAG_NONE SVC_XPRT_FLAG_NONE
+#define SVC_REF_FLAG_LOCKED SVC_XPRT_FLAG_LOCKED
 
 /*
  * SVC_RELEASE flags
  */
 
-#define SVC_RELEASE_FLAG_NONE		SVC_XPRT_FLAG_NONE
-#define SVC_RELEASE_FLAG_LOCKED		SVC_XPRT_FLAG_LOCKED
+#define SVC_RELEASE_FLAG_NONE SVC_XPRT_FLAG_NONE
+#define SVC_RELEASE_FLAG_LOCKED SVC_XPRT_FLAG_LOCKED
 
 /* Don't confuse with (currently incomplete) transport type, nee socktype.
  */
@@ -224,10 +224,10 @@ typedef enum xprt_type {
 	XPRT_VSOCK_RENDEZVOUS
 } xprt_type_t;
 
-struct SVCAUTH;			/* forward decl. */
-struct svc_req;			/* forward decl. */
+struct SVCAUTH; /* forward decl. */
+struct svc_req; /* forward decl. */
 
-typedef enum xprt_stat (*svc_req_fun_t) (struct svc_req *);
+typedef enum xprt_stat (*svc_req_fun_t)(struct svc_req *);
 
 /**
  * Server side transport handle
@@ -247,16 +247,16 @@ struct svc_xprt {
 		svc_req_fun_t xp_reply;
 
 		/** optional checksum (after authentication/decryption) */
-		void (*xp_checksum) (struct svc_req *, void *, size_t);
+		void (*xp_checksum)(struct svc_req *, void *, size_t);
 
 		/** Unlink xprt from it's lookup table. */
-		void (*xp_unlink) (SVCXPRT *, u_int, const char *, const int);
+		void (*xp_unlink)(SVCXPRT *, u_int, const char *, const int);
 
 		/** actually destroy after xp_destroy_it and xp_release_it */
-		void (*xp_destroy) (SVCXPRT *, u_int, const char *, const int);
+		void (*xp_destroy)(SVCXPRT *, u_int, const char *, const int);
 
 		/** catch-all function */
-		bool (*xp_control) (SVCXPRT *, const u_int, void *);
+		bool (*xp_control)(SVCXPRT *, const u_int, void *);
 
 		/** Remove references: of xprt from user-data, and of user-data
 		 * from xprt.
@@ -274,26 +274,26 @@ struct svc_xprt {
 			svc_xprt_fun_t remote_addr_set_cb;
 		};
 		svc_xprt_fun_t rendezvous_cb;
-	}  xp_dispatch;
+	} xp_dispatch;
 	SVCXPRT *xp_parent;
 
-	char *xp_tp;		/* transport provider device name */
-	char *xp_netid;		/* network token */
+	char *xp_tp; /* transport provider device name */
+	char *xp_netid; /* network token */
 
-	void *xp_p1;		/* private: for use by svc ops */
-	void *xp_p2;		/* private: for use by svc ops */
-	void *xp_p3;		/* private: for use by svc lib */
-	void *xp_u1;		/* client user data */
-	void *xp_u2;		/* client user data */
+	void *xp_p1; /* private: for use by svc ops */
+	void *xp_p2; /* private: for use by svc ops */
+	void *xp_p3; /* private: for use by svc lib */
+	void *xp_u1; /* client user data */
+	void *xp_u2; /* client user data */
 
 #if defined(_USE_NFS_RDMA) || defined(USE_RPC_RDMA)
-	bool xp_rdma;		/* True if this xprt is RDMA enabled.
+	bool xp_rdma; /* True if this xprt is RDMA enabled.
 				 * Shared with Ganesha */
 #endif
 
-	struct rpc_address xp_local;	/* local address, length, port */
-	struct rpc_address xp_remote;	/* remote address, length, port */
-	struct rpc_address xp_proxy;	/* proxy address, length, port */
+	struct rpc_address xp_local; /* local address, length, port */
+	struct rpc_address xp_remote; /* remote address, length, port */
+	struct rpc_address xp_proxy; /* proxy address, length, port */
 
 #if defined(HAVE_BLKIN)
 	/* blkin tracing */
@@ -306,13 +306,13 @@ struct svc_xprt {
 	mutex_t xp_lock;
 
 	int xp_fd;
-	int xp_fd_send;		/* Sometimes a dup of xp_fd needed for send */
-	int xp_ifindex;		/* interface index */
-	int xp_si_type;		/* si type */
-	int xp_type;		/* xprt type */
+	int xp_fd_send; /* Sometimes a dup of xp_fd needed for send */
+	int xp_ifindex; /* interface index */
+	int xp_si_type; /* si type */
+	int xp_type; /* xprt type */
 
-	int32_t xp_refcnt;	/* handle reference count */
-	uint16_t xp_flags;	/* flags */
+	int32_t xp_refcnt; /* handle reference count */
+	uint16_t xp_flags; /* flags */
 	uint32_t xp_unique_id;
 
 	union {
@@ -324,23 +324,25 @@ struct svc_xprt {
 };
 
 #define XPRT_FMT "xprt: [ptr = {},flags = {},fd = {},type = {},refcnt = {}]"
-#define XPRT_VARS(_xprt) (_xprt), (_xprt)->xp_flags, (_xprt)->xp_fd, \
-	(_xprt)->xp_type, (_xprt)->xp_refcnt
+#define XPRT_VARS(_xprt)                                              \
+	(_xprt), (_xprt)->xp_flags, (_xprt)->xp_fd, (_xprt)->xp_type, \
+		(_xprt)->xp_refcnt
 
-#define XPRT_AUTO_TRACEPOINT(_xprt, event, log_level, format, ...) \
-	NTIRPC_AUTO_TRACEPOINT(xprt, event, log_level, \
-		XPRT_FMT " | " format, XPRT_VARS(_xprt), ##__VA_ARGS__)
+#define XPRT_AUTO_TRACEPOINT(_xprt, event, log_level, format, ...)            \
+	NTIRPC_AUTO_TRACEPOINT(xprt, event, log_level, XPRT_FMT " | " format, \
+			       XPRT_VARS(_xprt), ##__VA_ARGS__)
 
-#define XPRT_UNIQUE_AUTO_TRACEPOINT(_xprt, event, log_level, format, ...) \
-	NTIRPC_UNIQUE_AUTO_TRACEPOINT(xprt, event, log_level, \
-		XPRT_FMT " | " format, XPRT_VARS(_xprt), ##__VA_ARGS__)
+#define XPRT_UNIQUE_AUTO_TRACEPOINT(_xprt, event, log_level, format, ...)      \
+	NTIRPC_UNIQUE_AUTO_TRACEPOINT(xprt, event, log_level,                  \
+				      XPRT_FMT " | " format, XPRT_VARS(_xprt), \
+				      ##__VA_ARGS__)
 
 /* Service record used by exported search routines */
 typedef struct svc_record {
 	rpcprog_t sc_prog;
 	rpcvers_t sc_vers;
 	char *sc_netid;
-	void (*sc_dispatch) (struct svc_req *);
+	void (*sc_dispatch)(struct svc_req *);
 } svc_rec_t;
 
 typedef struct svc_vers_range {
@@ -360,28 +362,28 @@ typedef enum svc_lookup_result {
  * Service request
  */
 struct svc_req {
-	SVCXPRT *rq_xprt;	/* associated transport */
+	SVCXPRT *rq_xprt; /* associated transport */
 
 	/* New with TI-RPC */
-	char *rq_clntname;	/* read only client name */
-	char *rq_svcname;	/* read only cooked service cred */
+	char *rq_clntname; /* read only client name */
+	char *rq_svcname; /* read only cooked service cred */
 
 	/* New with N TI-RPC */
 	XDR *rq_xdrs;
-	void *rq_u1;		/* user data */
-	void *rq_u2;		/* user data */
+	void *rq_u1; /* user data */
+	void *rq_u2; /* user data */
 	uint64_t rq_cksum;
 
 #if defined(_USE_NFS_RDMA) || defined(USE_RPC_RDMA)
 	/* Data buffer used to server read/readdir from fs */
-	int data_chunk_length;	/* Shared with Ganesha */
-	uint8_t *data_chunk;	/* Shared with Ganesha */
+	int data_chunk_length; /* Shared with Ganesha */
+	uint8_t *data_chunk; /* Shared with Ganesha */
 #endif
 
 	/* Moved in N TI-RPC */
-	struct SVCAUTH *rq_auth;	/* auth handle */
-	void *rq_ap1;		/* auth private */
-	void *rq_ap2;		/* auth private */
+	struct SVCAUTH *rq_auth; /* auth handle */
+	void *rq_ap1; /* auth private */
+	void *rq_ap2; /* auth private */
 
 	/* Handle resumed requests */
 	svc_req_fun_t rq_resume_cb;
@@ -424,9 +426,9 @@ __BEGIN_DECLS
 extern void svc_xprt_trace(SVCXPRT *, const char *, const char *, const int);
 __END_DECLS
 
-#define XPRT_TRACE(xprt, func, tag, line)				 \
+#define XPRT_TRACE(xprt, func, tag, line)                                \
 	if (__ntirpc_pkg_params.debug_flags & TIRPC_DEBUG_FLAG_REFCNT) { \
-		svc_xprt_trace((xprt), (func), (tag), (line));		 \
+		svc_xprt_trace((xprt), (func), (tag), (line));           \
 	}
 
 /*
@@ -435,43 +437,36 @@ __END_DECLS
  * SVCXPRT *xprt;
  * struct svc_req *req;
  */
-#define SVC_RECV(xprt) \
-	(*(xprt)->xp_ops->xp_recv)(xprt)
+#define SVC_RECV(xprt) (*(xprt)->xp_ops->xp_recv)(xprt)
 
-#define SVC_STAT(xprt) \
-	(*(xprt)->xp_ops->xp_stat)(xprt)
+#define SVC_STAT(xprt) (*(xprt)->xp_ops->xp_stat)(xprt)
 
-#define SVC_DECODE(req) \
-	(*((req)->rq_xprt)->xp_ops->xp_decode)(req)
+#define SVC_DECODE(req) (*((req)->rq_xprt)->xp_ops->xp_decode)(req)
 
-#define SVC_REPLY(req) \
-	(*((req)->rq_xprt)->xp_ops->xp_reply)(req)
+#define SVC_REPLY(req) (*((req)->rq_xprt)->xp_ops->xp_reply)(req)
 
-#define SVC_CHECKSUM(req, what, length) \
+#define SVC_CHECKSUM(req, what, length)            \
 	if (((req)->rq_xprt)->xp_ops->xp_checksum) \
-		(*((req)->rq_xprt)->xp_ops->xp_checksum)(req, what, length)
+	(*((req)->rq_xprt)->xp_ops->xp_checksum)(req, what, length)
 
 /* Protect a SVCXPRT with SVC_REF() for each call, request, or task thread.
  */
-static inline void svc_ref_it(SVCXPRT *xprt, u_int flags,
-			      const char *tag, const int line)
+static inline void svc_ref_it(SVCXPRT *xprt, u_int flags, const char *tag,
+			      const int line)
 {
-	const int32_t refs =
-		atomic_inc_int32_t(&xprt->xp_refcnt);
+	const int32_t refs = atomic_inc_int32_t(&xprt->xp_refcnt);
 
-	if (flags & SVC_REF_FLAG_LOCKED)  {
+	if (flags & SVC_REF_FLAG_LOCKED) {
 		/* unlock before warning trace */
 		mutex_unlock(&xprt->xp_lock);
 	}
 	XPRT_TRACE(xprt, __func__, tag, line);
 
-	XPRT_AUTO_TRACEPOINT(xprt, incref, TRACE_DEBUG,
-		"Incref. refs: {}", refs);
+	XPRT_AUTO_TRACEPOINT(xprt, incref, TRACE_DEBUG, "Incref. refs: {}",
+			     refs);
 }
-#define SVC_REF2(xprt, flags, tag, line)				\
-	svc_ref_it(xprt, flags, tag, line)
-#define SVC_REF(xprt, flags)						\
-	svc_ref_it(xprt, flags, __func__, __LINE__)
+#define SVC_REF2(xprt, flags, tag, line) svc_ref_it(xprt, flags, tag, line)
+#define SVC_REF(xprt, flags) svc_ref_it(xprt, flags, __func__, __LINE__)
 
 /*
  * Socket to use on svcxxx_ncreate call to get default socket
@@ -483,8 +478,8 @@ static inline void svc_ref_it(SVCXPRT *xprt, u_int flags,
  * Idempotent SVC_XPRT_FLAG_DESTROYED (bit SVC_XPRT_FLAG_RELEASING)
  * indicates that more references should not be taken.
  */
-static inline void svc_release_it(SVCXPRT *xprt, u_int flags,
-				  const char *tag, const int line)
+static inline void svc_release_it(SVCXPRT *xprt, u_int flags, const char *tag,
+				  const int line)
 {
 	int32_t refs = atomic_dec_int32_t(&xprt->xp_refcnt);
 	uint16_t xp_flags;
@@ -495,8 +490,10 @@ static inline void svc_release_it(SVCXPRT *xprt, u_int flags,
 	}
 	XPRT_TRACE(xprt, __func__, tag, line);
 
-	XPRT_AUTO_TRACEPOINT(xprt, release_it, TRACE_DEBUG, "Release ref. "
-		"refs={}", refs);
+	XPRT_AUTO_TRACEPOINT(xprt, release_it, TRACE_DEBUG,
+			     "Release ref. "
+			     "refs={}",
+			     refs);
 
 	if (likely(refs > 0)) {
 		/* normal case */
@@ -515,18 +512,17 @@ static inline void svc_release_it(SVCXPRT *xprt, u_int flags,
 	/* Releasing last reference */
 	(*(xprt)->xp_ops->xp_destroy)(xprt, flags, tag, line);
 }
-#define SVC_RELEASE2(xprt, flags, tag, line)				\
+#define SVC_RELEASE2(xprt, flags, tag, line) \
 	svc_release_it(xprt, flags, __func__, __LINE__)
-#define SVC_RELEASE(xprt, flags)					\
-	svc_release_it(xprt, flags, __func__, __LINE__)
+#define SVC_RELEASE(xprt, flags) svc_release_it(xprt, flags, __func__, __LINE__)
 
 #define SVC_DESTROY_RETRY 10
 /* SVC_DESTROY() is SVC_RELEASE() with once-only semantics.
  * Idempotent SVC_XPRT_FLAG_DESTROYED (bit SVC_XPRT_FLAG_DESTROYING)
  * indicates that more references should not be taken.
  */
-static inline void svc_destroy_it(SVCXPRT *xprt,
-				  const char *tag, const int line)
+static inline void svc_destroy_it(SVCXPRT *xprt, const char *tag,
+				  const int line)
 {
 	int retry;
 	uint16_t flags = atomic_postset_uint16_t_bits(&xprt->xp_flags,
@@ -550,8 +546,8 @@ static inline void svc_destroy_it(SVCXPRT *xprt,
 	 * initialization to be done
 	 */
 	retry = 0;
-	while (!(xprt->xp_flags & SVC_XPRT_FLAG_READY)
-	    && (retry < SVC_DESTROY_RETRY)) {
+	while (!(xprt->xp_flags & SVC_XPRT_FLAG_READY) &&
+	       (retry < SVC_DESTROY_RETRY)) {
 		sched_yield();
 		retry += 1;
 	};
@@ -569,8 +565,8 @@ static inline void svc_destroy_it(SVCXPRT *xprt,
 	 * If set, let's cleanup and close the FDs, so that FIN-ACK
 	 * could be sent to the client immediately.
 	 * Also for UDP xprt, this is never set, needn't enter here */
-	if ((atomic_fetch_uint16_t(&xprt->xp_flags) & SVC_XPRT_FLAG_CLOSE)
-	    && xprt->xp_fd != RPC_ANYFD) {
+	if ((atomic_fetch_uint16_t(&xprt->xp_flags) & SVC_XPRT_FLAG_CLOSE) &&
+	    xprt->xp_fd != RPC_ANYFD) {
 		(void)shutdown(xprt->xp_fd, SHUT_RDWR);
 		if (xprt->xp_fd_send != RPC_ANYFD)
 			(void)shutdown(xprt->xp_fd_send, SHUT_RDWR);
@@ -578,10 +574,9 @@ static inline void svc_destroy_it(SVCXPRT *xprt,
 
 	svc_release_it(xprt, SVC_RELEASE_FLAG_NONE, tag, line);
 }
-#define SVC_DESTROY(xprt)						\
-	svc_destroy_it(xprt, __func__, __LINE__)
+#define SVC_DESTROY(xprt) svc_destroy_it(xprt, __func__, __LINE__)
 
-#define SVC_CONTROL(xprt, rq, in)					\
+#define SVC_CONTROL(xprt, rq, in) \
 	(*(xprt)->xp_ops->xp_control)((xprt), (rq), (in))
 
 /*
@@ -611,8 +606,7 @@ __END_DECLS
  */
 __BEGIN_DECLS
 extern bool svc_reg(SVCXPRT *, const rpcprog_t, const rpcvers_t,
-		    void (*)(struct svc_req *),
-		    const struct netconfig *);
+		    void (*)(struct svc_req *), const struct netconfig *);
 __END_DECLS
 /*
  * Service un-registration
@@ -633,12 +627,10 @@ __BEGIN_DECLS
 extern u_int __rpc_address_port(struct rpc_address *);
 extern void __rpc_address_set_length(struct rpc_address *, socklen_t);
 
-static inline void
-__rpc_address_setup(struct rpc_address *rpca)
+static inline void __rpc_address_setup(struct rpc_address *rpca)
 {
 	rpca->nb.buf = &rpca->ss;
-	rpca->nb.len =
-	rpca->nb.maxlen = sizeof(struct sockaddr_storage);
+	rpca->nb.len = rpca->nb.maxlen = sizeof(struct sockaddr_storage);
 }
 __END_DECLS
 /*
@@ -712,9 +704,8 @@ extern int svc_ncreate(void (*)(struct svc_req *), const rpcprog_t,
  * instead of a nettype.
  */
 
-extern SVCXPRT *svc_tp_ncreate(void (*)(struct svc_req *),
-			       const rpcprog_t, const rpcvers_t,
-			       const struct netconfig *);
+extern SVCXPRT *svc_tp_ncreate(void (*)(struct svc_req *), const rpcprog_t,
+			       const rpcvers_t, const struct netconfig *);
 /*
  * void (*dispatch)();            -- dispatch routine
  * const rpcprog_t prognum;       -- program number
@@ -742,13 +733,13 @@ __END_DECLS
  */
 
 /* uint16_t actually used */
-#define SVC_CREATE_FLAG_NONE		SVC_XPRT_FLAG_NONE
-#define SVC_CREATE_FLAG_CLOSE		SVC_XPRT_FLAG_CLOSE
+#define SVC_CREATE_FLAG_NONE SVC_XPRT_FLAG_NONE
+#define SVC_CREATE_FLAG_CLOSE SVC_XPRT_FLAG_CLOSE
 
 /* uint32_t instructions */
-#define SVC_CREATE_FLAG_LISTEN		0x20000000
-#define SVC_CREATE_FLAG_XPRT_DOREG	0x80000000
-#define SVC_CREATE_FLAG_XPRT_NOREG	0x08000000
+#define SVC_CREATE_FLAG_LISTEN 0x20000000
+#define SVC_CREATE_FLAG_XPRT_DOREG 0x80000000
+#define SVC_CREATE_FLAG_XPRT_NOREG 0x08000000
 
 __BEGIN_DECLS
 
@@ -761,8 +752,8 @@ extern SVCXPRT *svc_vc_ncreatef(const int, const u_int, const u_int,
  *      const u_int flags;                      -- flags
  */
 
-static inline SVCXPRT *
-svc_vc_ncreate(const int fd, const u_int sendsize, const u_int recvsize)
+static inline SVCXPRT *svc_vc_ncreate(const int fd, const u_int sendsize,
+				      const u_int recvsize)
 {
 	return (svc_vc_ncreatef(fd, sendsize, recvsize, SVC_CREATE_FLAG_CLOSE));
 }
@@ -776,8 +767,8 @@ extern SVCXPRT *svc_dg_ncreatef(const int, const u_int, const u_int,
  *      const uint32_t flags;                   -- flags
  */
 
-static inline SVCXPRT *
-svc_dg_ncreate(const int fd, const u_int sendsize, const u_int recvsize)
+static inline SVCXPRT *svc_dg_ncreate(const int fd, const u_int sendsize,
+				      const u_int recvsize)
 {
 	return (svc_dg_ncreatef(fd, sendsize, recvsize, SVC_CREATE_FLAG_CLOSE));
 }
@@ -794,8 +785,8 @@ extern SVCXPRT *svc_fd_ncreatef(const int, const u_int, const u_int,
  *      const uint32_t flags;                   -- flags
  */
 
-static inline SVCXPRT *
-svc_fd_ncreate(const int fd, const u_int sendsize, const u_int recvsize)
+static inline SVCXPRT *svc_fd_ncreate(const int fd, const u_int sendsize,
+				      const u_int recvsize)
 {
 	return (svc_fd_ncreatef(fd, sendsize, recvsize, SVC_CREATE_FLAG_NONE));
 }
@@ -811,19 +802,19 @@ extern SVCXPRT *svc_raw_ncreate(void);
 struct rpc_rdma_attr {
 	char *statistics_prefix;
 	/* silly char * to pass to rdma_getaddrinfo() */
-	char *node;			/**< remote peer's hostname */
-	char *port;			/**< service port (or name) */
+	char *node; /**< remote peer's hostname */
+	char *port; /**< service port (or name) */
 
-	u_int sq_depth;			/**< depth of Send Queue */
-	u_int max_send_sge;		/**< s/g elements per send */
-	u_int rq_depth;			/**< depth of Receive Queue. */
-	u_int max_recv_sge;		/**< s/g elements per recv */
+	u_int sq_depth; /**< depth of Send Queue */
+	u_int max_send_sge; /**< s/g elements per send */
+	u_int rq_depth; /**< depth of Receive Queue. */
+	u_int max_recv_sge; /**< s/g elements per recv */
 
-	u_int backlog;			/**< connection backlog */
-	u_int credits;			/**< parallel messages */
+	u_int backlog; /**< connection backlog */
+	u_int credits; /**< parallel messages */
 
-	bool destroy_on_disconnect;	/**< should perform cleanup */
-	bool use_srq;			/**< server use srq? */
+	bool destroy_on_disconnect; /**< should perform cleanup */
+	bool use_srq; /**< server use srq? */
 };
 
 extern SVCXPRT *rpc_rdma_ncreatef(const struct rpc_rdma_attr *, const u_int,
@@ -835,9 +826,9 @@ extern SVCXPRT *rpc_rdma_ncreatef(const struct rpc_rdma_attr *, const u_int,
  *      const uint32_t flags;                   -- flags
  */
 
-static inline SVCXPRT *
-svc_rdma_ncreate(const struct rpc_rdma_attr *xa, const u_int sendsize,
-		 const u_int recvsize)
+static inline SVCXPRT *svc_rdma_ncreate(const struct rpc_rdma_attr *xa,
+					const u_int sendsize,
+					const u_int recvsize)
 {
 	return rpc_rdma_ncreatef(xa, sendsize, recvsize, SVC_CREATE_FLAG_CLOSE);
 }
@@ -852,4 +843,4 @@ int __rpc_get_local_uid(SVCXPRT *, uid_t *);
 __END_DECLS
 /* for backward compatibility */
 #include <rpc/tirpc_compat.h>
-#endif				/* !_TIRPC_SVC_H */
+#endif /* !_TIRPC_SVC_H */
