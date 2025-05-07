@@ -294,6 +294,11 @@ struct svc_xprt {
 	struct rpc_address xp_local; /* local address, length, port */
 	struct rpc_address xp_remote; /* remote address, length, port */
 	struct rpc_address xp_proxy; /* proxy address, length, port */
+	struct proxy_protocol_tlv_headers proxy_protocol_tlv_headers;
+	/* Network id parsed from proxy protocol.
+	 * Populated only when PARSE_COMMON_NETWORK_ID flag is on
+	 */
+	struct network_id xp_remote_network_id;
 
 #if defined(HAVE_BLKIN)
 	/* blkin tracing */

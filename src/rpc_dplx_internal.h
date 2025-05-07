@@ -33,6 +33,7 @@
 #include <rpc/svc.h>
 #include <rpc/xdr_ioq.h>
 #include <rpc/pool_queue.h>
+#include <rpc/haproxy.h>
 
 /* Svc event strategy */
 enum svc_event_type {
@@ -126,6 +127,12 @@ rpc_dplx_rec_init(struct rpc_dplx_rec *rec)
 	(void)clock_gettime(CLOCK_MONOTONIC_FAST, &(rec->recv.ts));
 
 	rec->xprt.xp_refcnt = 1;
+
+	// Init TLV headers, network id values in case they are not set later on
+	rec->xprt.proxy_protocol_tlv_headers.tlv_count = 0;
+	rec->xprt.proxy_protocol_tlv_headers.tlvs = NULL;
+	rec->xprt.xp_remote_network_id.source = PP2_TYPE_UNSET;
+	rec->xprt.xp_remote_network_id.gcp_psc_connection_id = 0;
 }
 
 static inline void
@@ -134,6 +141,14 @@ rpc_dplx_rec_destroy(struct rpc_dplx_rec *rec)
 	rpc_dplx_lock_destroy(&rec->recv.lock);
 	mutex_destroy(&rec->xprt.xp_lock);
 	mutex_destroy(&rec->writeq.qmutex);
+
+	if (rec->xprt.proxy_protocol_tlv_headers.tlv_count > 0) {
+		for (uint16_t i = 0; i < rec->xprt.proxy_protocol_tlv_headers.tlv_count; i++)
+			free(rec->xprt.proxy_protocol_tlv_headers.tlvs[i].value);
+		free(rec->xprt.proxy_protocol_tlv_headers.tlvs);
+		rec->xprt.proxy_protocol_tlv_headers.tlvs = NULL;
+		rec->xprt.proxy_protocol_tlv_headers.tlv_count = 0;
+	}
 
 #if defined(HAVE_BLKIN)
 	if (rec->xprt.blkin.svc_name)

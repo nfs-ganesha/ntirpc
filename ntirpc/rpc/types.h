@@ -48,6 +48,8 @@
 #include <sys/types.h>
 #include <inttypes.h>
 
+#include "haproxy.h"
+
 #if defined(_WIN32)
 
 #define __BEGIN_DECLS
@@ -55,7 +57,7 @@
 
 /* integral types */
 #ifndef _MSC_VER
-#include <_bsd_types.h>		/* XXX mingw (defines u_long) */
+#include <_bsd_types.h> /* XXX mingw (defines u_long) */
 #endif
 typedef uint8_t u_char;
 typedef uint16_t u_int16_t;
@@ -77,7 +79,7 @@ struct iovec {
 };
 
 #include <winsock2.h>
-#include <ws2tcpip.h>		/* XXX mingw */
+#include <ws2tcpip.h> /* XXX mingw */
 
 #endif
 
@@ -109,65 +111,64 @@ typedef int32_t rpc_inline_t;
  * Package params support
  */
 
-#define TIRPC_GET_PARAMETERS		0
-#define TIRPC_PUT_PARAMETERS		1
-#define TIRPC_GET_DEBUG_FLAGS		2
-#define TIRPC_SET_DEBUG_FLAGS		3
-#define TIRPC_GET_OTHER_FLAGS		4
-#define TIRPC_SET_OTHER_FLAGS		5
+#define TIRPC_GET_PARAMETERS 0
+#define TIRPC_PUT_PARAMETERS 1
+#define TIRPC_GET_DEBUG_FLAGS 2
+#define TIRPC_SET_DEBUG_FLAGS 3
+#define TIRPC_GET_OTHER_FLAGS 4
+#define TIRPC_SET_OTHER_FLAGS 5
 
 /*
  * Debug flags support
  */
 
-#define TIRPC_FLAG_NONE                 0x0000000
-#define TIRPC_DEBUG_FLAG_NONE           0x0000000
-#define TIRPC_DEBUG_FLAG_ERROR          0x0000001
-#define TIRPC_DEBUG_FLAG_EVENT          0x0000002
-#define TIRPC_DEBUG_FLAG_WARN           0x0000004
-#define TIRPC_DEBUG_FLAG_LOCK           0x0000008
-#define TIRPC_DEBUG_FLAG_REFCNT         0x0000010
-#define TIRPC_DEBUG_FLAG_RBTREE         0x0000020
-#define TIRPC_DEBUG_FLAG_RPCSEC_GSS     0x0000040
-#define TIRPC_DEBUG_FLAG_AUTH           0x0000080
-#define TIRPC_DEBUG_FLAG_CLNT_DG        0x0000100
-#define TIRPC_DEBUG_FLAG_CLNT_RDMA      0x0000200
-#define TIRPC_DEBUG_FLAG_CLNT_SCTP      0x0000400
-#define TIRPC_DEBUG_FLAG_CLNT_VC        0x0000800
-#define TIRPC_DEBUG_FLAG_CLNT_BCAST     0x0001000
-#define TIRPC_DEBUG_FLAG_CLNT_RAW       0x0002000
-#define TIRPC_DEBUG_FLAG_CLNT_REQ       0x0004000
-#define TIRPC_DEBUG_FLAG_CLNT           0x0008000
-#define TIRPC_DEBUG_FLAG_SVC_DG         0x0010000
-#define TIRPC_DEBUG_FLAG_SVC_RDMA       0x0020000
-#define TIRPC_DEBUG_FLAG_SVC_SCTP       0x0040000
-#define TIRPC_DEBUG_FLAG_SVC_VC         0x0080000
-#define TIRPC_DEBUG_FLAG_SVC_RQST       0x0100000
-#define TIRPC_DEBUG_FLAG_SVC_XPRT       0x0200000
-#define TIRPC_DEBUG_FLAG_SVC            0x0400000
-#define TIRPC_DEBUG_FLAG_XDR            0x0800000
-#define TIRPC_DEBUG_FLAG_WORKER         0x1000000
-#define TIRPC_DEBUG_FLAG_RPC_MSG        0x2000000
-#define TIRPC_DEBUG_FLAG_RPC_RDMA       0x4000000
-#define TIRPC_DEBUG_FLAG_XDR_RDMA       0x8000000
+#define TIRPC_FLAG_NONE 0x0000000
+#define TIRPC_DEBUG_FLAG_NONE 0x0000000
+#define TIRPC_DEBUG_FLAG_ERROR 0x0000001
+#define TIRPC_DEBUG_FLAG_EVENT 0x0000002
+#define TIRPC_DEBUG_FLAG_WARN 0x0000004
+#define TIRPC_DEBUG_FLAG_LOCK 0x0000008
+#define TIRPC_DEBUG_FLAG_REFCNT 0x0000010
+#define TIRPC_DEBUG_FLAG_RBTREE 0x0000020
+#define TIRPC_DEBUG_FLAG_RPCSEC_GSS 0x0000040
+#define TIRPC_DEBUG_FLAG_AUTH 0x0000080
+#define TIRPC_DEBUG_FLAG_CLNT_DG 0x0000100
+#define TIRPC_DEBUG_FLAG_CLNT_RDMA 0x0000200
+#define TIRPC_DEBUG_FLAG_CLNT_SCTP 0x0000400
+#define TIRPC_DEBUG_FLAG_CLNT_VC 0x0000800
+#define TIRPC_DEBUG_FLAG_CLNT_BCAST 0x0001000
+#define TIRPC_DEBUG_FLAG_CLNT_RAW 0x0002000
+#define TIRPC_DEBUG_FLAG_CLNT_REQ 0x0004000
+#define TIRPC_DEBUG_FLAG_CLNT 0x0008000
+#define TIRPC_DEBUG_FLAG_SVC_DG 0x0010000
+#define TIRPC_DEBUG_FLAG_SVC_RDMA 0x0020000
+#define TIRPC_DEBUG_FLAG_SVC_SCTP 0x0040000
+#define TIRPC_DEBUG_FLAG_SVC_VC 0x0080000
+#define TIRPC_DEBUG_FLAG_SVC_RQST 0x0100000
+#define TIRPC_DEBUG_FLAG_SVC_XPRT 0x0200000
+#define TIRPC_DEBUG_FLAG_SVC 0x0400000
+#define TIRPC_DEBUG_FLAG_XDR 0x0800000
+#define TIRPC_DEBUG_FLAG_WORKER 0x1000000
+#define TIRPC_DEBUG_FLAG_RPC_MSG 0x2000000
+#define TIRPC_DEBUG_FLAG_RPC_RDMA 0x4000000
+#define TIRPC_DEBUG_FLAG_XDR_RDMA 0x8000000
 
 /* or symbolic names for default */
-#define TIRPC_DEBUG_FLAG_DEFAULT \
-	(TIRPC_DEBUG_FLAG_ERROR | \
-	 TIRPC_DEBUG_FLAG_EVENT | \
+#define TIRPC_DEBUG_FLAG_DEFAULT                           \
+	(TIRPC_DEBUG_FLAG_ERROR | TIRPC_DEBUG_FLAG_EVENT | \
 	 TIRPC_DEBUG_FLAG_WARN)
 
-#define TIRPC_DEBUG_FLAG_CLNT_RPCB      (TIRPC_DEBUG_FLAG_CLNT)
+#define TIRPC_DEBUG_FLAG_CLNT_RPCB (TIRPC_DEBUG_FLAG_CLNT)
 
-typedef void *(*mem_1_size_t) (size_t,
-	     const char *file, int line, const char *function);
-typedef void *(*mem_2_size_t) (size_t, size_t,
-	     const char *file, int line, const char *function);
-typedef void *(*mem_p_size_t) (void *, size_t,
-	     const char *file, int line, const char *function);
-typedef void (*mem_free_size_t) (void *, size_t);
-typedef void (*mem_format_t) (const char *fmt, ...);
-typedef void (*mem_char_t) (const char *);
+typedef void *(*mem_1_size_t)(size_t, const char *file, int line,
+			      const char *function);
+typedef void *(*mem_2_size_t)(size_t, size_t, const char *file, int line,
+			      const char *function);
+typedef void *(*mem_p_size_t)(void *, size_t, const char *file, int line,
+			      const char *function);
+typedef void (*mem_free_size_t)(void *, size_t);
+typedef void (*mem_format_t)(const char *fmt, ...);
+typedef void (*mem_char_t)(const char *);
 
 /*
  * Package params support
@@ -175,41 +176,42 @@ typedef void (*mem_char_t) (const char *);
 typedef struct tirpc_pkg_params {
 	uint32_t debug_flags;
 	uint32_t other_flags;
-	mem_char_t	thread_name_;
-	mem_format_t	warnx_;
-	mem_free_size_t	free_size_;
-	mem_1_size_t	malloc_;
-	mem_2_size_t	aligned_;
-	mem_2_size_t	calloc_;
-	mem_p_size_t	realloc_;
+	mem_char_t thread_name_;
+	mem_format_t warnx_;
+	mem_free_size_t free_size_;
+	mem_1_size_t malloc_;
+	mem_2_size_t aligned_;
+	mem_2_size_t calloc_;
+	mem_p_size_t realloc_;
 } tirpc_pkg_params;
 
 extern tirpc_pkg_params __ntirpc_pkg_params;
 
 #include <misc/abstract_atomic.h>
 
-#define __warnx(flags, ...) \
-	do {					   \
-		if (__ntirpc_pkg_params.debug_flags & (flags)) {	\
-			__ntirpc_pkg_params.warnx_(__VA_ARGS__);	\
-		}							\
+#define __warnx(flags, ...)                                      \
+	do {                                                     \
+		if (__ntirpc_pkg_params.debug_flags & (flags)) { \
+			__ntirpc_pkg_params.warnx_(__VA_ARGS__); \
+		}                                                \
 	} while (0)
 
 #define __debug_flag(flags) (__ntirpc_pkg_params.debug_flags & (flags))
 
-#define mem_alloc(size) __ntirpc_pkg_params.malloc_((size), \
-			__FILE__, __LINE__, __func__)
-#define mem_aligned(align, size) __ntirpc_pkg_params.aligned_((align), (size), \
-			__FILE__, __LINE__, __func__)
-#define mem_calloc(count, size) __ntirpc_pkg_params.calloc_((count), (size), \
-			__FILE__, __LINE__, __func__)
-#define mem_realloc(p, size) __ntirpc_pkg_params.realloc_((p), (size), \
-			__FILE__, __LINE__, __func__)
-#define mem_zalloc(size) __ntirpc_pkg_params.calloc_(1, (size), \
-			__FILE__, __LINE__, __func__)
+#define mem_alloc(size) \
+	__ntirpc_pkg_params.malloc_((size), __FILE__, __LINE__, __func__)
+#define mem_aligned(align, size)                                          \
+	__ntirpc_pkg_params.aligned_((align), (size), __FILE__, __LINE__, \
+				     __func__)
+#define mem_calloc(count, size)                                          \
+	__ntirpc_pkg_params.calloc_((count), (size), __FILE__, __LINE__, \
+				    __func__)
+#define mem_realloc(p, size) \
+	__ntirpc_pkg_params.realloc_((p), (size), __FILE__, __LINE__, __func__)
+#define mem_zalloc(size) \
+	__ntirpc_pkg_params.calloc_(1, (size), __FILE__, __LINE__, __func__)
 
-static inline void
-mem_free(void *p, size_t n)
+static inline void mem_free(void *p, size_t n)
 {
 	__ntirpc_pkg_params.free_size_(p, n);
 }
@@ -220,8 +222,8 @@ mem_free(void *p, size_t n)
 
 #include <string.h>
 
-static inline void *
-mem_strdup_(const char *s, const char *file, int line, const char *function)
+static inline void *mem_strdup_(const char *s, const char *file, int line,
+				const char *function)
 {
 	size_t l = strlen(s) + 1;
 	void *t = __ntirpc_pkg_params.malloc_(l, file, line, function);
@@ -256,7 +258,24 @@ struct netbuf {
 
 struct rpc_address {
 	struct netbuf nb;
-	struct sockaddr_storage ss;	/* address buffer */
+	struct sockaddr_storage ss; /* address buffer */
+};
+
+/*
+ * The network id struct is used in combination with the client address
+ * to identify the unique client.
+ * Using proxy protocol, it's possible for clients from multiple networks to connect
+ * to the server, although they have the same IP address.
+ * This means that the client IP is not enough to identify the client and the network id
+ * is needed as well.
+ */
+struct network_id {
+	/* based on proxy protocol TLV header type values */
+	uint32_t source;
+	union {
+		uint64_t gcp_psc_connection_id;
+		/* TODO: add support for more common cloud providers */
+	};
 };
 
 /*
@@ -280,4 +299,4 @@ struct __rpc_sockinfo {
 	int si_alen;
 };
 
-#endif				/* _TIRPC_TYPES_H */
+#endif /* _TIRPC_TYPES_H */

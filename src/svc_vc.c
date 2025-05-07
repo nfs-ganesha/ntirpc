@@ -57,6 +57,7 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <unistd.h>
 #include <signal.h>
@@ -69,6 +70,7 @@
 #include <rpc/clnt.h>
 #include <rpc/rpc.h>
 #include <rpc/svc.h>
+#include "rpc/haproxy.h"
 #include <rpc/svc_auth.h>
 #include <rpc/svc_rqst.h>
 #include <rpc/xdr_ioq.h>
@@ -79,7 +81,6 @@
 #include "svc_xprt.h"
 #include "rpc_dplx_internal.h"
 #include "svc_ioq.h"
-#include "haproxy.h"
 
 static void svc_vc_rendezvous_ops(SVCXPRT *);
 static void svc_vc_override_ops(SVCXPRT *, SVCXPRT *);
@@ -295,8 +296,9 @@ static SVCXPRT *makefd_xprt(const int fd, const u_int sendsz,
 
 	rec = REC_XPRT(xprt);
 
-	xp_flags = atomic_postset_uint16_t_bits(
-		&xprt->xp_flags, flags | SVC_XPRT_FLAG_INITIALIZED);
+	xp_flags =
+		atomic_postset_uint16_t_bits(&xprt->xp_flags,
+					     flags | SVC_XPRT_FLAG_INITIALIZED);
 	if (xp_flags & SVC_XPRT_FLAG_INITIALIZED) {
 		rpc_dplx_rui(rec);
 		XPRT_TRACE(xprt, __func__, __func__, __LINE__);
@@ -768,8 +770,9 @@ static bool update_and_notify_remote_address_set(SVCXPRT *xprt)
 	__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
 		"%s: %p fd %d update remote address set", __func__, xprt,
 		xprt->xp_fd);
-	prev_xp_flags = atomic_postset_uint16_t_bits(
-		&xprt->xp_flags, SVC_XPRT_FLAG_REMOTE_ADDR_SET);
+	prev_xp_flags =
+		atomic_postset_uint16_t_bits(&xprt->xp_flags,
+					     SVC_XPRT_FLAG_REMOTE_ADDR_SET);
 	/* remote addr set was must be called only once for xprt */
 	assert(!(prev_xp_flags & SVC_XPRT_FLAG_REMOTE_ADDR_SET));
 	if (xprt->xp_dispatch.remote_addr_set_cb) {
@@ -791,14 +794,291 @@ enum haproxy_ret_code {
 	HAPROXY_RET_CODE__NOT_HAPROXY
 };
 
+static enum haproxy_ret_code
+safe_read_and_update(SVCXPRT *xprt, ssize_t length_to_read,
+		     ssize_t *remaining_length_to_read, void *value)
+{
+	ssize_t rlen;
+	if (unlikely(*remaining_length_to_read < length_to_read)) {
+		__warnx(TIRPC_DEBUG_FLAG_ERROR,
+			"%s: %p fd %d proxy header failed header remaining_length_to_read(%d) < length_to_read(%d) "
+			"(will set dead)",
+			__func__, xprt, xprt->xp_fd, *remaining_length_to_read,
+			length_to_read);
+		return HAPROXY_RET_CODE__FAILURE;
+	}
+	rlen = recv(xprt->xp_fd, value, length_to_read, MSG_WAITALL);
+	if (unlikely(rlen != length_to_read)) {
+		__warnx(TIRPC_DEBUG_FLAG_ERROR,
+			"%s: %p fd %d proxy header failed header rlen = %zd "
+			"(will set dead)",
+			__func__, xprt, xprt->xp_fd, rlen);
+		return HAPROXY_RET_CODE__FAILURE;
+	}
+	*remaining_length_to_read -= length_to_read;
+
+	return HAPROXY_RET_CODE__SUCCESS;
+}
+
+/*
+ * Reads and discards length_to_ignore bytes from socket
+ */
+static enum haproxy_ret_code
+ignore_remaining_proxy_protocol(SVCXPRT *xprt, ssize_t length_to_ignore)
+{
+	enum haproxy_ret_code retval;
+	ssize_t remaining_header_to_read = length_to_ignore;
+#define TEMP_BUFFER_SIZE 200
+	char temp_buffer[TEMP_BUFFER_SIZE];
+	while (remaining_header_to_read > 0) {
+		const uint16_t bytes_to_read =
+			MIN(remaining_header_to_read, TEMP_BUFFER_SIZE);
+		retval = safe_read_and_update(xprt, bytes_to_read,
+					      &remaining_header_to_read,
+					      temp_buffer);
+		if (retval != HAPROXY_RET_CODE__SUCCESS) {
+			return retval;
+		}
+	}
+	return HAPROXY_RET_CODE__SUCCESS;
+}
+
+#ifdef PROXY_PROTOCOL_PARSE_COMMON_NETWORK_ID
+static enum haproxy_ret_code handle_proxy_protocol_network_id(
+	SVCXPRT *xprt, const struct proxy_protocol_tlv_header *tlv)
+{
+	switch (tlv->type) {
+	case PP2_TYPE_GCP:
+		if (tlv->length != PP2_TYPE_GCP_EXPECTED_LENGTH) {
+			__warnx(TIRPC_DEBUG_FLAG_ERROR,
+				"%s: %p fd %d proxy header failed to parse PP2_TYPE_GCP. TLV length mismatch - got %d, expected %d"
+				"(will set dead)",
+				__func__, xprt, xprt->xp_fd, tlv->length,
+				PP2_TYPE_GCP_EXPECTED_LENGTH);
+			return HAPROXY_RET_CODE__FAILURE;
+		}
+		xprt->xp_remote_network_id.source = PP2_TYPE_GCP;
+		xprt->xp_remote_network_id.gcp_psc_connection_id =
+			be64toh(*(uint64_t *)tlv->value);
+		XPRT_AUTO_TRACEPOINT(xprt, parse_network_id_gcp, TRACE_DEBUG,
+				     "parsed network id from PP2_TYPE_GCP");
+		break;
+	case PP2_TYPE_AWS:
+		// fallthrough
+	case PP2_TYPE_AZURE:
+		// fallthrough
+	default:
+		XPRT_AUTO_TRACEPOINT(
+			xprt, parse_network_id_ignored, TRACE_DEBUG,
+			"not parsing network id for unsupported TLV type: {}",
+			tlv->type);
+		break;
+	}
+
+	return HAPROXY_RET_CODE__SUCCESS;
+}
+#endif /* PROXY_PROTOCOL_PARSE_COMMON_NETWORK_ID */
+
+static enum haproxy_ret_code handle_haproxy_tlv(SVCXPRT *xprt,
+						ssize_t length_to_read)
+{
+	enum haproxy_ret_code retval;
+	ssize_t remaining_length_to_read = length_to_read;
+	proxy_protocol_tlv_type type;
+	proxy_protocol_tlv_length length;
+	void *value;
+	struct proxy_protocol_tlv_headers *const tlv_headers =
+		&xprt->proxy_protocol_tlv_headers;
+
+	while (remaining_length_to_read > 0) {
+		retval = safe_read_and_update(xprt,
+					      sizeof(proxy_protocol_tlv_type),
+					      &remaining_length_to_read, &type);
+		if (retval != HAPROXY_RET_CODE__SUCCESS) {
+			return retval;
+		}
+
+		retval = safe_read_and_update(xprt,
+					      sizeof(proxy_protocol_tlv_length),
+					      &remaining_length_to_read,
+					      &length);
+		if (retval != HAPROXY_RET_CODE__SUCCESS) {
+			return retval;
+		}
+		length = ntohs(length);
+
+		value = malloc(length);
+		if (!value) {
+			__warnx(TIRPC_DEBUG_FLAG_ERROR,
+				"%s: %p fd %d proxy header failed header failed to malloc tlv data"
+				"(will set dead)",
+				__func__, xprt, xprt->xp_fd);
+			return HAPROXY_RET_CODE__FAILURE;
+		}
+		retval = safe_read_and_update(xprt, length,
+					      &remaining_length_to_read, value);
+		if (retval != HAPROXY_RET_CODE__SUCCESS) {
+			free(value);
+			return retval;
+		}
+
+		const size_t new_size =
+			sizeof(struct proxy_protocol_tlv_header) *
+			(tlv_headers->tlv_count + 1);
+		struct proxy_protocol_tlv_header *new_tlvs =
+			realloc(tlv_headers->tlvs, new_size);
+		if (!new_tlvs) {
+			free(value);
+			__warnx(TIRPC_DEBUG_FLAG_ERROR,
+				"%s: %p fd %d proxy header failed header failed to realloc tlvs"
+				"(will set dead)",
+				__func__, xprt, xprt->xp_fd);
+			return HAPROXY_RET_CODE__FAILURE;
+		}
+		tlv_headers->tlvs = new_tlvs;
+		struct proxy_protocol_tlv_header *current_tlv =
+			&tlv_headers->tlvs[tlv_headers->tlv_count];
+		current_tlv->type = type;
+		current_tlv->length = length;
+		current_tlv->value = value;
+		tlv_headers->tlv_count++;
+
+#ifdef PROXY_PROTOCOL_PARSE_COMMON_NETWORK_ID
+		const enum haproxy_ret_code parse_network_id_retval =
+			handle_proxy_protocol_network_id(xprt, current_tlv);
+		if (parse_network_id_retval != HAPROXY_RET_CODE__SUCCESS) {
+			return parse_network_id_retval;
+		}
+#endif /* PROXY_PROTOCOL_PARSE_COMMON_NETWORK_ID */
+	}
+
+	assert(remaining_length_to_read == 0);
+
+	return HAPROXY_RET_CODE__SUCCESS;
+}
+
+static enum haproxy_ret_code handle_haproxy_header_local_cmd(
+	SVCXPRT *xprt, struct proxy_header_part *proxy_header_part)
+{
+	enum haproxy_ret_code ret;
+	__warnx(TIRPC_DEBUG_FLAG_EVENT,
+		"%s: %p fd %d proxy ignored for local. len ignored: %d",
+		__func__, xprt, xprt->xp_fd, proxy_header_part->len);
+	const enum haproxy_ret_code ignore_remaining_data_result =
+		ignore_remaining_proxy_protocol(xprt, proxy_header_part->len);
+	if (ignore_remaining_data_result != HAPROXY_RET_CODE__SUCCESS) {
+		return ignore_remaining_data_result;
+	}
+	ret = HAPROXY_RET_CODE__IGNORE_LOCAL;
+
+	if (unlikely(svc_rqst_rearm_events(xprt, SVC_XPRT_FLAG_ADDED_RECV))) {
+		__warnx(TIRPC_DEBUG_FLAG_ERROR,
+			"%s: %p fd %d svc_rqst_rearm_events failed (will set dead)",
+			__func__, xprt, xprt->xp_fd);
+		ret = HAPROXY_RET_CODE__FAILURE;
+
+		XPRT_AUTO_TRACEPOINT(xprt, rearm_failed, TRACE_ERR,
+				     "Rearm failed");
+	} else {
+		XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, recv_exit, TRACE_DEBUG,
+					    "Exiting recv");
+	}
+
+	return ret;
+}
+
+static enum haproxy_ret_code handle_haproxy_header_cmd_v2_parse_address(
+	SVCXPRT *xprt, uint8_t family, ssize_t *remaining_length_to_read)
+{
+	enum haproxy_ret_code retval;
+
+	if (family == PP2_TRANS_STREAM_FAM_INET) {
+		struct proxy_header_addr_ip4_part addr_ip4;
+		retval = safe_read_and_update(xprt, PP2_ADDR_LEN_INET,
+					      remaining_length_to_read,
+					      &addr_ip4);
+		if (unlikely(retval != HAPROXY_RET_CODE__SUCCESS)) {
+			return retval;
+		}
+
+		struct sockaddr_in *ss4;
+		xprt->xp_proxy = xprt->xp_remote;
+		ss4 = (struct sockaddr_in *)&xprt->xp_remote.ss;
+		ss4->sin_family = AF_INET;
+		memcpy(&ss4->sin_addr, &addr_ip4.src_addr,
+		       sizeof(struct in_addr));
+		ss4->sin_port = addr_ip4.src_port;
+
+		return HAPROXY_RET_CODE__SUCCESS;
+	}
+	if (family == PP2_TRANS_STREAM_FAM_INET6) {
+		struct proxy_header_addr_ip6_part addr_ip6;
+		retval = safe_read_and_update(xprt, PP2_ADDR_LEN_INET6,
+					      remaining_length_to_read,
+					      &addr_ip6);
+		if (unlikely(retval != HAPROXY_RET_CODE__SUCCESS)) {
+			return retval;
+		}
+
+		struct sockaddr_in6 *ss6;
+		xprt->xp_proxy = xprt->xp_remote;
+		ss6 = (struct sockaddr_in6 *)&xprt->xp_remote.ss;
+		xprt->xp_remote.ss.ss_family = AF_INET6;
+		memcpy(&ss6->sin6_addr, &addr_ip6.src_addr,
+		       sizeof(struct in6_addr));
+		ss6->sin6_port = addr_ip6.src_port;
+
+		return HAPROXY_RET_CODE__SUCCESS;
+	}
+
+	/* NOTE: we don't support UNIX or UDP
+							 * sockets
+							 */
+	__warnx(TIRPC_DEBUG_FLAG_ERROR,
+		"%s: %p fd %d invalid proxy protocol = %0x2 "
+		"(will set dead)",
+		__func__, xprt, xprt->xp_fd, family);
+
+	return HAPROXY_RET_CODE__FAILURE;
+}
+
+static enum haproxy_ret_code handle_haproxy_header_cmd_v2_proxy(
+	SVCXPRT *xprt, struct proxy_header_part *proxy_header_part)
+{
+	enum haproxy_ret_code retval;
+	if (unlikely(is_remote_addr_set(xprt))) {
+		/* We don't allow more than one proxy protocol packet.
+							   Allowing it will cause a security vulnerability where
+							   at any point the client could sent a PP packet and
+							   change its IP to circumvent any IP based access rules.
+							*/
+		__warnx(TIRPC_DEBUG_FLAG_WARN,
+			"%s: %p fd %d got more than one PP packet. "
+			"This is not allowed - terminating",
+			__func__, xprt, xprt->xp_fd);
+		return HAPROXY_RET_CODE__FAILURE;
+	}
+
+	ssize_t remaining_length_to_read = proxy_header_part->len;
+	retval = handle_haproxy_header_cmd_v2_parse_address(
+		xprt, proxy_header_part->fam, &remaining_length_to_read);
+	if (unlikely(retval != HAPROXY_RET_CODE__SUCCESS)) {
+		return retval;
+	}
+
+	/* we read all the proxy protocol header parts.
+			 * The remaining data left to read should be parsed
+			 * as TLV headers
+			 */
+	return handle_haproxy_tlv(xprt, remaining_length_to_read);
+}
+
 static enum haproxy_ret_code handle_haproxy_header(SVCXPRT *xprt)
 {
 	/* HA Proxy V2? */
 	ssize_t rlen;
 	uint32_t rest[2];
 	struct proxy_header_part s;
-	union proxy_addr pa;
-	enum haproxy_ret_code ret;
 
 	__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
 		"%s: %p fd %d potential haproxy packet", __func__, xprt,
@@ -808,7 +1088,7 @@ static enum haproxy_ret_code handle_haproxy_header(SVCXPRT *xprt)
 	rlen = recv(xprt->xp_fd, rest, sizeof(rest), MSG_WAITALL | MSG_PEEK);
 	if (rlen != sizeof(rest)) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
-			"%s: %p fd %d proxy header failed rest rlen = %z "
+			"%s: %p fd %d proxy header failed rest rlen = %zd "
 			"(will set dead)",
 			__func__, xprt, xprt->xp_fd, rlen);
 		return HAPROXY_RET_CODE__FAILURE;
@@ -830,7 +1110,7 @@ static enum haproxy_ret_code handle_haproxy_header(SVCXPRT *xprt)
 	rlen = recv(xprt->xp_fd, rest, sizeof(rest), MSG_WAITALL);
 	if (rlen != sizeof(rest)) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
-			"%s: %p fd %d proxy header failed rest rlen = %z "
+			"%s: %p fd %d proxy header failed rest rlen = %zd "
 			"(will set dead)",
 			__func__, xprt, xprt->xp_fd, rlen);
 		return HAPROXY_RET_CODE__FAILURE;
@@ -840,117 +1120,26 @@ static enum haproxy_ret_code handle_haproxy_header(SVCXPRT *xprt)
 
 	if (rlen != sizeof(s)) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
-			"%s: %p fd %d proxy header failed header rlen = %z "
+			"%s: %p fd %d proxy header failed header rlen = %zd "
 			"(will set dead)",
 			__func__, xprt, xprt->xp_fd, rlen);
 		return HAPROXY_RET_CODE__FAILURE;
 	}
 
 	s.len = ntohs(s.len);
-	if (unlikely(s.len > sizeof(pa))) {
-		__warnx(TIRPC_DEBUG_FLAG_ERROR,
-			"%s: %p fd %d incorrect proxy header "
-			"addr len = %z (will set dead)",
-			__func__, xprt, xprt->xp_fd, s.len);
-		return HAPROXY_RET_CODE__FAILURE;
-	}
 
-	rlen = recv(xprt->xp_fd, &pa, s.len, MSG_WAITALL);
-
-	if (rlen != s.len) {
-		__warnx(TIRPC_DEBUG_FLAG_ERROR,
-			"%s: %p fd %d proxy header rest len failed header "
-			"rlen = %z (will set dead)",
-			__func__, xprt, xprt->xp_fd, rlen);
-		return HAPROXY_RET_CODE__FAILURE;
-	}
-
-	if (s.ver_cmd == PP2_VERSIOB2_CMD_PROXY) {
-		if (unlikely(is_remote_addr_set(xprt))) {
-			/* We don't allow more than one proxy protocol packet.
-			   Allowing it will cause a security vulnerability where
-			   at any point the client could sent a PP packet and
-			   change its IP to circumvent any IP based access rules.
-			*/
-			__warnx(TIRPC_DEBUG_FLAG_WARN,
-				"%s: %p fd %d got more than one PP packet. "
-				"This is not allowed - terminating",
-				__func__, xprt, xprt->xp_fd);
-			return HAPROXY_RET_CODE__FAILURE;
-		}
-		if (s.fam == PP2_TRANS_STREAM_FAM_INET) {
-			if (unlikely(s.len < sizeof(pa.ip4))) {
-				__warnx(TIRPC_DEBUG_FLAG_ERROR,
-					"%s: %p fd %d incorrect proxy header "
-					"ipv4 addr len = %z (will set dead)",
-					__func__, xprt, xprt->xp_fd, s.len);
-				return HAPROXY_RET_CODE__FAILURE;
-			}
-			struct sockaddr_in *ss4;
-
-			xprt->xp_proxy = xprt->xp_remote;
-			ss4 = (struct sockaddr_in *)&xprt->xp_remote.ss;
-			ss4->sin_family = AF_INET;
-			memcpy(&ss4->sin_addr, &pa.ip4.src_addr,
-			       sizeof(struct in_addr));
-			ss4->sin_port = pa.ip4.src_port;
-
-		} else if (s.fam == PP2_TRANS_STREAM_FAM_INET6) {
-			if (unlikely(s.len < sizeof(pa.ip6))) {
-				__warnx(TIRPC_DEBUG_FLAG_ERROR,
-					"%s: %p fd %d incorrect proxy header "
-					"ipv6 addr len = %z (will set dead)",
-					__func__, xprt, xprt->xp_fd, s.len);
-				return HAPROXY_RET_CODE__FAILURE;
-			}
-			struct sockaddr_in6 *ss6;
-
-			xprt->xp_proxy = xprt->xp_remote;
-			ss6 = (struct sockaddr_in6 *)&xprt->xp_remote.ss;
-			xprt->xp_remote.ss.ss_family = AF_INET6;
-			memcpy(&ss6->sin6_addr, &pa.ip6.src_addr,
-			       sizeof(struct in6_addr));
-			ss6->sin6_port = pa.ip6.src_port;
-
+	if (s.ver_cmd != PP2_VERSION2_CMD_PROXY) {
+		if (s.ver_cmd == PP2_VERSION2_CMD_LOCAL) {
+			return handle_haproxy_header_local_cmd(xprt, &s);
 		} else {
-			/* NOTE: we don't support UNIX or UDP
-			 * sockets
-			 */
 			__warnx(TIRPC_DEBUG_FLAG_ERROR,
-				"%s: %p fd %d invalid proxy protocol = %0x2 "
-				"(will set dead)",
-				__func__, xprt, xprt->xp_fd, (int)s.fam);
+				"%s: %p fd %d invalid proxy command = %0x2 (will set dead)",
+				__func__, xprt, xprt->xp_fd, (int)s.ver_cmd);
 			return HAPROXY_RET_CODE__FAILURE;
 		}
-
-		return HAPROXY_RET_CODE__SUCCESS;
-
-	} else if (s.ver_cmd == PP2_VERSION2_CMD_LOCAL) {
-		__warnx(TIRPC_DEBUG_FLAG_EVENT,
-			"%s: %p fd %d proxy ignored for local", __func__, xprt,
-			xprt->xp_fd);
-		ret = HAPROXY_RET_CODE__IGNORE_LOCAL;
-	} else {
-		__warnx(TIRPC_DEBUG_FLAG_ERROR,
-			"%s: %p fd %d invalid proxy command = %0x2 (will set dead)",
-			__func__, xprt, xprt->xp_fd, (int)s.ver_cmd);
-		return HAPROXY_RET_CODE__FAILURE;
 	}
 
-	if (unlikely(svc_rqst_rearm_events(xprt, SVC_XPRT_FLAG_ADDED_RECV))) {
-		__warnx(TIRPC_DEBUG_FLAG_ERROR,
-			"%s: %p fd %d svc_rqst_rearm_events failed (will set dead)",
-			__func__, xprt, xprt->xp_fd);
-		ret = HAPROXY_RET_CODE__FAILURE;
-
-		XPRT_AUTO_TRACEPOINT(xprt, rearm_failed, TRACE_ERR,
-				     "Rearm failed");
-	} else {
-		XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, recv_exit, TRACE_DEBUG,
-					    "Exiting recv");
-	}
-
-	return ret;
+	return handle_haproxy_header_cmd_v2_proxy(xprt, &s);
 }
 
 static enum xprt_stat svc_vc_recv(SVCXPRT *xprt)
@@ -990,8 +1179,8 @@ again:
 			code = errno;
 
 			if (code == EAGAIN || code == EWOULDBLOCK) {
-				__warnx(hap_again ? TIRPC_DEBUG_FLAG_SVC_VC :
-						    TIRPC_DEBUG_FLAG_WARN,
+				__warnx(hap_again ? TIRPC_DEBUG_FLAG_SVC_VC
+						  : TIRPC_DEBUG_FLAG_WARN,
 					"%s: %p fd %d recv errno %d (try again)",
 					"svc_vc_wait", xprt, xprt->xp_fd, code);
 				if (unlikely(svc_rqst_rearm_events(

@@ -23,7 +23,15 @@
  *       https://github.com/haproxy/haproxy.git
  *
  * Specifically, parts of this file: include/haproxy/connection-t.h
+ *
+ * NOTE: the definitions in this file are based on the haproxy spec in
+ * https://www.haproxy.org/download/1.8/doc/proxy-protocol.txt
  */
+
+#include "config.h"
+
+#ifndef _NTIRPC_RPC_HAPROXY_H
+#define _NTIRPC_RPC_HAPROXY_H
 
 /* proxy protocol v2 definitions */
 #define PP2_SIGNATURE "\x0D\x0A\x0D\x0A\x00\x0D\x0A\x51\x55\x49\x54\x0A"
@@ -42,7 +50,7 @@
 #define PP2_VERSION_MASK 0xF0
 
 #define PP2_VERSION2_CMD_LOCAL (PP2_CMD_LOCAL | PP2_VERSION)
-#define PP2_VERSIOB2_CMD_PROXY (PP2_CMD_PROXY | PP2_VERSION)
+#define PP2_VERSION2_CMD_PROXY (PP2_CMD_PROXY | PP2_VERSION)
 
 /* fam byte */
 #define PP2_TRANS_UNSPEC 0x00
@@ -82,6 +90,17 @@
 #define PP2_SUBTYPE_SSL_KEY_ALG 0x25
 #define PP2_TYPE_NETNS 0x30
 
+#define PP2_TYPE_UNSET 0x00
+
+/* Define custom PP2_TYPE by common cloud provides */
+/* https://cloud.google.com/vpc/docs/about-vpc-hosted-services#proxy-protocol */
+#define PP2_TYPE_GCP 0xE0
+#define PP2_TYPE_GCP_EXPECTED_LENGTH 8
+/* https://docs.aws.amazon.com/elasticloadbalancing/latest/network/edit-target-group-attributes.html#proxy-protocol */
+#define PP2_TYPE_AWS 0xEA
+/* https://learn.microsoft.com/en-us/azure/private-link/private-link-service-overview#getting-connection-information-using-tcp-proxy-v2 */
+#define PP2_TYPE_AZURE 0xEE
+
 #define PP2_CLIENT_SSL 0x01
 #define PP2_CLIENT_CERT_CONN 0x02
 #define PP2_CLIENT_CERT_SESS 0x04
@@ -97,29 +116,38 @@ struct proxy_header_part {
 	uint16_t len; /* number of following bytes part of the header */
 };
 
-union proxy_addr {
-	struct { /* for TCP/UDP over IPv4, len = 12 */
-		uint32_t src_addr;
-		uint32_t dst_addr;
-		uint16_t src_port;
-		uint16_t dst_port;
-	} ip4;
-	struct { /* for TCP/UDP over IPv6, len = 36 */
-		uint8_t src_addr[16];
-		uint8_t dst_addr[16];
-		uint16_t src_port;
-		uint16_t dst_port;
-	} ip6;
-	struct { /* for AF_UNIX sockets, len = 216 */
-		uint8_t src_addr[108];
-		uint8_t dst_addr[108];
-	} unx;
+struct proxy_header_addr_ip4_part { /* for TCP/UDP over IPv4, len = 12 */
+	uint32_t src_addr;
+	uint32_t dst_addr;
+	uint16_t src_port;
+	uint16_t dst_port;
+};
+_Static_assert(
+	sizeof(struct proxy_header_addr_ip4_part) == PP2_ADDR_LEN_INET,
+	"proxy_header_addr_ip4_part size is not equal to PP2_ADDR_LEN_INET");
+
+struct proxy_header_addr_ip6_part { /* for TCP/UDP over IPv6, len = 36 */
+	uint8_t src_addr[16];
+	uint8_t dst_addr[16];
+	uint16_t src_port;
+	uint16_t dst_port;
+};
+_Static_assert(
+	sizeof(struct proxy_header_addr_ip6_part) == PP2_ADDR_LEN_INET6,
+	"proxy_header_addr_ip6_part size is not equal to PP2_ADDR_LEN_INET6");
+
+typedef uint8_t proxy_protocol_tlv_type;
+typedef uint16_t proxy_protocol_tlv_length;
+struct proxy_protocol_tlv_header {
+	proxy_protocol_tlv_type type;
+	proxy_protocol_tlv_length length;
+	/* value is stored in big-endian as received from socket */
+	void *value;
 };
 
-struct proxy_hdr_v2 {
-	uint8_t sig[12]; /* hex 0D 0A 0D 0A 00 0D 0A 51 55 49 54 0A */
-	struct proxy_header_part header_part;
-	union proxy_addr addr;
+struct proxy_protocol_tlv_headers {
+	uint16_t tlv_count;
+	struct proxy_protocol_tlv_header *tlvs;
 };
 
-enum xprt_stat recv_haproxy_header(SVCXPRT *xprt);
+#endif /* _NTIRPC_RPC_HAPROXY_H */

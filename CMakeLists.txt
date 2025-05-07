@@ -79,6 +79,8 @@ endif (USE_GSS)
 
 option(USE_MONITORING "Enable monitoring stack" ON)
 
+option(PROXY_PROTOCOL_PARSE_COMMON_NETWORK_ID "Enable parsing of common network id from haproxy TLV" OFF)
+
 option(USE_RPC_RDMA "platform supports RDMA" OFF)
 if (USE_RPC_RDMA)
   find_package(RDMA REQUIRED)
@@ -263,6 +265,7 @@ message(STATUS "USE_GSS = ${USE_GSS}")
 message(STATUS "USE_PROFILE = ${USE_PROFILE}")
 message(STATUS "USE_LTTNG_NTIRPC = ${USE_LTTNG_NTIRPC}")
 message(STATUS "USE_MONITORING = ${USE_MONITORING}")
+message(STATUS "PROXY_PROTOCOL_PARSE_COMMON_NETWORK_ID = ${PROXY_PROTOCOL_PARSE_COMMON_NETWORK_ID}")
 
 #force command line options to be stored in cache
 set(_MSPAC_SUPPORT ${_MSPAC_SUPPORT}
