@@ -827,7 +827,7 @@ static enum haproxy_ret_code handle_haproxy_header(SVCXPRT *xprt)
 	/* PEEK in order not to consume a non haproxy packet */
 	rlen = recv(xprt->xp_fd, rest, sizeof(rest), MSG_WAITALL | MSG_PEEK);
 	if (rlen != sizeof(rest)) {
-		__warnx(TIRPC_DEBUG_FLAG_ERROR,
+		__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
 			"%s: %p fd %d proxy header failed rest rlen = %zd "
 			"(will set dead)",
 			__func__, xprt, xprt->xp_fd, rlen);
@@ -837,7 +837,7 @@ static enum haproxy_ret_code handle_haproxy_header(SVCXPRT *xprt)
 	rest[1] = ntohl(rest[1]);
 
 	if (rest[0] != PP2_SIG_UINT32_2 || rest[1] != PP2_SIG_UINT32_3) {
-		__warnx(TIRPC_DEBUG_FLAG_WARN,
+		__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
 			"%s: %p fd %d proxy header failed rest1=%08x rest2=%08x "
 			"(treat as regular rpc packet)",
 			__func__, xprt, xprt->xp_fd, (int) rest[0],
@@ -849,7 +849,7 @@ static enum haproxy_ret_code handle_haproxy_header(SVCXPRT *xprt)
 
 	rlen = recv(xprt->xp_fd, rest, sizeof(rest), MSG_WAITALL);
 	if (rlen != sizeof(rest)) {
-		__warnx(TIRPC_DEBUG_FLAG_ERROR,
+		__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
 			"%s: %p fd %d proxy header failed rest rlen = %zd "
 			"(will set dead)",
 			__func__, xprt, xprt->xp_fd, rlen);
@@ -859,7 +859,7 @@ static enum haproxy_ret_code handle_haproxy_header(SVCXPRT *xprt)
 	rlen = recv(xprt->xp_fd, &s, sizeof(s), MSG_WAITALL);
 
 	if (rlen != sizeof(s)) {
-		__warnx(TIRPC_DEBUG_FLAG_ERROR,
+		__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
 			"%s: %p fd %d proxy header failed header rlen = %zd "
 			"(will set dead)",
 			__func__, xprt, xprt->xp_fd, rlen);
@@ -868,7 +868,7 @@ static enum haproxy_ret_code handle_haproxy_header(SVCXPRT *xprt)
 
 	s.len = ntohs(s.len);
 	if (unlikely(s.len > sizeof(pa))) {
-		__warnx(TIRPC_DEBUG_FLAG_ERROR,
+		__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
 			"%s: %p fd %d incorrect proxy header "
 			"addr len = %zd (will set dead)",
 			__func__, xprt, xprt->xp_fd, s.len);
@@ -878,7 +878,7 @@ static enum haproxy_ret_code handle_haproxy_header(SVCXPRT *xprt)
 	rlen = recv(xprt->xp_fd, &pa, s.len, MSG_WAITALL);
 
 	if (rlen != s.len) {
-		__warnx(TIRPC_DEBUG_FLAG_ERROR,
+		__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
 			"%s: %p fd %d proxy header rest len failed header "
 			"rlen = %zd (will set dead)",
 			__func__, xprt, xprt->xp_fd, rlen);
