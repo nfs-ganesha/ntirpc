@@ -78,13 +78,14 @@ tirpc_thread_name(const char *p)
 }
 
 static void
-tirpc_free(void *p, size_t unused)
+tirpc_free(void *p, size_t unused, uint8_t comp)
 {
 	free(p);
 }
 
 static void *
-tirpc_malloc(size_t size, const char *file, int line, const char *function)
+tirpc_malloc(size_t size, uint8_t comp, const char *file,
+	     int line, const char *function)
 {
 	void *r = malloc(size);
 
@@ -93,8 +94,8 @@ tirpc_malloc(size_t size, const char *file, int line, const char *function)
 }
 
 static void *
-tirpc_aligned(size_t alignment, size_t size, const char *file, int line,
-	      const char *function)
+tirpc_aligned(size_t alignment, size_t size, uint8_t comp,
+	      const char *file, int line, const char *function)
 {
 	void *r;
 
@@ -108,8 +109,8 @@ tirpc_aligned(size_t alignment, size_t size, const char *file, int line,
 }
 
 static void *
-tirpc_calloc(size_t count, size_t size, const char *file, int line,
-	     const char *function)
+tirpc_calloc(size_t count, size_t size, uint8_t comp,
+	     const char *file, int line, const char *function)
 {
 	void *r = calloc(count, size);
 
@@ -118,8 +119,8 @@ tirpc_calloc(size_t count, size_t size, const char *file, int line,
 }
 
 static void *
-tirpc_realloc(void *p, size_t size, const char *file, int line,
-	      const char *function)
+tirpc_realloc(void *p, size_t size, uint8_t comp,
+	      const char *file, int line, const char *function)
 {
 	void *r = realloc(p, size);
 

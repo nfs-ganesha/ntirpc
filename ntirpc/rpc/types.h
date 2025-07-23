@@ -161,13 +161,43 @@ typedef int32_t rpc_inline_t;
 
 #define TIRPC_DEBUG_FLAG_CLNT_RPCB      (TIRPC_DEBUG_FLAG_CLNT)
 
-typedef void *(*mem_1_size_t) (size_t,
+/* Memory Statistics Structures */
+typedef enum {
+        NTIRPC_MEM_COMP_INIT,
+        NTIRPC_MEM_COMP_FSAL,
+        NTIRPC_MEM_COMP_PROTOCOL,
+        NTIRPC_MEM_COMP_FILE_AND_STATE_LOCK,
+        NTIRPC_MEM_COMP_IO_BUFFER,
+        NTIRPC_MEM_COMP_SESSION,
+        NTIRPC_MEM_COMP_CLIENT,
+        NTIRPC_MEM_COMP_CACHE,
+        NTIRPC_MEM_COMP_LIBNTIRPC,
+        NTIRPC_MEM_COMP_DIGEST_POOL,
+        NTIRPC_MEM_COMP_HANDLE_POOL,
+        NTIRPC_MEM_COMP_DB_THREAD_POOL,
+        NTIRPC_MEM_COMP_DROP_POOL,
+        NTIRPC_MEM_COMP_MDCACHE_POOL,
+        NTIRPC_MEM_COMP_NFSV4_SESSION_POOL,
+        NTIRPC_MEM_COMP_DUP_REQ_POOL,
+        NTIRPC_MEM_COMP_NFS_RES_POOL,
+        NTIRPC_MEM_COMP_TCP_DRC_POOL,
+        NTIRPC_MEM_COMP_NFS4_CLIENT_ID_POOL,
+        NTIRPC_MEM_COMP_NFS4_STATE_OWNER_POOL,
+        NTIRPC_MEM_COMP_NODE_POOL,
+        NTIRPC_MEM_COMP_DATA_POOL,
+        NTIRPC_MEM_COMP_ACL_POOL,
+        NTIRPC_MEM_COMP_MISC,
+        NTIRPC_MEM_COMP_GTEST,
+        NTIRPC_MEM_COMP_MAX
+} ntirpc_mem_components_t;
+
+typedef void *(*mem_1_size_t) (size_t, uint8_t,
 	     const char *file, int line, const char *function);
-typedef void *(*mem_2_size_t) (size_t, size_t,
+typedef void *(*mem_2_size_t) (size_t, size_t, uint8_t,
 	     const char *file, int line, const char *function);
-typedef void *(*mem_p_size_t) (void *, size_t,
+typedef void *(*mem_p_size_t) (void *, size_t, uint8_t,
 	     const char *file, int line, const char *function);
-typedef void (*mem_free_size_t) (void *, size_t);
+typedef void (*mem_free_size_t) (void *, size_t, uint8_t);
 typedef void (*mem_format_t) (const char *fmt, ...);
 typedef void (*mem_char_t) (const char *);
 
@@ -199,22 +229,86 @@ extern tirpc_pkg_params __ntirpc_pkg_params;
 
 #define __debug_flag(flags) (__ntirpc_pkg_params.debug_flags & (flags))
 
-#define mem_alloc(size) __ntirpc_pkg_params.malloc_((size), \
-			__FILE__, __LINE__, __func__)
-#define mem_aligned(align, size) __ntirpc_pkg_params.aligned_((align), (size), \
-			__FILE__, __LINE__, __func__)
-#define mem_calloc(count, size) __ntirpc_pkg_params.calloc_((count), (size), \
-			__FILE__, __LINE__, __func__)
-#define mem_realloc(p, size) __ntirpc_pkg_params.realloc_((p), (size), \
-			__FILE__, __LINE__, __func__)
-#define mem_zalloc(size) __ntirpc_pkg_params.calloc_(1, (size), \
-			__FILE__, __LINE__, __func__)
+#define NTIRPC_MEM_COMP_DEFAULT NTIRPC_MEM_COMP_LIBNTIRPC
+
+#define GET_MEM_ALLOC_MACRO(_1, _2, NAME, ...) NAME
+#define mem_alloc(...) \
+        GET_MEM_ALLOC_MACRO(__VA_ARGS__, mem_alloc_with_size_and_component, \
+                            mem_alloc_with_size)(__VA_ARGS__)
+#define mem_alloc_with_size(size) \
+	__ntirpc_pkg_params.malloc_((size), NTIRPC_MEM_COMP_DEFAULT, \
+				    __FILE__, __LINE__, __func__)
+#define mem_alloc_with_size_and_component(size, comp) \
+	__ntirpc_pkg_params.malloc_((size), comp, \
+				    __FILE__, __LINE__, __func__)
+
+#define GET_MEM_ALIGNED_MACRO(_1, _2, _3, NAME, ...) NAME
+#define mem_aligned(...) \
+	GET_MEM_ALIGNED_MACRO(__VA_ARGS__, \
+			      mem_aligned_with_size_and_component, \
+			      mem_aligned_with_size, dummy)(__VA_ARGS__)
+#define mem_aligned_with_size(align, size) \
+	__ntirpc_pkg_params.aligned_((align), (size), NTIRPC_MEM_COMP_DEFAULT, \
+				     __FILE__, __LINE__, __func__)
+#define mem_aligned_with_size_and_component(align, size, comp) \
+	__ntirpc_pkg_params.aligned_((align), (size), comp, \
+				     __FILE__, __LINE__, __func__)
+
+#define GET_MEM_CALLOC_MACRO(_1, _2, _3, NAME, ...) NAME
+#define mem_calloc(...) \
+	GET_MEM_CALLOC_MACRO(__VA_ARGS__, mem_calloc_with_size_component, \
+			     mem_calloc_with_size, dummy)(__VA_ARGS__)
+#define mem_calloc_with_size(count, size) \
+	__ntirpc_pkg_params.calloc_((count), (size), NTIRPC_MEM_COMP_DEFAULT, \
+				    __FILE__, __LINE__, __func__)
+#define mem_calloc_with_size_component(count, size, comp) \
+	__ntirpc_pkg_params.calloc_((count), (size), comp, \
+				    __FILE__, __LINE__, __func__)
+
+#define GET_MEM_REALLOC_MACRO(_1, _2, _3, NAME, ...) NAME
+#define mem_realloc(...) \
+	GET_MEM_REALLOC_MACRO(__VA_ARGS__, mem_realloc_with_size_component, \
+			      mem_realloc_with_size, dummy)(__VA_ARGS__)
+#define mem_realloc_with_size(p, size) \
+	 __ntirpc_pkg_params.realloc_((p), (size), NTIRPC_MEM_COMP_DEFAULT, \
+				      __FILE__, __LINE__, __func__)
+#define mem_realloc_with_size_component(p, size, comp) \
+	 __ntirpc_pkg_params.realloc_((p), (size), comp, \
+				      __FILE__, __LINE__, __func__)
+
+#define GET_MEM_ZALLOC_MACRO(_1, _2, NAME, ...) NAME
+#define mem_zalloc(...) \
+        GET_MEM_ZALLOC_MACRO(__VA_ARGS__, mem_zalloc_with_size_component, \
+                             mem_zalloc_with_size)(__VA_ARGS__)
+#define mem_zalloc_with_size(size) \
+        __ntirpc_pkg_params.calloc_(1, (size), NTIRPC_MEM_COMP_DEFAULT, \
+                                    __FILE__, __LINE__, __func__)
+#define mem_zalloc_with_size_component(size, comp) \
+        __ntirpc_pkg_params.calloc_(1, (size), comp, \
+                                    __FILE__, __LINE__, __func__)
 
 static inline void
-mem_free(void *p, size_t n)
+mem_free_default_component_fn(void *p, size_t n)
 {
-	__ntirpc_pkg_params.free_size_(p, n);
+	__ntirpc_pkg_params.free_size_(p, n, NTIRPC_MEM_COMP_DEFAULT);
 }
+
+static inline void
+mem_free_with_component(void *p, size_t n, ntirpc_mem_components_t comp)
+{
+	__ntirpc_pkg_params.free_size_(p, n, comp);
+}
+
+#define GET_MEM_FREE_MACRO(_1, _2, _3, NAME, ...) NAME
+#define mem_free(...) \
+    GET_MEM_FREE_MACRO(__VA_ARGS__, \
+                       mem_free_with_component, \
+                       mem_free_default_component, dummy)(__VA_ARGS__)
+
+#define mem_free_default_component(p, n) \
+		mem_free_default_component_fn(p, n)
+#define mem_free_with_component(p, n, comp) \
+		 mem_free_with_component_fn(p, n, comp)
 
 /*
  * Uses allocator with indirections, if any.
@@ -226,7 +320,8 @@ static inline void *
 mem_strdup_(const char *s, const char *file, int line, const char *function)
 {
 	size_t l = strlen(s) + 1;
-	void *t = __ntirpc_pkg_params.malloc_(l, file, line, function);
+	void *t = __ntirpc_pkg_params.malloc_(l, NTIRPC_MEM_COMP_DEFAULT,
+					      file, line, function);
 
 	memcpy(t, s, l);
 	return (t);
