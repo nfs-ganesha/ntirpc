@@ -1942,15 +1942,16 @@ xdr_rdma_svc_reply(struct rpc_rdma_cbc *cbc, u_int32_t xid,
 		allocate_header = 1;
 
 		if (allocate_header) {
-			have = xdr_rdma_ioq_uv_fetch(&cbc->sendq, &rdma_xprt->outbufs_hdr.uvqh,
-					"sreply buffer", 1, IOQ_FLAG_NONE);
-
+			/* With ACL support we could need buffers >8k */
+			have = xdr_rdma_ioq_uv_fetch(&cbc->sendq, &rdma_xprt->outbufs_data.uvqh,
+				"sreply buffer", 1, IOQ_FLAG_NONE);
 
 			/* buffer is limited size */
 			IOQ_(have)->v.vio_head =
 			IOQ_(have)->v.vio_tail = IOQ_(have)->v.vio_base;
 			IOQ_(have)->v.vio_wrap = (char *)IOQ_(have)->v.vio_base
-					+ rdma_xprt->sm_dr.send_hdr_sz;
+				+ rdma_xprt->sm_dr.sendsz;
+
 			/* make room at head for RDMA header */
 			xdr_ioq_reset(&cbc->sendq, 0);
 		}
@@ -2272,6 +2273,7 @@ xdr_rdma_svc_flushout(struct rpc_rdma_cbc *cbc, bool rdma_buf_used)
 		 * protocols and UIO_FLAG_REFER will be set.
 		 * first_buf = nfs_header buf + rdma_write bufs */
 		if (rdma_buf_used) {
+			/* data_chunk buffer will be set by x_putbufs to vio_head */
 			rdma_buf_addr = first_send_buf_uv->v.vio_head;
 			rdma_buf_len = ioquv_length(first_send_buf_uv);
 			if (first_send_buf_uv->u.uio_flags & UIO_FLAG_REFER)
