@@ -52,7 +52,6 @@
 #include <fcntl.h>	//fcntl
 #include <sys/epoll.h>
 #include <urcu-bp.h>
-#include "gsh_rpc.h"
 
 #define EPOLL_SIZE (10)
 /*^ expected number of fd, must be > 0 */
@@ -75,7 +74,6 @@
 #include "misc/abstract_atomic.h"
 #include "rpc_rdma.h"
 #include "svc_internal.h"
-#include "clnt_internal.h"
 
 #ifdef HAVE_VALGRIND_MEMCHECK_H
 #  include <valgrind/memcheck.h>
@@ -846,8 +844,8 @@ rpc_rdma_stats_thread(void *arg)
  *
  * @return 0 on success, work completion status if not 0
  */
-int
-rpc_rdma_cq_event_handler(RDMAXPRT *rdma_xprt, int expected_poll_count)
+static int
+rpc_rdma_cq_event_handler(RDMAXPRT *rdma_xprt)
 {
 	struct ibv_wc wc[IBV_POLL_EVENTS];
 	struct ibv_cq *ev_cq;
@@ -859,9 +857,6 @@ rpc_rdma_cq_event_handler(RDMAXPRT *rdma_xprt, int expected_poll_count)
 	int npoll = 0;
 	uint32_t len;
 	int poll_count = IBV_POLL_COUNT;
-
-	if (expected_poll_count)
-		poll_count = expected_poll_count;
 
 	rc = ibv_get_cq_event(rdma_xprt->comp_channel, &ev_cq, &ev_ctx);
 	if (rc) {
@@ -1052,56 +1047,6 @@ rpc_rdma_cq_event_handler(RDMAXPRT *rdma_xprt, int expected_poll_count)
 }
 
 /**
- * rpc_rdma_process_transport_expires: process expired client requests for a specific RDMA transport
- * Similar to the call_expires processing in svc_rqst_epoll_loop
- *
- * @param[IN] rdma_xprt RDMA transport to process
- * @param[IN] expire_ms current time in milliseconds
- * @param[INOUT] timeout_ms pointer to timeout value to be updated
- */
-static void
-rpc_rdma_process_transport_expires(RDMAXPRT *rdma_xprt, int expire_ms, int *timeout_ms)
-{
-	struct clnt_req *cc;
-	struct opr_rbtree_node *n_node;
-	struct rpc_dplx_rec *rec;
-	int min_timeout = *timeout_ms;
-
-	if (!rdma_xprt)
-		return;
-
-	rec = &rdma_xprt->sm_dr;
-
-	/* Process rdma_call_expires for this transport - similar to svc_rqst_epoll_loop */
-	rpc_dplx_rli(rec);
-	while ((n_node = opr_rbtree_first(&rec->rdma_call_expires))) {
-		cc = opr_containerof(n_node, struct clnt_req, cc_rqst);
-
-		if (cc->cc_expire_ms > expire_ms) {
-			int transport_timeout = cc->cc_expire_ms - expire_ms;
-			if (transport_timeout < min_timeout) {
-				min_timeout = transport_timeout;
-			}
-			break;
-		}
-
-		/* order dependent */
-		atomic_clear_uint16_t_bits(&cc->cc_flags,
-					   CLNT_REQ_FLAG_EXPIRING);
-		opr_rbtree_remove(&rec->rdma_call_expires, &cc->cc_rqst);
-		cc->cc_expire_ms = 0;	/* atomic barrier(s) */
-
-		atomic_inc_uint32_t(&cc->cc_refcnt);
-		cc->cc_wpe.fun = svc_rqst_expire_task;
-		cc->cc_wpe.arg = NULL;
-		work_pool_submit(&svc_work_pool, &cc->cc_wpe);
-	}
-	rpc_dplx_rui(rec);
-
-	*timeout_ms = min_timeout;
-}
-
-/**
  * rpc_rdma_cq_thread: thread function which waits for new completion events
  * and gives them to handler (then ack the event)
  *
@@ -1111,9 +1056,6 @@ rpc_rdma_cq_thread(void *arg)
 {
 	RDMAXPRT *rdma_xprt;
 	struct epoll_event epoll_events[EPOLL_EVENTS];
-	struct timespec ts;
-	int timeout_ms;
-	int expire_ms;
 	int i;
 	int n;
 	int rc;
@@ -1130,15 +1072,8 @@ rpc_rdma_cq_thread(void *arg)
 	rcu_register_thread();
 
 	while (rpc_rdma_state.run_count > 0) {
-		timeout_ms = EPOLL_WAIT_MS;
-
-		/* Process call_expires for RDMA transports */
-		/* coarse nsec, not system time */
-		(void)clock_gettime(CLOCK_MONOTONIC_FAST, &ts);
-		expire_ms = timespec_ms(&ts);
-
 		n = epoll_wait(epollfd,
-				epoll_events, EPOLL_EVENTS, timeout_ms);
+				epoll_events, EPOLL_EVENTS, EPOLL_WAIT_MS);
 		if (n == 0)
 			continue;
 
@@ -1163,9 +1098,6 @@ rpc_rdma_cq_thread(void *arg)
 				continue;
 			}
 
-			/* Process call_expires for this RDMA transport */
-			rpc_rdma_process_transport_expires(rdma_xprt, expire_ms, &timeout_ms);
-
 			if (epoll_events[i].events == EPOLLERR
 			 || epoll_events[i].events == EPOLLHUP) {
 				__warnx(TIRPC_DEBUG_FLAG_ERROR,
@@ -1184,7 +1116,7 @@ rpc_rdma_cq_thread(void *arg)
 
 			mutex_lock(&rdma_xprt->cm_lock);
 
-			rc = rpc_rdma_cq_event_handler(rdma_xprt, 0);
+			rc = rpc_rdma_cq_event_handler(rdma_xprt);
 			if (rc) {
 				SVC_DESTROY(&rdma_xprt->sm_dr.xprt);
 			}
@@ -1255,18 +1187,16 @@ rpc_rdma_cm_event_handler(RDMAXPRT *ep_rdma_xprt, struct rdma_cm_event *event)
 
 		rdma_xprt->state = RDMAXS_CONNECTED;
 
-		if (rdma_xprt->server) {
-			int cq_fd = rdma_xprt->comp_channel->fd;
-			int cq_thread_index = cq_fd % NUM_CQ_EPOLL_THREADS;
-			rc = rpc_rdma_fd_add(rdma_xprt, cq_fd,
+		int cq_fd = rdma_xprt->comp_channel->fd;
+		int cq_thread_index = cq_fd % NUM_CQ_EPOLL_THREADS;
+		rc = rpc_rdma_fd_add(rdma_xprt, cq_fd,
 				     rpc_rdma_state.cq_epollfd[cq_thread_index]);
-			if (rc) {
-				__warnx(TIRPC_DEBUG_FLAG_ERROR,
-					"%s:%u ERROR (return)",
-					__func__, __LINE__);
-			}
-			rpc_rdma_stats_add(rdma_xprt);
+		if (rc) {
+			__warnx(TIRPC_DEBUG_FLAG_ERROR,
+				"%s:%u ERROR (return)",
+				__func__, __LINE__);
 		}
+		rpc_rdma_stats_add(rdma_xprt);
 		break;
 
 	case RDMA_CM_EVENT_CONNECT_REQUEST:
@@ -1422,41 +1352,6 @@ rpc_rdma_cm_thread(void *nullarg)
 	pthread_exit(NULL);
 }
 
-/* Handle RDMA connection manager events synchronously */
-int
-rpc_rdma_cm_event_handler_inline(RDMAXPRT *rdma_xprt, int expected_event)
-{
-	int rc = 0;
-	struct rdma_cm_event *event = NULL;
-
-	rc = rdma_get_cm_event(rdma_xprt->event_channel, &event);
-	if (rc) {
-		rc = errno;
-		__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s: rdma get event failed xprt %p "
-			"err %d", __func__, rdma_xprt, rc);
-		goto out;
-	}
-
-	if (event->event != expected_event) {
-		__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s: unexpected event %d, expected %d "
-			"xprt %s", __func__, event->event, expected_event);
-	}
-
-	SVC_REF(&rdma_xprt->sm_dr.xprt, SVC_REF_FLAG_NONE);
-
-	rc = rpc_rdma_cm_event_handler(rdma_xprt, event);
-
-	rdma_ack_cm_event(event);
-
-	SVC_RELEASE(&rdma_xprt->sm_dr.xprt, SVC_REF_FLAG_NONE);
-
-out:
-	if (rc)
-		SVC_DESTROY(&rdma_xprt->sm_dr.xprt);
-
-	return rc;
-}
-
 /**
  * rpc_rdma_destroy_stuff: destroys all qp-related stuff for us
  *
@@ -1478,8 +1373,7 @@ rpc_rdma_destroy_stuff(RDMAXPRT *rdma_xprt)
 	}
 
 	if (rdma_xprt->comp_channel) {
-		if (rdma_xprt->server &&
-		    (rdma_xprt->state == RDMAXS_CONNECTED)) {
+		if (rdma_xprt->state == RDMAXS_CONNECTED) {
 			int cq_fd = ((RDMAXPRT *)rdma_xprt)->comp_channel->fd;
 			int cq_thread_index = cq_fd % NUM_CQ_EPOLL_THREADS;
 			rpc_rdma_fd_del(cq_fd,
@@ -1696,7 +1590,7 @@ rpc_rdma_destroy(RDMAXPRT *rdma_xprt)
  *
  * @return rdma_xprt on success, NULL on failure
  */
-RDMAXPRT *
+static RDMAXPRT *
 rpc_rdma_allocate(const struct rpc_rdma_attr *xa)
 {
 	RDMAXPRT *rdma_xprt;
@@ -1905,48 +1799,6 @@ rpc_rdma_create_qp(RDMAXPRT *rdma_xprt, struct rdma_cm_id *cm_id)
 	return 0;
 }
 
-/* Initialize RDMA client completion channel and queue */
-int
-rpc_rdma_setup_stuff_client(RDMAXPRT *rdma_xprt)
-{
-	int rc = 0;
-
-	rdma_xprt->comp_channel = ibv_create_comp_channel(rdma_xprt->cm_id->verbs);
-	if (!rdma_xprt->comp_channel) {
-		rc = errno;
-		__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s: create comp channel failed xprt %p "
-			"err %d", __func__, rdma_xprt, rc);
-		goto out;
-	}
-
-	rdma_xprt->cq = ibv_create_cq(rdma_xprt->cm_id->verbs, MAX_CQ_SIZE(rdma_xprt->xa),
-	    rdma_xprt, rdma_xprt->comp_channel, 0);
-	if (!rdma_xprt->cq) {
-		rc = errno;
-		__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s: create cq failed xprt %p err %d",
-			__func__, rdma_xprt, rc);
-		goto out;
-	}
-
-	rc = ibv_req_notify_cq(rdma_xprt->cq, 0);
-	if (rc) {
-		rc = errno;
-		__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s: notify cq failed xprt %p err %d",
-			__func__, rdma_xprt, rc);
-		goto out;
-	}
-
-	rc = rpc_rdma_create_qp(rdma_xprt, rdma_xprt->cm_id);
-	if (rc) {
-		rc = errno;
-		__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s: create qp failed xprt %p err %d",
-			__func__, rdma_xprt, rc);
-	}
-
-out:
-	return rc;
-}
-
 /**
  * rpc_rdma_setup_stuff: setup pd, qp an' stuff
  *
@@ -2069,14 +1921,10 @@ rpc_rdma_allocate_cbc_locked(struct poolq_head *ioqh)
 /**
  * rpc_rdma_setup_cbq
  */
-int
+static int
 rpc_rdma_setup_cbq(RDMAXPRT *rdma_xprt,
     struct poolq_head *ioqh, u_int depth, u_int sge)
 {
-	__warnx(TIRPC_DEBUG_FLAG_EVENT,
-		"%s: setup cbq xprt %p depth %d sge %d",
-		__func__, rdma_xprt, depth, sge);
-
 	if (ioqh->qsize) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s() contexts already allocated",
@@ -2433,23 +2281,19 @@ rpc_rdma_bind_client(RDMAXPRT *rdma_xprt)
 	struct rdma_addrinfo *res;
 	int rc;
 
+	mutex_lock(&rdma_xprt->cm_lock);
+
 	do {
 		memset(&hints, 0, sizeof(hints));
 		hints.ai_port_space = rdma_xprt->conn_type;
 
-		__warnx(TIRPC_DEBUG_FLAG_EVENT, "%s: resolve %s port %d", __func__,
-			rdma_xprt->sm_dr.xprt.xp_ip, rdma_xprt->sm_dr.xprt.xp_port);
-		char port_str[SOCK_NAME_MAX];
-		snprintf(port_str, SOCK_NAME_MAX, "%d", rdma_xprt->sm_dr.xprt.xp_port);
-
-		rc = rdma_getaddrinfo(rdma_xprt->sm_dr.xprt.xp_ip, port_str,
+		rc = rdma_getaddrinfo(rdma_xprt->xa->node, rdma_xprt->xa->port,
 					&hints, &res);
 		if (rc) {
 			rc = errno;
 			__warnx(TIRPC_DEBUG_FLAG_ERROR,
-				"%s() %p[%u] rdma_getaddrinfo: %s (%d) ip %s port %d",
-				__func__, rdma_xprt, rdma_xprt->state, strerror(rc), rc,
-				rdma_xprt->sm_dr.xprt.xp_ip, rdma_xprt->sm_dr.xprt.xp_port);
+				"%s() %p[%u] rdma_getaddrinfo: %s (%d)",
+				__func__, rdma_xprt, rdma_xprt->state, strerror(rc), rc);
 			break;
 		}
 
@@ -2465,8 +2309,14 @@ rpc_rdma_bind_client(RDMAXPRT *rdma_xprt)
 		}
 		rdma_freeaddrinfo(res);
 
-		rc = rpc_rdma_cm_event_handler_inline(rdma_xprt, RDMA_CM_EVENT_ADDR_RESOLVED);
-		if (rc) {
+		while (rdma_xprt->state == RDMAXS_INITIAL) {
+			cond_wait(&rdma_xprt->cm_cond, &rdma_xprt->cm_lock);
+			__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA,
+				"%s() %p[%u] after cond_wait",
+				__func__, rdma_xprt, rdma_xprt->state);
+		}
+
+		if (rdma_xprt->state != RDMAXS_ADDR_RESOLVED) {
 			__warnx(TIRPC_DEBUG_FLAG_ERROR,
 				"%s() Could not resolve addr",
 				__func__);
@@ -2484,8 +2334,14 @@ rpc_rdma_bind_client(RDMAXPRT *rdma_xprt)
 			break;
 		}
 
-		rc = rpc_rdma_cm_event_handler_inline(rdma_xprt, RDMA_CM_EVENT_ROUTE_RESOLVED);
-		if (rc) {
+		while (rdma_xprt->state == RDMAXS_ADDR_RESOLVED) {
+			cond_wait(&rdma_xprt->cm_cond, &rdma_xprt->cm_lock);
+			__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA,
+				"%s() %p[%u] after cond_wait",
+				__func__, rdma_xprt, rdma_xprt->state);
+		}
+
+		if (rdma_xprt->state != RDMAXS_ROUTE_RESOLVED) {
 			__warnx(TIRPC_DEBUG_FLAG_ERROR,
 				"%s() Could not resolve route",
 				__func__);
@@ -2493,6 +2349,8 @@ rpc_rdma_bind_client(RDMAXPRT *rdma_xprt)
 			break;
 		}
 	} while (0);
+
+	mutex_unlock(&rdma_xprt->cm_lock);
 
 	return rc;
 }
@@ -2540,39 +2398,6 @@ rpc_rdma_connect_finalize(RDMAXPRT *rdma_xprt)
 			__func__, rdma_xprt, rdma_xprt->state, strerror(rc), rc);
 	}
 
-	rc = rpc_rdma_cm_event_handler_inline(rdma_xprt, RDMA_CM_EVENT_ESTABLISHED);
-	if (rc) {
-		rc = errno;
-		__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s: conect failed xprt %p err %d",
-			__func__, rdma_xprt, rc);
-	}
-
-	return rc;
-}
-
-/* Prepare RDMA connection by creating event channel and CM ID */
-int
-rpc_rdma_connect_prepare(RDMAXPRT *rdma_xprt)
-{
-	int rc = 0;
-
-	rdma_xprt->event_channel = rdma_create_event_channel();
-	if (!rdma_xprt->event_channel) {
-		rc = errno;
-		__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s: create event channel failed "
-			"ip %s err %d", __func__, rdma_xprt->sm_dr.xprt.xp_ip, rc);
-		goto out;
-	}
-
-	rc = rdma_create_id(rdma_xprt->event_channel, &rdma_xprt->cm_id, rdma_xprt,
-	    rdma_xprt->conn_type);
-	if (rc) {
-		rc = errno;
-		__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s: create id failed ip %s err %d",
-			__func__, rdma_xprt->sm_dr.xprt.xp_ip, rc);
-		goto out;
-	}
-out:
 	return rc;
 }
 
@@ -2602,11 +2427,20 @@ rpc_rdma_connect(RDMAXPRT *rdma_xprt)
 		return EINVAL;
 	}
 
-	if (rdma_xprt->server != RDMAX_CLIENT) {
+	if (rdma_xprt->server) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s() only called from client side!",
 			__func__);
 		return EINVAL;
+	}
+
+	rc = rpc_rdma_thread_create_epoll(&rpc_rdma_state.cm_thread_id,
+		rpc_rdma_cm_thread, rdma_xprt, &rpc_rdma_state.cm_epollfd);
+	if (rc) {
+		__warnx(TIRPC_DEBUG_FLAG_ERROR,
+			"%s() %p[%u] rpc_rdma_thread_create_epoll failed: %s (%d)",
+			__func__, rdma_xprt, rdma_xprt->state, strerror(rc), rc);
+		return rc;
 	}
 
 	rc = rpc_rdma_bind_client(rdma_xprt);
@@ -2615,7 +2449,7 @@ rpc_rdma_connect(RDMAXPRT *rdma_xprt)
 	rc = rpc_rdma_pd_get(rdma_xprt);
 	if (rc)
 		return rc;
-	rc = rpc_rdma_setup_stuff_client(rdma_xprt);
+	rc = rpc_rdma_setup_stuff(rdma_xprt);
 	if (rc) {
 		rpc_rdma_destroy_stuff(rdma_xprt);
 		return rc;
@@ -2623,7 +2457,11 @@ rpc_rdma_connect(RDMAXPRT *rdma_xprt)
 	rc = rpc_rdma_setup_cbq(rdma_xprt, &rdma_xprt->cbqh,
 				rdma_xprt->xa->rq_depth + rdma_xprt->xa->sq_depth,
 				rdma_xprt->xa->credits);
-	return rc;
+	if (rc)
+		return rc;
+
+	return rpc_rdma_fd_add(rdma_xprt, rdma_xprt->event_channel->fd,
+				rpc_rdma_state.cm_epollfd);
 }
 
 extern mutex_t ops_lock;

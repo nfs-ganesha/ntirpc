@@ -315,8 +315,6 @@ struct svc_xprt {
 	int xp_ifindex;		/* interface index */
 	int xp_si_type;		/* si type */
 	int xp_type;		/* xprt type */
-	char *xp_ip;		/* remote ip */
-	int xp_port;		/* remote port */
 
 	int32_t xp_refcnt;	/* handle reference count */
 	uint16_t xp_flags;	/* flags */

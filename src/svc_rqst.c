@@ -297,7 +297,7 @@ svc_rqst_lookup_chan(uint32_t chan_id)
 static void svc_rqst_epoll_loop(struct work_pool_entry *wpe);
 static void svc_complete_task(struct svc_rqst_rec *sr_rec, bool finished);
 
-int
+static int
 svc_rqst_expire_cmpf(const struct opr_rbtree_node *lhs,
 		     const struct opr_rbtree_node *rhs)
 {
@@ -371,7 +371,7 @@ svc_rqst_expire_remove(struct clnt_req *cc)
 	ev_sig(sr_rec->sv[0], 0);	/* send wakeup */
 }
 
-void
+static void
 svc_rqst_expire_task(struct work_pool_entry *wpe)
 {
 	struct clnt_req *cc = opr_containerof(wpe, struct clnt_req, cc_wpe);

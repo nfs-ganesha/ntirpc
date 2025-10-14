@@ -115,7 +115,6 @@ typedef struct rpc_client {
 	mutex_t cl_lock;	/* serialize private data */
 	struct rpc_err cl_error; /* specific error code */
 	int32_t cl_refcnt;	/* handle reference count */
-	bool rdma_clnt;		/* transport rdma */
 	uint16_t cl_flags;	/* state flags */
 
 } CLIENT;
@@ -490,11 +489,6 @@ extern CLIENT *clnt_vc_ncreatef(const int, const struct netbuf *,
 				const rpcprog_t, const rpcvers_t,
 				const u_int, const u_int, const uint32_t);
 
-CLIENT *
-clnt_rdma_create(int fd, char *host, int port, int recv_sz,
-    int send_sz, int page_sz, const rpcprog_t prog,
-    const rpcvers_t vers, const uint32_t flags);
-
 static inline CLIENT *
 clnt_vc_ncreate(const int fd, const struct netbuf *raddr,
 		const rpcprog_t prog, const rpcvers_t vers,
@@ -509,9 +503,6 @@ clnt_vc_ncreate(const int fd, const struct netbuf *raddr,
  */
 extern CLIENT *clnt_vc_ncreate_svc(const SVCXPRT *, const rpcprog_t,
 				   const rpcvers_t, const uint32_t);
-
-extern CLIENT *clnt_rdma_ncreatef(const SVCXPRT *, const rpcprog_t,
-				  const rpcvers_t, const uint32_t, bool);
 /*
  *      const SVCXPRT *xprt;                    -- active service xprt
  *      const rpcprog_t prog;                   -- RPC program number

@@ -57,7 +57,6 @@ struct rpc_dplx_rec {
 	struct xdr_ioq ioq;
 	struct poolq_head writeq;	/**< poolq for write requests */
 	struct opr_rbtree call_replies;
-	struct opr_rbtree rdma_call_expires;	/**< call expiration tree for RDMA */
 	struct opr_rbtree_node fd_node;
 	struct {
 		rpc_dplx_lock_t lock;
@@ -115,16 +114,11 @@ rpc_dplx_lock_destroy(struct rpc_dplx_lock *lock)
 	cond_destroy(&lock->we.cv);
 }
 
-/* Forward declaration for call_expires comparison function */
-int svc_rqst_expire_cmpf(const struct opr_rbtree_node *lhs,
-			 const struct opr_rbtree_node *rhs);
-
 static inline void
 rpc_dplx_rec_init(struct rpc_dplx_rec *rec)
 {
 	rpc_dplx_lock_init(&rec->recv.lock);
 	opr_rbtree_init(&rec->call_replies, clnt_req_xid_cmpf);
-	opr_rbtree_init(&rec->rdma_call_expires, svc_rqst_expire_cmpf);
 	mutex_init(&rec->xprt.xp_lock, NULL);
 	TAILQ_INIT(&rec->writeq.qh);
 	mutex_init(&rec->writeq.qmutex, NULL);

@@ -222,7 +222,6 @@ struct rpc_rdma_xprt {
 					 * -1 (RDMAX_SERVER_CHILD):
 					 * server has accepted connection
 					 */
-	bool shared;
 
 	enum rdma_transport_state {
 		RDMAXS_INITIAL, 	/* assumes zero, never set */
@@ -375,7 +374,6 @@ void rpc_rdma_destroy(RDMAXPRT *);
 enum xprt_stat svc_rdma_rendezvous(SVCXPRT *);
 
 /* client */
-int rpc_rdma_connect_prepare(RDMAXPRT *);
 int rpc_rdma_connect(RDMAXPRT *);
 int rpc_rdma_connect_finalize(RDMAXPRT *);
 
@@ -385,7 +383,7 @@ void xdr_rdma_add_inbufs_data(RDMAXPRT *rdma_xprt);
 void xdr_rdma_add_outbufs_data(RDMAXPRT *rdma_xprt);
 void xdr_rdma_add_inbufs_hdr(RDMAXPRT *rdma_xprt);
 void xdr_rdma_add_outbufs_hdr(RDMAXPRT *rdma_xprt);
-void xdr_rdma_callq(RDMAXPRT *, int);
+void xdr_rdma_callq(RDMAXPRT *);
 
 bool xdr_rdma_clnt_reply(XDR *, u_int32_t);
 bool xdr_rdma_clnt_flushout(struct rpc_rdma_cbc *);
@@ -407,14 +405,5 @@ void rpc_rdma_close_connection(RDMAXPRT *rdma_xprt);
 
 int xdr_rdma_dereg_mr(RDMAXPRT *rdma_xprt, struct ibv_mr *mr,
     uint8_t *buffer_aligned, uint32_t buffer_total);
-
-int rpc_rdma_cq_event_handler(RDMAXPRT *, int);
-
-RDMAXPRT * rpc_rdma_allocate(const struct rpc_rdma_attr *);
-
-int rpc_rdma_setup_cbq(RDMAXPRT *, struct poolq_head *,
-    u_int depth, u_int sge);
-
-void svc_rdma_ops(SVCXPRT *);
 
 #endif /* !_TIRPC_RPC_RDMA_H */

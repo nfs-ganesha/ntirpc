@@ -73,8 +73,6 @@
 #include "svc_ioq.h"
 #include "clnt_internal.h"
 #include "svc_internal.h"
-#include "rpc_rdma.h"
-#include "gsh_rpc.h"
 
 static enum xprt_stat clnt_vc_process(struct svc_req *req);
 static struct clnt_ops *clnt_vc_ops(void);
@@ -125,48 +123,6 @@ clnt_vc_data_zalloc(void)
  *      duplex channels, full coordination is required between client and
  *      server tranpsorts sharing an underlying bytestream (Matt).
  */
-
-
-/* Create new RDMA client with specified connection parameters */
-CLIENT *
-clnt_rdma_create(int fd, char *host, int port, int recv_sz, int send_sz,
-    int page_sz, const rpcprog_t prog, const rpcvers_t vers,
-    const uint32_t flags)
-{
-	struct rpc_rdma_attr tmp_xa = {
-		.statistics_prefix = NULL,
-		.node = "::",
-		.port = "20049",                /* default port 20049 */
-		.sq_depth = 32,                 /* default was 50 */
-		.max_send_sge = 32,             /* minimum 2 */
-		.rq_depth = 32,                 /* default was 50 */
-		.max_recv_sge = 31,             /* minimum 1 */
-		.backlog = 10,                  /* minimum 2 */
-		.credits = 30,                  /* default 10 */
-		.destroy_on_disconnect = true,
-		.use_srq = false,
-	};
-	struct rpc_rdma_attr *use_xa = gsh_malloc(sizeof(struct rpc_rdma_attr));
-	memcpy(use_xa, &tmp_xa, sizeof(struct rpc_rdma_attr));
-	SVCXPRT *xprt = svc_fd_ncreatef(fd, send_sz, recv_sz, flags);
-	if (!xprt) {
-		__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s: Failed to create xprt fd %d",
-			__func__, fd);
-		return NULL;
-	}
-	RDMAXPRT *rdma_xprt = (RDMAXPRT *)xprt;
-	rdma_xprt->xa = use_xa;
-	struct rpc_dplx_rec *rec = REC_XPRT(xprt);
-	rec->recvsz = RDMA_DATA_CHUNK_SZ;
-	rec->sendsz = RDMA_DATA_CHUNK_SZ;
-	rec->pagesz = page_sz;
-	rec->recv_hdr_sz = RDMA_HDR_CHUNK_SZ;
-	rec->send_hdr_sz = RDMA_HDR_CHUNK_SZ;
-	xprt->xp_ip = host;
-	xprt->xp_port = port;
-	/* create rdma_xprt using xprt */
-	return clnt_rdma_ncreatef(xprt, prog, vers, flags, true);
-}
 
 /*
  * Create a client handle for a connection.

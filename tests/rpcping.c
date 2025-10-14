@@ -34,7 +34,6 @@
 #include <rpc/rpc.h>
 #include <rpc/svc_auth.h>
 
-
 #include "lttng/ntirpc_traces.h"
 #if defined(USE_LTTNG_NTIRPC) && !defined(LTTNG_PARSING)
 #include "lttng/generated_traces/rpcping.h"
@@ -45,11 +44,6 @@ static pthread_cond_t rpcping_cond = PTHREAD_COND_INITIALIZER;
 static uint32_t rpcping_threads;
 
 static struct timespec to = {30, 0};
-typedef enum {
-	TCP = 1,
-	RDMA = 2,
-	RAW = 3
-} proto_t;
 
 struct state {
 	CLIENT *handle;
@@ -59,7 +53,6 @@ struct state {
 	struct timespec stopping;
 	int count;
 	int proc;
-	proto_t proto;
 	int id;
 	uint32_t failures;
 	uint32_t responses;
@@ -190,11 +183,9 @@ worker(void *arg)
 		}
 	}
 
-	if (s->proto != RDMA) {
-		pthread_mutex_lock(&s->s_mutex);
-		pthread_cond_wait(&s->s_cond, &s->s_mutex);
-		pthread_mutex_unlock(&s->s_mutex);
-	}
+	pthread_mutex_lock(&s->s_mutex);
+	pthread_cond_wait(&s->s_cond, &s->s_mutex);
+	pthread_mutex_unlock(&s->s_mutex);
 	clock_gettime(CLOCK_MONOTONIC, &s->stopping);
 
 	if (atomic_dec_uint32_t(&rpcping_threads) > 0) {
@@ -263,11 +254,9 @@ int main(int argc, char *argv[])
 	int proc = 0;
 	int send_sz = 8192;
 	int recv_sz = 8192;
-	int page_sz = sysconf(_SC_PAGESIZE);
 	unsigned int failures = 0;
 	unsigned int timeouts = 0;
 	bool rpcbind = false;
-	proto_t proto_used = 0;
 
 	NTIRPC_AUTO_TRACEPOINT(rpcping, test, TRACE_INFO, "Boo");
 
@@ -345,8 +334,7 @@ int main(int argc, char *argv[])
 					   "clnt_ncreate failed");
 				exit(2);
 			}
-		} else if (strcmp(proto, "rdma")) {
-			proto_used = TCP;
+		} else {
 			/* connect to host:port */
 			struct sockaddr_storage ss;
 			struct netbuf raddr = {
@@ -368,21 +356,7 @@ int main(int argc, char *argv[])
 					   "clnt_ncreate failed");
 				exit(4);
 			}
-		} else {
-			proto_used = RDMA;
-			int fd = get_conn_fd(host, port);
-			if (fd <= 0) {
-				perror("get_conn_fd failed");
-				exit(3);
-			}
-			clnt = clnt_rdma_create(fd, "10.53.87.150", 20049, recv_sz,
-			    send_sz, page_sz, prog, vers, CLNT_CREATE_FLAG_CLOSE);
-			if (CLNT_FAILURE(clnt)) {
-				rpc_perror(&clnt->cl_error, "clnt_rdma_create failed");
-				exit(4);
-			}
 		}
-
 		s = &states[i];
 		clnt->cl_u1 = s;
 
@@ -390,7 +364,6 @@ int main(int argc, char *argv[])
 		s->id = i;
 		s->count = count;
 		s->proc = proc;
-		s->proto = proto_used;
 		pthread_create(&t, NULL, worker, s);
 	}
 

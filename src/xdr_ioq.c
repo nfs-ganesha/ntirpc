@@ -260,7 +260,6 @@ chunk_ref_locked(struct poolq_entry *have)
 		    &rdma_xprt->last_extra_buf_allocation_time);
 	}
 
-	__warnx(TIRPC_DEBUG_FLAG_XDR, "io buf ref %p refs %d", io_buf, io_buf->refs);
 	return atomic_inc_uint32_t(&io_buf->refs);
 }
 
@@ -404,7 +403,6 @@ chunk_unref_locked(struct poolq_entry *have)
 	struct rpc_io_bufs *io_buf = get_parent_chunk(have);
 	uint32_t refs = atomic_dec_uint32_t(&io_buf->refs);
 	RDMAXPRT *rdma_xprt = (RDMAXPRT *)io_buf->ctx;
-	__warnx(TIRPC_DEBUG_FLAG_XDR, "io buf unref %p refs %d", io_buf, io_buf->refs);
 
 	/* Check if its on on demand allocated data buf */
 	if (is_shrink_buf(io_buf, rdma_xprt)) {

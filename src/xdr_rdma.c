@@ -461,35 +461,6 @@ xdr_rdma_post_recv_n(RDMAXPRT *rdma_xprt, struct rpc_rdma_cbc *cbc, int sge)
 	return 0;
 }
 
-/* Post synchronous RDMA receive operation */
-static int
-xdr_rdma_post_recv_sync(RDMAXPRT *rdma_xprt, struct rpc_rdma_cbc *cbc, int sge)
-{
-	cbc->positive_cb = xdr_rdma_wrap_callback;
-	cbc->negative_cb = xdr_rdma_destroy_callback_recv;
-	cbc->callback_arg = NULL;
-	cbc->call_inline = 1;
-
-	SVC_REF(&rdma_xprt->sm_dr.xprt, SVC_REF_FLAG_NONE);
-
-	int ret = xdr_rdma_post_recv_n(rdma_xprt, cbc, sge);
-
-	if (ret) {
-		__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s post_recv failed rdma_xprt %p "
-			"cbc %p error %d", __func__, rdma_xprt, cbc, ret);
-
-		cbc->cbc_flags = CBC_FLAG_RELEASE;
-
-		/* Release sentinel ref */
-		cbc_release_it(cbc);
-
-		SVC_DESTROY(&rdma_xprt->sm_dr.xprt);
-	}
-	rpc_rdma_cq_event_handler(rdma_xprt, 1);
-
-	return ret;
-}
-
 /**
  * xdr_rdma_post_recv_cb: Post receive chunk(s) with standard callbacks.
  *
@@ -684,39 +655,6 @@ xdr_rdma_wait_cb_done_locked(struct rpc_rdma_cbc *cbc)
 
 }
 
-/* Post synchronous RDMA send operation with callback */
-static inline int
-xdr_rdma_sync_send_cb(RDMAXPRT *rdma_xprt, struct rpc_rdma_cbc *cbc, int sge)
-{
-	int ret;
-
-	cbc->positive_cb = xdr_rdma_respond_callback_send;
-	cbc->negative_cb = xdr_rdma_destroy_callback_send;
-	cbc->callback_arg = NULL;
-	cbc->call_inline = 1;
-	int32_t write_waits = atomic_inc_int32_t(&cbc->write_waits);
-
-	cbc_ref_it(cbc, rdma_xprt);
-
-	ret = xdr_rdma_post_send_n(rdma_xprt, cbc, sge, NULL, IBV_WR_SEND);
-
-	if (ret) {
-		write_waits = atomic_dec_int32_t(&cbc->write_waits);
-
-		cbc_release_it(cbc);
-
-		SVC_DESTROY(&rdma_xprt->sm_dr.xprt);
-
-		/* Assuming there won't be callback */
-		__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s: failed ret %d err %d"
-		    " rdma_xprt %p cbc %p cbc_ref %d write_waits %d",
-		    __func__, ret, errno, rdma_xprt, cbc, cbc->refcnt,
-		    write_waits);
-	}
-	rpc_rdma_cq_event_handler(rdma_xprt, 2);
-
-	return ret;
-}
 /**
  * Post a work chunk with standard callbacks.
  *
@@ -949,10 +887,8 @@ xdr_rdma_encode_error(struct xdr_ioq_uv *call_uv, enum rpcrdma_errcode err)
 
 /* post recv buffers */
 void
-xdr_rdma_callq(RDMAXPRT *rdma_xprt, int sync)
+xdr_rdma_callq(RDMAXPRT *rdma_xprt)
 {
-	int rc = 0;
-
 	/* Get context buf from cbqh and add to sm_dr
 	 * rpc_rdma_allocate->xdr_ioq_setup(&rdma_xprt->sm_dr.ioq);
 	 * Check if we have credits availabled from cbqh
@@ -991,7 +927,7 @@ xdr_rdma_callq(RDMAXPRT *rdma_xprt, int sync)
 
 	pthread_mutex_lock(&rdma_xprt->cbclist.qmutex);
 
-	cbc->call_inline = sync;
+	cbc->call_inline = 0;
 	cbc->data_chunk_uv = NULL;
 	cbc->refcnt = 1; // Sentinel ref
 	cbc->cbc_flags = CBC_FLAG_NONE;
@@ -1005,13 +941,8 @@ xdr_rdma_callq(RDMAXPRT *rdma_xprt, int sync)
 	rdma_xprt->cbclist.qcount++;
 	pthread_mutex_unlock(&rdma_xprt->cbclist.qmutex);
 
-	if (sync)
-		rc = xdr_rdma_post_recv_sync(rdma_xprt, cbc, 1);
-	else
-		rc = xdr_rdma_post_recv_cb(rdma_xprt, cbc, 1);
-
 	/* rdma_xprt ref is taken by xdr_rdma_post_recv_cb */
-	if (rc) {
+	if (xdr_rdma_post_recv_cb(rdma_xprt, cbc, 1)) {
 		 __warnx(TIRPC_DEBUG_FLAG_ERROR, "%s: recv failed %p",
 			__func__, rdma_xprt);
 	}
@@ -1450,7 +1381,7 @@ xdr_rdma_create(RDMAXPRT *rdma_xprt)
 			"%s() qcount %d callq size %d",
 			__func__, rdma_xprt->sm_dr.ioq.ioq_uv.uvqh.qcount,
 			callq_size);
-		xdr_rdma_callq(rdma_xprt, 0);
+		xdr_rdma_callq(rdma_xprt);
 	}
 
 	return 0;
@@ -1574,7 +1505,7 @@ xdr_rdma_svc_recv(struct rpc_rdma_cbc *cbc, u_int32_t xid)
 	assert(cbc->write_waits == 0);
 
 	/* Maintain max_outstanding */
-	xdr_rdma_callq(rdma_xprt, 0);
+	xdr_rdma_callq(rdma_xprt);
 
 	/* Get inbuf from recvq */
 	cbc->call_uv = IOQ_(TAILQ_FIRST(&cbc->recvq.ioq_uv.uvqh.qh));
@@ -2008,22 +1939,21 @@ xdr_rdma_svc_reply(struct rpc_rdma_cbc *cbc, u_int32_t xid,
 bool
 xdr_rdma_clnt_flushout(struct rpc_rdma_cbc *cbc)
 {
-	RDMAXPRT *rdma_xprt = x_rdma_xprt(cbc->sendq.xdrs);
+/* FIXME: decide how many buffers we use in argument!!!!!! */
+#define num_chunks (rdma_xprt->xa->credits - 1)
+
+	RDMAXPRT *rdma_xprt = x_rdma_xprt(cbc->recvq.xdrs);
 	struct rpc_msg *msg;
 	struct rdma_msg *rmsg;
+	struct xdr_write_list *w_array;
 	struct xdr_ioq_uv *head_uv;
 	struct xdr_ioq_uv *hold_uv;
+	struct poolq_entry *have;
+	int i = 0;
 
-	/* hold NFS request */
 	hold_uv = IOQ_(TAILQ_FIRST(&cbc->sendq.ioq_uv.uvqh.qh));
-
-	pthread_mutex_lock(&cbc->sendq.ioq_uv.uvqh.qmutex);
-	TAILQ_REMOVE(&cbc->sendq.ioq_uv.uvqh.qh, &hold_uv->uvq, q);
-	(cbc->sendq.ioq_uv.uvqh.qcount)--;
-	pthread_mutex_unlock(&cbc->sendq.ioq_uv.uvqh.qmutex);
-
 	msg = (struct rpc_msg *)(hold_uv->v.vio_head);
-	xdr_tail_update(cbc->sendq.xdrs);
+	xdr_tail_update(cbc->recvq.xdrs);
 
 	switch(ntohl(msg->rm_direction)) {
 	    case CALL:
@@ -2041,10 +1971,13 @@ xdr_rdma_clnt_flushout(struct rpc_rdma_cbc *cbc)
 		return (false);
 	}
 
-	cbc->sendq.ioq_uv.uvq_fetch = xdr_rdma_ioq_uv_fetch_nothing;
+	cbc->recvq.ioq_uv.uvq_fetch = xdr_rdma_ioq_uv_fetch_nothing;
 
-	head_uv = IOQ_(xdr_rdma_ioq_uv_fetch(&cbc->sendq, &rdma_xprt->outbufs_hdr.uvqh,
+	head_uv = IOQ_(xdr_rdma_ioq_uv_fetch(&cbc->recvq, &rdma_xprt->outbufs_data.uvqh,
 					"c_head buffer", 1, IOQ_FLAG_NONE));
+
+	(void)xdr_rdma_ioq_uv_fetch(&cbc->sendq, &rdma_xprt->inbufs_data.uvqh,
+				"call buffers", num_chunks, IOQ_FLAG_NONE);
 
 	rmsg = m_(head_uv->v.vio_head);
 	rmsg->rdma_xid = msg->rm_xid;
@@ -2055,25 +1988,31 @@ xdr_rdma_clnt_flushout(struct rpc_rdma_cbc *cbc)
 	/* no read, write chunks. */
 	rmsg->rdma_body.rdma_msg.rdma_reads = 0; /* htonl(0); */
 	rmsg->rdma_body.rdma_msg.rdma_writes = 0; /* htonl(0); */
-	rmsg->rdma_body.rdma_msg.rdma_reply = 0;
+
+	/* reply chunk */
+	w_array = (wl_t *)&rmsg->rdma_body.rdma_msg.rdma_reply;
+	w_array->present = htonl(1);
+	w_array->elements = htonl(num_chunks);
+
+	TAILQ_FOREACH(have, &cbc->sendq.ioq_uv.uvqh.qh, q) {
+		struct xdr_rdma_segment *w_seg =
+			&w_array->entry[i++].target;
+		uint32_t length = ioquv_length(IOQ_(have));
+
+		w_seg->handle = htonl(rdma_xprt->mr->rkey);
+		w_seg->length = htonl(length);
+		xdr_encode_hyper((uint32_t*)&w_seg->offset,
+				 (uintptr_t)IOQ_(have)->v.vio_head);
+	}
 
 	head_uv->v.vio_tail = head_uv->v.vio_head
 				+ xdr_rdma_header_length(rmsg);
-
-	pthread_mutex_lock(&cbc->sendq.ioq_uv.uvqh.qmutex);
-	TAILQ_INSERT_TAIL(&cbc->sendq.ioq_uv.uvqh.qh, &hold_uv->uvq, q);
-	(cbc->sendq.ioq_uv.uvqh.qcount)++;
-	pthread_mutex_unlock(&cbc->sendq.ioq_uv.uvqh.qmutex);
 
 	rpcrdma_dump_msg(head_uv, "clnthead", msg->rm_xid);
 	rpcrdma_dump_msg(hold_uv, "clntcall", msg->rm_xid);
 
 	/* actual send, callback will take care of cleanup */
-	cbc->have = TAILQ_FIRST(&cbc->sendq.ioq_uv.uvqh.qh);
-	if (rdma_xprt->shared)
-		xdr_rdma_async_send_cb(rdma_xprt, cbc, 2);
-	else
-		xdr_rdma_sync_send_cb(rdma_xprt, cbc, 2);
+	xdr_rdma_async_send_cb(rdma_xprt, cbc, 2);
 	return (true);
 }
 
