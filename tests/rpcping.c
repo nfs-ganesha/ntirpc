@@ -263,7 +263,9 @@ int main(int argc, char *argv[])
 	int proc = 0;
 	int send_sz = 8192;
 	int recv_sz = 8192;
+#ifdef USE_RPC_RDMA
 	int page_sz = sysconf(_SC_PAGESIZE);
+#endif
 	unsigned int failures = 0;
 	unsigned int timeouts = 0;
 	bool rpcbind = false;
