@@ -78,6 +78,38 @@ if (USE_GSS)
 endif (USE_GSS)
 
 option(USE_MONITORING "Enable monitoring stack" ON)
+option(USE_TLS "Enable TLS support" OFF)
+option(USE_OPENSSL "Use OpenSSL as TLS backend" OFF)
+option(USE_GNUTLS "Use GNUTLS as TLS backend" OFF)
+# Find TLS libraries based on configuration
+if(USE_TLS)
+  set(TLS_COMPONENTS "")
+
+  if(USE_OPENSSL)
+    list(APPEND TLS_COMPONENTS "openssl")
+    set(USE_GNUTLS OFF)
+  endif(USE_OPENSSL)
+
+  if(USE_GNUTLS)
+    list(APPEND TLS_COMPONENTS "gnutls")
+    set(USE_OPENSSL OFF)
+  endif(USE_GNUTLS)
+
+  if( NOT USE_OPENSSL AND NOT USE_GNUTLS)
+    list(APPEND TLS_COMPONENTS "openssl")
+    list(APPEND TLS_COMPONENTS "gnutls")
+  endif()
+
+  find_package(TLS REQUIRED ${TLS_COMPONENTS})
+
+  # Add TLS libraries to system libraries
+  if (TLS_FOUND)
+    set(SYSTEM_LIBRARIES ${TLS_LIBRARIES} ${SYSTEM_LIBRARIES})
+    include_directories(${TLS_INCLUDE_DIRS})
+  else (TLS_FOUND)
+    set(USE_TLS OFF)
+  endif(TLS_FOUND)
+endif(USE_TLS)
 
 option(PROXY_PROTOCOL_PARSE_COMMON_NETWORK_ID "Enable parsing of common network id from haproxy TLV" OFF)
 
@@ -266,6 +298,9 @@ message(STATUS "USE_PROFILE = ${USE_PROFILE}")
 message(STATUS "USE_LTTNG_NTIRPC = ${USE_LTTNG_NTIRPC}")
 message(STATUS "USE_MONITORING = ${USE_MONITORING}")
 message(STATUS "PROXY_PROTOCOL_PARSE_COMMON_NETWORK_ID = ${PROXY_PROTOCOL_PARSE_COMMON_NETWORK_ID}")
+message(STATUS "NTIRPC USE_TLS = ${USE_TLS}")
+message(STATUS "NTIRPC USE_OPENSSL = ${USE_OPENSSL}")
+message(STATUS "NTIRPC USE_GNUTLS = ${USE_GNUTLS}")
 
 #force command line options to be stored in cache
 set(_MSPAC_SUPPORT ${_MSPAC_SUPPORT}

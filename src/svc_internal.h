@@ -202,6 +202,10 @@ void svc_rqst_unhook(SVCXPRT *);
  */
 #define SOCK_NAME_MAX 128
 
+#if USE_TLS
+void svc_tls_send_event(SVCXPRT *xprt);
+#endif
+
 typedef struct sockaddr_storage sockaddr_t;
 int svc_get_port(sockaddr_t *);
 

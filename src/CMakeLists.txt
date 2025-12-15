@@ -93,6 +93,28 @@ if(USE_RPC_RDMA)
   )
 endif(USE_RPC_RDMA)
 
+if(USE_GNUTLS)
+  SET(ntirpc_tls_SRCS
+    tls_gnutls.c
+    )
+endif(USE_GNUTLS)
+
+if(USE_OPENSSL)
+  SET(ntirpc_tls_SRCS
+    ${ntirpc_tls_SRC}
+    tls_openssl.c)
+endif(USE_OPENSSL)
+
+if(USE_TLS)
+  SET(ntirpc_tls_SRCS
+    ${ntirpc_tls_SRCS}
+    tls_transport.c
+    tls_init.c
+    svc_auth_tls.c
+    )
+endif(USE_TLS)
+
+
 if(USE_LTTNG_NTIRPC)
   include("${CMAKE_CURRENT_BINARY_DIR}/../ntirpc_lttng_generation_file_properties.cmake")
   add_subdirectory(lttng)
@@ -111,6 +133,7 @@ add_library(ntirpc SHARED
   ${ntirpc_common_SRCS}
   ${ntirpc_gss_SRCS}
   ${ntirpc_rdma_SRCS}
+  ${ntirpc_tls_SRCS}
   ${ntirpc_monitoring_SRCS}
 )
 

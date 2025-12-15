@@ -81,6 +81,7 @@
 #include "svc_xprt.h"
 #include "rpc_dplx_internal.h"
 #include "svc_ioq.h"
+#include "tls.h"
 
 static void svc_vc_rendezvous_ops(SVCXPRT *);
 static void svc_vc_override_ops(SVCXPRT *, SVCXPRT *);
@@ -610,6 +611,12 @@ svc_vc_destroy_task(struct work_pool_entry *wpe)
 	close_fd = ((xp_flags & SVC_XPRT_FLAG_CLOSE) &&
 		rec->xprt.xp_fd != RPC_ANYFD);
 	if (close_fd) {
+#ifdef USE_TLS
+		/*   need to tell the client about TLS Connection closure */
+		SVCXPRT *xprt = &rec->xprt;
+
+		SVC_TLS_CLOSE(xprt);
+#endif
 		/* Shutting down without releasing the fd, since
 		 * xp_free_user_data() might be using it */
 		(void)shutdown(rec->xprt.xp_fd, SHUT_RDWR);
@@ -1189,9 +1196,30 @@ svc_vc_recv(SVCXPRT *xprt)
 
 	if (!xd->sx_fbtbc) {
 again:
-
+#ifdef USE_TLS
+               /* This is stunnel like TLS handshake request handling
+                * this internally does handshake if this is handshake msg*/
+		if (!((xprt)->xp_tls.not_first_packet)) {
+			if (is_handshake_msg(xprt)) {
+				(xprt)->xp_tls.not_first_packet = true;
+				xd->sx_fbtbc = 0;
+				if (unlikely(svc_rqst_rearm_events(xprt,
+								SVC_XPRT_FLAG_ADDED_RECV))) {
+					__warnx(TIRPC_DEBUG_FLAG_ERROR,
+							"%s: %p fd %d svc_rqst_rearm_events failed (will set dead)",
+							__func__, xprt, xprt->xp_fd);
+					SVC_DESTROY(xprt);
+				}
+				return SVC_STAT(xprt);
+			}
+			(xprt)->xp_tls.not_first_packet = true;
+		}
+		rlen = SVC_TLS_RECV(xprt, &xd->sx_fbtbc, BYTES_PER_XDR_UNIT,
+				    hap_again ? MSG_DONTWAIT : MSG_WAITALL);
+#else
 		rlen = recv(xprt->xp_fd, &xd->sx_fbtbc, BYTES_PER_XDR_UNIT,
-			    hap_again ? MSG_DONTWAIT : MSG_WAITALL);
+				    hap_again ? MSG_DONTWAIT : MSG_WAITALL);
+#endif
 
 		if (unlikely(rlen < 0)) {
 			code = errno;
@@ -1254,6 +1282,9 @@ again:
 				/* Now look to see if there's more... */
 	                        xd->sx_fbtbc = 0;
 				hap_again = true;
+#ifdef USE_TLS
+				xprt->xp_tls.not_first_packet = false;
+#endif
 				goto again;
 			case HAPROXY_RET_CODE__FAILURE:
 				SVC_DESTROY(xprt);
@@ -1295,8 +1326,11 @@ again:
 		uv = IOQ_(TAILQ_LAST(&xioq->ioq_uv.uvqh.qh, poolq_head_s));
 		flags = uv->u.uio_flags;
 	}
-
+#ifdef USE_TLS
+	rlen = SVC_TLS_RECV(xprt, uv->v.vio_tail, xd->sx_fbtbc,  MSG_DONTWAIT);
+#else
 	rlen = recv(xprt->xp_fd, uv->v.vio_tail, xd->sx_fbtbc, MSG_DONTWAIT);
+#endif
 
 	if (unlikely(rlen < 0)) {
 		code = errno;
@@ -1366,6 +1400,10 @@ again:
 		} else {
 			XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, recv_exit,
 				TRACE_DEBUG, "recv exit");
+#if USE_TLS
+			if (SVC_TLS_DATAPENDING(xprt) == true)
+				svc_tls_send_event(xprt);
+#endif
 		}
 
 		return SVC_STAT(xprt);
@@ -1395,6 +1433,11 @@ again:
 
 		return SVC_STAT(xprt);
 	}
+
+#if USE_TLS
+	if (SVC_TLS_DATAPENDING(xprt) == true)
+		svc_tls_send_event(xprt);
+#endif
 
 	XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, calling_svc_request,
 		TRACE_DEBUG, "Calling svc_request");

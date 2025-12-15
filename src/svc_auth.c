@@ -102,6 +102,12 @@ svc_auth_authenticate(struct svc_req *req, bool *no_dispatch)
 	cred_flavor = req->rq_msg.cb_cred.oa_flavor;
 	req->rq_msg.RPCM_ack.ar_verf.oa_flavor = cred_flavor;
 	switch (cred_flavor) {
+#ifdef USE_TLS
+	case AUTH_TLS:
+		/* Validate AUTH_TLS probe */
+		rslt = _svcauth_tls(req);
+		goto out;
+#endif /* USE_TLS */
 #ifdef _HAVE_GSSAPI
 	case RPCSEC_GSS:
 		rslt = _svcauth_gss(req, no_dispatch);
@@ -173,6 +179,9 @@ int svc_auth_reg(int cred_flavor,
 	switch (cred_flavor) {
 	case AUTH_NULL:
 	case AUTH_SYS:
+#ifdef USE_TLS
+	case AUTH_TLS:
+#endif
 	case AUTH_SHORT:
 	case RPCSEC_GSS:
 #ifdef DES_BUILTIN

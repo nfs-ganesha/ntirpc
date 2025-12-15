@@ -64,6 +64,9 @@
 #include <getpeereid.h>
 #include <misc/opr.h>
 #include "svc_ioq.h"
+#ifdef USE_TLS
+#include "tls.h"
+#endif
 
 #define LAST_FRAG ((u_int32_t)(1 << 31))
 #define LAST_FRAG_XDR_UNITS ((LAST_FRAG - 1) & ~(BYTES_PER_XDR_UNIT - 1))
@@ -223,7 +226,13 @@ again:
 
 		/* non-blocking write */
 		errno = 0;
+
+#ifdef USE_TLS
+		result = SVC_TLS_SEND(xprt, &msg, MSG_DONTWAIT);
+#else
 		result = sendmsg(xprt->xp_fd, &msg, MSG_DONTWAIT);
+#endif
+
 		error = errno;
 
 		__warnx((error == EWOULDBLOCK || error == EAGAIN || error == 0)

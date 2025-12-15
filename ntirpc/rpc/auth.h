@@ -289,6 +289,7 @@ enum auth_stat _svcauth_none(struct svc_req *);
 enum auth_stat _svcauth_short(struct svc_req *);
 enum auth_stat _svcauth_unix(struct svc_req *);
 enum auth_stat _svcauth_gss(struct svc_req *, bool *);
+enum auth_stat _svcauth_tls(struct svc_req *req);
 __END_DECLS
 
 #define AUTH_NONE 0		/* no authentication */
@@ -300,5 +301,8 @@ __END_DECLS
 #define AUTH_DES AUTH_DH	/* for backward compatibility */
 #define AUTH_KERB 4		/* kerberos style */
 #define RPCSEC_GSS 6		/* RPCSEC_GSS */
+
+/* AUTH_TLS authentication flavor - value from RFC */
+#define AUTH_TLS    7  /* As defined in Section 7.1 of the RFC */
 
 #endif				/* !_TIRPC_AUTH_H */

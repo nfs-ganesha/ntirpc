@@ -59,6 +59,7 @@
 #define SVC_RQST_FLAG_LOCKED		SVC_XPRT_FLAG_LOCKED
 #define SVC_RQST_FLAG_UNLOCK		SVC_XPRT_FLAG_UNLOCK
 #define SVC_RQST_FLAG_EPOLL		0x00080000
+#define SVC_RQST_FLAG_TLS_MORE_DATA_AVAILABLE	SVC_XPRT_FLAG_TLS_MORE_DATA_AVAILABLE
 
 void svc_rqst_init(uint32_t);
 int svc_rqst_new_evchan(uint32_t *chan_id /* OUT */ , void *u_data,

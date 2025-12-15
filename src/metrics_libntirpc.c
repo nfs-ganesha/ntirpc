@@ -71,8 +71,8 @@ static bool initialized = false;
  * will have the default `0` value in the array. Such entries will not be
  * represented in the metrics array.
  */
-static const uint8_t
-	sec_flavors_idx[] = { [AUTH_NONE] = 1, [AUTH_SYS] = 2, [RPCSEC_GSS] = 3 };
+static const uint8_t sec_flavors_idx[] = { [AUTH_NONE] = 1, [AUTH_SYS] = 2,
+					[RPCSEC_GSS] = 3 , [AUTH_TLS] = 4};
 
 /* For each auth-stat as an array index, assign a serial number to be
  * represented as the index in the metrics array.
@@ -149,6 +149,8 @@ static const char *get_sec_flavor_string(int sec_flavor)
 		return "SYS";
 	case RPCSEC_GSS:
 		return "RPCSEC_GSS";
+	case AUTH_TLS:
+		return "AUTH_TLS";
 	default:
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s: Unsupported security flavor value: %d", __func__,

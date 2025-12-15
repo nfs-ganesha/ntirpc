@@ -56,6 +56,9 @@
 #include "rpc_rdma.h"
 #endif // USE_RPC_RDMA
 
+#ifdef USE_TLS
+#include "tls.h"
+#endif /* USE_TLS */
 /**
  * @file svc_rqst.c
  * @contributeur William Allen Simpson <bill@cohortfs.com>
@@ -1473,11 +1476,29 @@ svc_rqst_epoll_event(struct svc_rqst_rec *sr_rec, struct epoll_event *ev)
 			"%s: fd %d wakeup (sr_rec %p)",
 			__func__, sr_rec->sv[1],
 			sr_rec);
+#if USE_TLS
+		if (consume_ev_sig_nb(sr_rec->sv[1]) ==
+				SVC_RQST_FLAG_TLS_MORE_DATA_AVAILABLE) {
+			int tls_dpr_fd = 0;
+
+			LogDebugTLS(TLS_DISPATCH,
+				    "recv sig DPR fd %d events =:%d",
+				     ev_data.data.fd, ev->events);
+			/* next 4 bytes indicates DPR fd */
+			read(sr_rec->sv[1], &tls_dpr_fd, sizeof(uint32_t));
+			xprt = svc_xprt_lookup(tls_dpr_fd, NULL);
+			if (xprt && SVC_TLS_DATAPENDING(xprt)) {
+				rec = REC_XPRT(xprt);
+				goto tls_dpr;
+			}
+		}
+#else
 		(void)consume_ev_sig_nb(sr_rec->sv[1]);
-		__warnx(TIRPC_DEBUG_FLAG_SVC_RQST,
-			"%s: fd %d after consume sig (sr_rec %p)",
-			__func__, sr_rec->sv[1],
-			sr_rec);
+#endif
+               __warnx(TIRPC_DEBUG_FLAG_SVC_RQST,
+                       "%s: fd %d after consume sig (sr_rec %p)",
+                       __func__, sr_rec->sv[1],
+                       sr_rec);
 		return (NULL);
 	}
 
@@ -1515,6 +1536,9 @@ svc_rqst_epoll_event(struct svc_rqst_rec *sr_rec, struct epoll_event *ev)
 		ev->events & EPOLLOUT ? " SEND" : "",
 		rec, sr_rec);
 
+#if USE_TLS
+tls_dpr:
+#endif
 	if (ev->events & EPOLLIN) {
 		/* This is a RECV event */
 		ev_flag = SVC_XPRT_FLAG_ADDED_RECV;
@@ -1567,14 +1591,29 @@ svc_rqst_epoll_event(struct svc_rqst_rec *sr_rec, struct epoll_event *ev)
 	}
 	XPRT_UNIQUE_AUTO_TRACEPOINT(&rec->xprt, epoll_event, TRACE_INFO,
 		"irrelevant epoll event. ev_flag: {}", ev_flag);
-	/* Do not return destroyed transports.
-	 * Probably log non-fatal "WARNING! already destroying!"
-	 */
-	__warnx(TIRPC_DEBUG_FLAG_ERROR,
+
+#if USE_TLS
+	/*  In case of TLS, there is possiblity of data EPOLLIN event just got
+	 *  processed and xp_flag has been cleared.
+	 *  Because of current DPR event processing will cause:
+	 *  (xp_flags & ev_flag) != TRUE
+	 *  In that case DPR event should be dropped. i.e already recv IO in
+	 *  progress and it will be the reposibillity of this recv IO to raise
+	 *  another DPR after proper check.
+	 *  so added check for proper case of destroy
+	 *  */
+	if (xp_flags & SVC_XPRT_FLAG_DESTROYED)
+#endif
+	{
+		/* Do not return destroyed transports.
+		 * Probably log non-fatal "WARNING! already destroying!"
+		 */
+		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 		"%s: %p fd %d already destroying. prev flags %x, curr flags %x, ev_flag %x,"
 		"ref_count = %" PRId32,
 		__func__, &rec->xprt, rec->xprt.xp_fd, xp_flags, xprt->xp_flags,
 		ev_flag, xprt->xp_refcnt);
+	}
 	SVC_RELEASE(&rec->xprt, SVC_RELEASE_FLAG_NONE);
 	return (NULL);
 }
@@ -1618,7 +1657,7 @@ svc_rqst_epoll_events(struct svc_rqst_rec *sr_rec, int n_events)
 
 static void svc_rqst_epoll_loop(struct work_pool_entry *wpe)
 {
-	struct svc_rqst_rec *sr_rec = 
+	struct svc_rqst_rec *sr_rec =
 		opr_containerof(wpe, struct svc_rqst_rec, ev_wpe);
 	struct clnt_req *cc;
 	struct opr_rbtree_node *n;
@@ -1845,3 +1884,34 @@ svc_get_port(sockaddr_t *addr)
 		return -1;
 	}
 }
+
+#if USE_TLS
+/* Signal to wake up recv fd from epoll_wait to recv data
+ * this is because TLS lib reads all available data from underlying sockets
+ * and caches it, so libntirpc doesn't receives any event for buffered
+ * data and this event helps in this situtation
+ * */
+void svc_tls_send_event(SVCXPRT *xprt)
+{
+        struct rpc_dplx_rec *rec = REC_XPRT(xprt);
+        struct svc_rqst_rec *sr_rec = rec->ev_p;
+        int tls_code;
+        struct tls_signal_dpr dpr;
+        dpr.signal = SVC_RQST_FLAG_TLS_MORE_DATA_AVAILABLE;
+        dpr.fd = rec->xprt.xp_fd;
+
+        LogDebugTLS(TLS_DISPATCH,
+                        "TLS sending DPR fd %d epoll_fd %" PRId32
+                        "control fd pair (%d:%d)",
+                        rec->xprt.xp_fd,
+                        sr_rec->ev_u.epoll.epoll_fd,
+                        sr_rec->sv[0], sr_rec->sv[1]);
+        /* we cannot do ev_sig, because of need fd info also to
+         * resume data, so directly write to control pipe */
+        tls_code = write(sr_rec->sv[0], &dpr, sizeof(dpr));
+        LogDebugTLS(TLS_DISPATCH,
+                        "fd %d sig %d :%d :%d",
+                        sr_rec->sv[0], dpr.signal, tls_code, errno);
+
+}
+#endif
