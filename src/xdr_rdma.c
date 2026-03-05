@@ -1116,7 +1116,7 @@ xdr_rdma_update_io_bufs(RDMAXPRT *rdma_xprt, struct ibv_mr *mr, uint32_t buffer_
 	rdma_xprt->io_bufs_count++;
 	rdma_xprt->io_bufs.qcount++;
 
-	__warnx(TIRPC_DEBUG_FLAG_EVENT,
+	__warnx(TIRPC_DEBUG_FLAG_XDR_RDMA,
 		"%s() io bufs count %u io_buf %p rdma_xprt %p",
 		__func__, rdma_xprt->io_bufs_count, io_buf, rdma_xprt);
 
@@ -1140,7 +1140,7 @@ xdr_rdma_reg_mr(RDMAXPRT *rdma_xprt, uint8_t *buffer_aligned, uint32_t buffer_to
 	if (mr) {
 		atomic_add_uint64_t(&total_rdma_reg_mem, buffer_total);
 
-		__warnx(TIRPC_DEBUG_FLAG_EVENT, "%s: total_rdma_reg_mem %llu registered, "
+		__warnx(TIRPC_DEBUG_FLAG_XDR_RDMA, "%s: total_rdma_reg_mem %llu registered, "
 		    "registering for xprt %p mr %p buffer_aligned %p buffer_total %u",
 		    __func__, atomic_fetch_uint64_t(&total_rdma_reg_mem),
 		    rdma_xprt, mr, buffer_aligned, buffer_total);
@@ -1173,7 +1173,7 @@ xdr_rdma_dereg_mr(RDMAXPRT *rdma_xprt, struct ibv_mr *mr,
 	} else {
 		atomic_sub_uint64_t(&total_rdma_reg_mem, buffer_total);
 
-		__warnx(TIRPC_DEBUG_FLAG_EVENT, "%s: total_rdma_reg_mem %llu registered, "
+		__warnx(TIRPC_DEBUG_FLAG_XDR_RDMA, "%s: total_rdma_reg_mem %llu registered, "
 		    "unregistering for xprt %p mr %p buffer_aligned %p buffer_total %u",
 		    __func__, atomic_fetch_uint64_t(&total_rdma_reg_mem),
 		    rdma_xprt, mr, buffer_aligned, buffer_total);
@@ -1227,7 +1227,7 @@ xdr_rdma_add_outbufs_data(RDMAXPRT *rdma_xprt)
 	uint32_t buffer_total = rdma_xprt->sm_dr.sendsz * data_qdepth;
 	struct rpc_io_bufs *io_buf = NULL;
 
-	__warnx(TIRPC_DEBUG_FLAG_EVENT,
+	__warnx(TIRPC_DEBUG_FLAG_XDR_RDMA,
 		"%s() buffer_total %llu, sendsz %llu sq %llu rdma_xprt %p pagesz %llu",
 		__func__, buffer_total, rdma_xprt->sm_dr.sendsz, data_qdepth,
 		rdma_xprt, rdma_xprt->sm_dr.pagesz);
@@ -1237,7 +1237,7 @@ xdr_rdma_add_outbufs_data(RDMAXPRT *rdma_xprt)
 	assert(buffer_aligned);
 	memset(buffer_aligned, 0, buffer_total);
 
-	__warnx(TIRPC_DEBUG_FLAG_EVENT,
+	__warnx(TIRPC_DEBUG_FLAG_XDR_RDMA,
 		"%s() buffer_aligned at %p protection domain %p rdma_xprt %p",
 		__func__, buffer_aligned, rdma_xprt->pd->pd, rdma_xprt);
 
@@ -1264,7 +1264,7 @@ xdr_rdma_add_inbufs_hdr(RDMAXPRT *rdma_xprt)
 	uint32_t buffer_total = rdma_xprt->sm_dr.recv_hdr_sz * hdr_qdepth;
 	struct rpc_io_bufs *io_buf = NULL;
 
-	__warnx(TIRPC_DEBUG_FLAG_EVENT,
+	__warnx(TIRPC_DEBUG_FLAG_XDR_RDMA,
 		"%s() buffer_total %llu, recvsz %llu rq %llu rdma_xprt %p pagesz %llu",
 		__func__, buffer_total, rdma_xprt->sm_dr.recv_hdr_sz, hdr_qdepth,
 		rdma_xprt, rdma_xprt->sm_dr.pagesz);
@@ -1274,7 +1274,7 @@ xdr_rdma_add_inbufs_hdr(RDMAXPRT *rdma_xprt)
 	assert(buffer_aligned);
 	memset(buffer_aligned, 0, buffer_total);
 
-	__warnx(TIRPC_DEBUG_FLAG_EVENT,
+	__warnx(TIRPC_DEBUG_FLAG_XDR_RDMA,
 		"%s() buffer_aligned at %p protection domain %p rdma_xprt %p",
 		__func__, buffer_aligned, rdma_xprt->pd->pd, rdma_xprt);
 

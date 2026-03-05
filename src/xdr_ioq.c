@@ -292,7 +292,7 @@ do_shrink(RDMAXPRT *rdma_xprt, struct rpc_io_bufs *io_buf, bool_t unlock)
 {
 	struct poolq_head *ioqh = get_data_poolq_head(io_buf, rdma_xprt);
 
-	__warnx(TIRPC_DEBUG_FLAG_EVENT, "%s: Start shrinking xprt %p "
+	__warnx(TIRPC_DEBUG_FLAG_XDR, "%s: Start shrinking xprt %p "
 	    "io_buf %p refs %d ioqh %p count %d",
 	    __func__, rdma_xprt, io_buf, io_buf->refs, ioqh,
 	    ioqh->qcount);
@@ -386,7 +386,7 @@ get_lru_chunk_with_lock(RDMAXPRT *rdma_xprt, struct rpc_io_bufs *cur_io_buf)
 			rdma_xprt->io_bufs_count--;
 			rdma_xprt->io_bufs.qcount--;
 
-			__warnx(TIRPC_DEBUG_FLAG_EVENT, "%s: xprt %p shrink "
+			__warnx(TIRPC_DEBUG_FLAG_XDR, "%s: xprt %p shrink "
 			    "io_buf %p refs %d io_bufs count %d %d",
 			    __func__, rdma_xprt, io_buf, io_buf->refs,
 			    rdma_xprt->io_bufs_count,
@@ -650,7 +650,7 @@ xdr_rdma_buf_pool_destroy_locked(struct poolq_head *ioqh,
 			    io_buf->buffer_aligned, io_buf->buffer_total));
 			io_buf->mr = NULL;
 
-			__warnx(TIRPC_DEBUG_FLAG_EVENT, "%s() Free xprt %p mr "
+			__warnx(TIRPC_DEBUG_FLAG_XDR, "%s() Free xprt %p mr "
 			    "io_bufs %p size %u io_buf %p", __func__, rdma_xprt,
 			    io_buf->buffer_aligned, io_buf->buffer_total, io_buf);
 
