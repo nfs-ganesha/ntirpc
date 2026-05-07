@@ -1849,6 +1849,22 @@ xdr_rdma_svc_recv(struct rpc_rdma_cbc *cbc, u_int32_t xid)
 		pthread_mutex_unlock(&cbc->cb_done_mutex);
 	}
 
+	/* Reject if any RDMA READ completed with a CQ error.
+	 * Both positive and negative callbacks signal cb_done, so
+	 * read_waits can reach 0 even when some chunks failed.
+	 * cbc->status reflects the last CQ completion status.
+	 */
+	if ((status == true) && cbc->status) {
+		__warnx(TIRPC_DEBUG_FLAG_ERROR,
+		    "%s: RDMA_READ completed with CQ error "
+		    "status %d (%s), rejecting to prevent stale data "
+		    "cbc %p rdma_xprt %p",
+		    __func__, cbc->status,
+		    ibv_wc_status_str(cbc->status),
+		    cbc, rdma_xprt);
+		status = false;
+	}
+
 	pthread_mutex_lock(&cbc->recvq.ioq_uv.uvqh.qmutex);
 	pthread_mutex_lock(&cbc->freeq.ioq_uv.uvqh.qmutex);
 
