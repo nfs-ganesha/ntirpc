@@ -1817,7 +1817,7 @@ xdr_rdma_svc_recv(struct rpc_rdma_cbc *cbc, u_int32_t xid)
 		/* Check for race signaled before we wait
 		 * If read_waits > 1 then not signaled yet since we hold
 		 * cb_done_mutex */
-		if (atomic_fetch_int32_t(&cbc->read_waits)) {
+		while (atomic_fetch_int32_t(&cbc->read_waits)) {
 
 			/* Wait for all rdma_read callbacks to complete */
 			int rc = xdr_rdma_wait_cb_done_locked(cbc);
@@ -1843,6 +1843,7 @@ xdr_rdma_svc_recv(struct rpc_rdma_cbc *cbc, u_int32_t xid)
 					}
 				}
 				status = false;
+				break;
 			}
 		}
 		pthread_mutex_unlock(&cbc->cb_done_mutex);
