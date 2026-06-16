@@ -231,6 +231,20 @@ clnt_rdma_call(struct clnt_req *cc)
 	struct cx_data *cx = CX_DATA(cl);
 	struct rpc_dplx_rec *rec = cx->cx_rec;
 	RDMAXPRT *rdma_xprt = RDMA_DR(rec);
+
+	/* Check if adding this callback would exceed MAX_RDMA_CALLBACKS
+	 * before allocating any resources to avoid cleanup overhead */
+	uint32_t active_callbacks = atomic_fetch_uint32_t(&rdma_xprt->active_client_callbacks);
+	uint32_t max_rdma_callbacks = MAX_RDMA_CALLBACKS(rdma_xprt);
+	if (active_callbacks >= max_rdma_callbacks) {
+		__warnx(TIRPC_DEBUG_FLAG_ERROR,
+		    "%s: active_client_callbacks %u >= max_rdma_callbacks %u, "
+		    "cannot post new RDMA callback",
+		    __func__, active_callbacks, max_rdma_callbacks);
+		cl->cl_error.re_errno = EAGAIN;
+		return (RPC_CANTSEND);
+	}
+
 	struct poolq_entry *have =
 		xdr_rdma_ioq_uv_fetch(&rdma_xprt->sm_dr.ioq, &rdma_xprt->cbqh,
 				 "call context", 1, IOQ_FLAG_NONE);
@@ -247,7 +261,7 @@ clnt_rdma_call(struct clnt_req *cc)
         cbc->data_chunk_uv = NULL;
         cbc->refcnt = 1; // Sentinel ref
 	SVC_REF(&rdma_xprt->sm_dr.xprt, SVC_REF_FLAG_NONE); // for cbc ref
-        cbc->cbc_flags = CBC_FLAG_RELEASE;
+        cbc->cbc_flags = CBC_FLAG_RELEASE | CBC_FLAG_CLIENT;
         cbc->read_waits = 0;
         cbc->write_waits = 0;
         cbc->active = false;
@@ -256,6 +270,8 @@ clnt_rdma_call(struct clnt_req *cc)
 
         TAILQ_INSERT_TAIL(&rdma_xprt->cbclist.qh, &cbc->cbc_list, q);
         rdma_xprt->cbclist.qcount++;
+	/* Increment active_client_callbacks counter */
+	atomic_inc_uint32_t(&rdma_xprt->active_client_callbacks);
         pthread_mutex_unlock(&rdma_xprt->cbclist.qmutex);
 
 	XDR *xdrs;
@@ -286,6 +302,8 @@ clnt_rdma_call(struct clnt_req *cc)
 		__warnx(TIRPC_DEBUG_FLAG_CLNT_RDMA,
 			"%s: %p@%p failed",
 			__func__, cl, cx->cx_rec);
+		/* Decrement active_client_callbacks on error */
+		atomic_dec_uint32_t(&rdma_xprt->active_client_callbacks);
 		cbc_release_it(cbc);
 		return (RPC_CANTENCODEARGS);
 	}
@@ -293,6 +311,8 @@ clnt_rdma_call(struct clnt_req *cc)
 
 	/* send request and recv response */
 	if (!xdr_rdma_clnt_flushout(cbc)) {
+		/* Decrement active_client_callbacks on error */
+		atomic_dec_uint32_t(&rdma_xprt->active_client_callbacks);
 		cbc_release_it(cbc);
 		cl->cl_error.re_errno = errno;
 		return (RPC_CANTSEND);

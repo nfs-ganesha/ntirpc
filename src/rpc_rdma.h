@@ -87,10 +87,11 @@ typedef int (*rpc_rdma_callback_t)(struct rpc_rdma_cbc *cbc, RDMAXPRT *rdma_xprt
 #define CBC_FLAG_NONE		0x0000
 #define CBC_FLAG_RELEASE	0x0001
 #define CBC_FLAG_RELEASING	0x0002
+#define CBC_FLAG_CLIENT		0x0004	/**< Client-side callback (from clnt_rdma_call) */
 /* svc_request returned XPRT_SUSPEND (e.g. QOS, async request handling)
  * wrap_callback deferred the sentinel cbc_release_it to xdr_rdma_svc_flushout
  * so that dataq buffers remain valid across the suspension window. */
-#define CBC_FLAG_SENTINEL_PENDING 0x0004
+#define CBC_FLAG_SENTINEL_PENDING 0x0008
 
 #define RDMA_CB_TIMEOUT_SEC 10
 
@@ -166,6 +167,12 @@ struct rpc_rdma_pd {
 /* Keep enough cbcs to avoid on demand allocation */
 #define MAX_CBC_ALLOCATION(xa) (MAX_CBC_OUTSTANDING(xa) * 3)
 #define MAX_RECV_OUTSTANDING(xa) MAX_CBC_OUTSTANDING(xa)
+/**< Maximum active client RDMA callbacks per connection.
+ * Use min of client_credits and xa->credits if both are > 0, else xa->credits */
+#define MAX_RDMA_CALLBACKS(rdma_xprt) \
+	(((rdma_xprt)->client_credits > 0 && (rdma_xprt)->xa->credits > 0) ? \
+	 MIN((rdma_xprt)->client_credits, (rdma_xprt)->xa->credits) : \
+	 (rdma_xprt)->xa->credits)
 
 /**
  * \struct rpc_rdma_xprt
@@ -210,6 +217,8 @@ struct rpc_rdma_xprt {
 	u_int io_bufs_count;
 
 	uint32_t active_requests;
+	uint32_t active_client_callbacks;	/**< Active client RDMA callbacks (from clnt_rdma_call) */
+	uint32_t client_credits;		/**< Client credits from rdma_credit in incoming messages */
 
 	struct poolq_head cbclist;
 

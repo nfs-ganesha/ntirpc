@@ -838,6 +838,217 @@ rpc_rdma_stats_thread(void *arg)
 }
 
 /**
+ * rpc_rdma_process_single_wc: process a single work completion event.
+ *
+ * Processes one work completion from the completion queue,
+ * updates statistics, and invokes appropriate callbacks.
+ *
+ * @param[IN] rdma_xprt RDMA transport
+ * @param[IN] wc work completion event to process
+ *
+ * @return 0 on success, error code on failure
+ */
+static int
+rpc_rdma_process_single_wc(RDMAXPRT *rdma_xprt, struct ibv_wc *wc)
+{
+	struct rpc_rdma_cbc *cbc;
+	struct xdr_ioq_uv *data;
+	int rc = 0;
+	uint32_t len;
+
+	if (rdma_xprt->bad_recv_wr) {
+		__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA,
+			"%s() Something was bad on that recv",
+			__func__);
+		rc = -1;
+	}
+
+	if (rdma_xprt->bad_send_wr) {
+		__warnx(TIRPC_DEBUG_FLAG_ERROR,
+			"%s() Something was bad on that send",
+			__func__);
+		rc = -1;
+	}
+
+	cbc = (struct rpc_rdma_cbc *)wc->wr_id;
+	cbc->opcode = wc->opcode;
+	cbc->status = wc->status;
+	cbc->wpe.arg = rdma_xprt;
+	cbc->active = true;
+
+	if (wc->status) {
+		rc = -1;
+
+		switch (wc->opcode) {
+			case IBV_WC_SEND:
+			case IBV_WC_RDMA_WRITE:
+			case IBV_WC_RDMA_READ:
+				rdma_xprt->stats.tx_err++;
+				break;
+			case IBV_WC_RECV:
+			case IBV_WC_RECV_RDMA_WITH_IMM:
+				rdma_xprt->stats.rx_err++;
+				break;
+			default:
+				break;
+		}
+
+		__warnx(TIRPC_DEBUG_FLAG_ERROR,
+			"%s() cq completion status: %s (%d) rdma_xprt state %x opcode %d cbc %p "
+			"inline %d",
+			__func__, ibv_wc_status_str(wc->status), wc->status,
+			rdma_xprt->state, wc->opcode, cbc, cbc->call_inline);
+
+		cbc->call_inline = 1;
+
+		if (cbc->call_inline) {
+			rpc_rdma_worker_callback(&cbc->wpe);
+		} else {
+			SVC_REF(&rdma_xprt->sm_dr.xprt, SVC_REF_FLAG_NONE);
+			work_pool_submit(&svc_work_pool, &cbc->wpe);
+		}
+
+		return rc;
+	}
+
+	switch (wc->opcode) {
+	case IBV_WC_SEND:
+	case IBV_WC_RDMA_WRITE:
+	case IBV_WC_RDMA_READ:
+		len = wc->byte_len;
+		rdma_xprt->stats.tx_bytes += len;
+		rdma_xprt->stats.tx_pkt++;
+
+		__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA,
+			"%s() WC_SEND/RDMA_WRITE/RDMA_READ: %d len %u",
+			__func__,
+			wc->opcode,
+			len);
+
+		if (wc->wc_flags & IBV_WC_WITH_IMM) {
+			//FIXME cbc->data->imm_data = ntohl(wc.imm_data);
+			__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA,
+				"%s() imm_data: %d",
+				__func__,
+				ntohl(wc->imm_data));
+		}
+		__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA, "%s:%d submit cbc %p wpe %p inline %d",
+			__func__, __LINE__, cbc, &cbc->wpe, cbc->call_inline);
+		if (cbc->call_inline) {
+			rpc_rdma_worker_callback(&cbc->wpe);
+		} else {
+			SVC_REF(&rdma_xprt->sm_dr.xprt, SVC_REF_FLAG_NONE);
+			work_pool_submit(&svc_work_pool, &cbc->wpe);
+		}
+		break;
+
+	case IBV_WC_RECV:
+	case IBV_WC_RECV_RDMA_WITH_IMM:
+		len = wc->byte_len;
+		rdma_xprt->stats.rx_bytes += len;
+		rdma_xprt->stats.rx_pkt++;
+
+		__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA,
+			"%s() WC_RECV: %d len %u",
+			__func__,
+			wc->opcode,
+			len);
+
+		if (wc->wc_flags & IBV_WC_WITH_IMM) {
+			//FIXME cbc->data->imm_data = ntohl(wc.imm_data);
+			__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA,
+				"%s() imm_data: %d",
+				__func__,
+				ntohl(wc->imm_data));
+		}
+
+		/* fill all the sizes in case of multiple sge
+		 * assumes _tail was set to _wrap before call
+		 */
+		data = IOQ_(TAILQ_FIRST(&cbc->recvq.ioq_uv.uvqh.qh));
+		while (data && ioquv_length(data) < len) {
+			VALGRIND_MAKE_MEM_DEFINED(data->v.vio_head, ioquv_length(data));
+			len -= ioquv_length(data);
+			data = IOQ_(TAILQ_NEXT(&data->uvq, q));
+		}
+		if (data) {
+			data->v.vio_tail = data->v.vio_head + len;
+			VALGRIND_MAKE_MEM_DEFINED(data->v.vio_head, ioquv_length(data));
+		} else if (len) {
+			__warnx(TIRPC_DEBUG_FLAG_ERROR,
+				"%s() ERROR %d leftover bytes?",
+				__func__, len);
+		}
+		__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA, "%s:%d submit cbc %p wpe %p inline %d",
+			__func__, __LINE__, cbc, &cbc->wpe, cbc->call_inline);
+		if (cbc->call_inline) {
+			rpc_rdma_worker_callback(&cbc->wpe);
+		} else {
+			SVC_REF(&rdma_xprt->sm_dr.xprt, SVC_REF_FLAG_NONE);
+			work_pool_submit(&svc_work_pool, &cbc->wpe);
+		}
+		break;
+
+	default:
+		__warnx(TIRPC_DEBUG_FLAG_ERROR,
+			"%s() unknown opcode: %d",
+			__func__, wc->opcode);
+		rc = EINVAL;
+	}
+
+	return rc;
+}
+
+/**
+ * rpc_rdma_process_cq_events: process completion queue events.
+ *
+ * Processes work completions from the completion queue,
+ * updates statistics, and invokes appropriate callbacks.
+ *
+ * @param[IN] rdma_xprt RDMA transport
+ * @param[IN] poll_count maximum number of poll iterations
+ * @param[OUT] events_processed total number of events processed
+ *
+ * @return 0 on success, error code on failure
+ */
+static int
+rpc_rdma_process_cq_events(RDMAXPRT *rdma_xprt, int poll_count,
+    int *events_processed)
+{
+	struct ibv_wc wc[IBV_POLL_EVENTS];
+	int i;
+	int rc = 0;
+
+	int npoll = 0;
+	*events_processed = 0;
+
+	while (poll_count-- &&
+	    ((npoll = ibv_poll_cq(rdma_xprt->cq, IBV_POLL_EVENTS, wc)) > 0)) {
+
+		__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA, "%s: npoll %d "
+		    "poll_count %d xprt %p",
+		    __func__, npoll, poll_count);
+
+		for (i = 0; i < npoll; i++) {
+			int wc_rc = rpc_rdma_process_single_wc(rdma_xprt, &wc[i]);
+			if (wc_rc && !rc)
+				rc = wc_rc;
+		}
+
+		*events_processed += npoll;
+	}
+
+	if (npoll < 0) {
+		__warnx(TIRPC_DEBUG_FLAG_ERROR,
+			"%s() %p[%u] ibv_poll_cq failed: %s (%d)",
+			__func__, rdma_xprt, rdma_xprt->state, strerror(-npoll), -npoll);
+		rc = -npoll;
+	}
+
+	return rc;
+}
+
+/**
  * rpc_rdma_cq_event_handler: completion queue event handler.
  *
  * marks contexts back out of use,
@@ -848,20 +1059,17 @@ rpc_rdma_stats_thread(void *arg)
 int
 rpc_rdma_cq_event_handler(RDMAXPRT *rdma_xprt, int expected_poll_count)
 {
-	struct ibv_wc wc[IBV_POLL_EVENTS];
 	struct ibv_cq *ev_cq;
 	void *ev_ctx;
-	struct rpc_rdma_cbc *cbc;
-	struct xdr_ioq_uv *data;
-	int i;
 	int rc;
-	int npoll = 0;
-	uint32_t len;
 	int poll_count = IBV_POLL_COUNT;
+	int total_events_processed = 0, retry_count = 0;
 
 	if (expected_poll_count)
-		poll_count = expected_poll_count;
+		retry_count = poll_count = expected_poll_count;
 
+retry:
+	retry_count--;
 	rc = ibv_get_cq_event(rdma_xprt->comp_channel, &ev_cq, &ev_ctx);
 	if (rc) {
 		rc = errno;
@@ -888,164 +1096,29 @@ rpc_rdma_cq_event_handler(RDMAXPRT *rdma_xprt, int expected_poll_count)
 		return rc;
 	}
 
-	while (poll_count-- &&
-	    ((npoll = ibv_poll_cq(rdma_xprt->cq, IBV_POLL_EVENTS, wc)) > 0)) {
+	int events_processed = 0;
+	rc = rpc_rdma_process_cq_events(rdma_xprt, poll_count,
+					&events_processed);
 
-		__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA, "%s: npoll %d "
-		    "poll_count %d xprt %p",
-		    __func__, npoll, poll_count);
-
-		for (i = 0; i < npoll; i++) {
-			if (rdma_xprt->bad_recv_wr) {
-				__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA,
-					"%s() Something was bad on that recv",
-					__func__);
-				rc = -1;
-			}
-
-			if (rdma_xprt->bad_send_wr) {
-				__warnx(TIRPC_DEBUG_FLAG_ERROR,
-					"%s() Something was bad on that send",
-					__func__);
-				rc = -1;
-			}
-
-			cbc = (struct rpc_rdma_cbc *)wc[i].wr_id;
-			cbc->opcode = wc[i].opcode;
-			cbc->status = wc[i].status;
-			cbc->wpe.arg = rdma_xprt;
-			cbc->active = true;
-
-			if (wc[i].status) {
-				rc = -1;
-
-				switch (wc[i].opcode) {
-					case IBV_WC_SEND:
-					case IBV_WC_RDMA_WRITE:
-					case IBV_WC_RDMA_READ:
-						rdma_xprt->stats.tx_err++;
-						break;
-					case IBV_WC_RECV:
-					case IBV_WC_RECV_RDMA_WITH_IMM:
-						rdma_xprt->stats.rx_err++;
-						break;
-					default:
-						break;
-				}
-
-				__warnx(TIRPC_DEBUG_FLAG_ERROR,
-					"%s() cq completion status: %s (%d) rdma_xprt state %x opcode %d cbc %p "
-					"inline %d",
-					__func__, ibv_wc_status_str(wc[i].status), wc[i].status,
-					rdma_xprt->state, wc[i].opcode, cbc, cbc->call_inline);
-
-				cbc->call_inline = 1;
-
-				if (cbc->call_inline) {
-					rpc_rdma_worker_callback(&cbc->wpe);
-				} else {
-					SVC_REF(&rdma_xprt->sm_dr.xprt, SVC_REF_FLAG_NONE);
-					work_pool_submit(&svc_work_pool, &cbc->wpe);
-				}
-
-				continue;
-			}
-
-			switch (wc[i].opcode) {
-			case IBV_WC_SEND:
-			case IBV_WC_RDMA_WRITE:
-			case IBV_WC_RDMA_READ:
-				len = wc[i].byte_len;
-				rdma_xprt->stats.tx_bytes += len;
-				rdma_xprt->stats.tx_pkt++;
-
-				__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA,
-					"%s() WC_SEND/RDMA_WRITE/RDMA_READ: %d len %u",
-					__func__,
-					wc[i].opcode,
-					len);
-
-				if (wc[i].wc_flags & IBV_WC_WITH_IMM) {
-					//FIXME cbc->data->imm_data = ntohl(wc.imm_data);
-					__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA,
-						"%s() imm_data: %d",
-						__func__,
-						ntohl(wc[i].imm_data));
-				}
-				__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA, "%s:%d submit cbc %p wpe %p inline %d",
-					__func__, __LINE__, cbc, &cbc->wpe, cbc->call_inline);
-				if (cbc->call_inline) {
-					rpc_rdma_worker_callback(&cbc->wpe);
-				} else {
-					SVC_REF(&rdma_xprt->sm_dr.xprt, SVC_REF_FLAG_NONE);
-					work_pool_submit(&svc_work_pool, &cbc->wpe);
-				}
-				break;
-
-			case IBV_WC_RECV:
-			case IBV_WC_RECV_RDMA_WITH_IMM:
-				len = wc[i].byte_len;
-				rdma_xprt->stats.rx_bytes += len;
-				rdma_xprt->stats.rx_pkt++;
-
-				__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA,
-					"%s() WC_RECV: %d len %u",
-					__func__,
-					wc[i].opcode,
-					len);
-
-				if (wc[i].wc_flags & IBV_WC_WITH_IMM) {
-					//FIXME cbc->data->imm_data = ntohl(wc.imm_data);
-					__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA,
-						"%s() imm_data: %d",
-						__func__,
-						ntohl(wc[i].imm_data));
-				}
-
-				/* fill all the sizes in case of multiple sge
-				 * assumes _tail was set to _wrap before call
-				 */
-				data = IOQ_(TAILQ_FIRST(&cbc->recvq.ioq_uv.uvqh.qh));
-				while (data && ioquv_length(data) < len) {
-					VALGRIND_MAKE_MEM_DEFINED(data->v.vio_head, ioquv_length(data));
-					len -= ioquv_length(data);
-					data = IOQ_(TAILQ_NEXT(&data->uvq, q));
-				}
-				if (data) {
-					data->v.vio_tail = data->v.vio_head + len;
-					VALGRIND_MAKE_MEM_DEFINED(data->v.vio_head, ioquv_length(data));
-				} else if (len) {
-					__warnx(TIRPC_DEBUG_FLAG_ERROR,
-						"%s() ERROR %d leftover bytes?",
-						__func__, len);
-				}
-				__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA, "%s:%d submit cbc %p wpe %p inline %d",
-					__func__, __LINE__, cbc, &cbc->wpe, cbc->call_inline);
-				if (cbc->call_inline) {
-					rpc_rdma_worker_callback(&cbc->wpe);
-				} else {
-					SVC_REF(&rdma_xprt->sm_dr.xprt, SVC_REF_FLAG_NONE);
-					work_pool_submit(&svc_work_pool, &cbc->wpe);
-				}
-				break;
-
-			default:
-				__warnx(TIRPC_DEBUG_FLAG_ERROR,
-					"%s() unknown opcode: %d",
-					__func__, wc[i].opcode);
-				rc = EINVAL;
-			}
-		}
-	}
-
-	if (npoll < 0) {
+	if (rc) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
-			"%s() %p[%u] ibv_poll_cq failed: %s (%d)",
-			__func__, rdma_xprt, rdma_xprt->state, strerror(-npoll), -npoll);
-		rc = -npoll;
+			"process_cq_events failed rc %d rdma_xprt %p",
+			rc, rdma_xprt);
 	}
 
 	ibv_ack_cq_events(rdma_xprt->cq, 1);
+
+	total_events_processed += events_processed;
+
+	if (expected_poll_count && retry_count &&
+	    (total_events_processed != expected_poll_count)) {
+		__warnx(TIRPC_DEBUG_FLAG_EVENT, "events processed %d, "
+			"expected %d, retrying %d", events_processed,
+			expected_poll_count, retry_count);
+
+		poll_count = expected_poll_count;
+		goto retry;
+	}
 
 	return -rc;
 }
@@ -1181,12 +1254,18 @@ rpc_rdma_cq_thread(void *arg)
 
 			rc = rpc_rdma_cq_event_handler(rdma_xprt, 0);
 			if (rc) {
+				__warnx(TIRPC_DEBUG_FLAG_ERROR,
+					"cq_even_handler failed %d, rdma_xprt %p",
+					rc, rdma_xprt);
 				SVC_DESTROY(&rdma_xprt->sm_dr.xprt);
 			}
 
 			mutex_unlock(&rdma_xprt->cm_lock);
 		}
 	}
+	__warnx(TIRPC_DEBUG_FLAG_EVENT,
+		"%s() thread %p exiting, run_count = %d",
+		__func__, pthread_self(), atomic_fetch_int32_t(&rpc_rdma_state.run_count));
 	rcu_unregister_thread();
 	pthread_exit(NULL);
 }
@@ -1259,8 +1338,9 @@ rpc_rdma_cm_event_handler(RDMAXPRT *ep_rdma_xprt, struct rdma_cm_event *event)
 				__warnx(TIRPC_DEBUG_FLAG_ERROR,
 					"%s:%u ERROR (return)",
 					__func__, __LINE__);
+			} else {
+				rpc_rdma_stats_add(rdma_xprt);
 			}
-			rpc_rdma_stats_add(rdma_xprt);
 		}
 		break;
 
@@ -1269,7 +1349,16 @@ rpc_rdma_cm_event_handler(RDMAXPRT *ep_rdma_xprt, struct rdma_cm_event *event)
 			"%s() %p CONNECT_REQUEST",
 			__func__, rdma_xprt);
 		rpc_rdma_state.c_r.id_queue[0] = cm_id;
-		svc_rdma_rendezvous(&rdma_xprt->sm_dr.xprt);
+		enum xprt_stat rendezvous_status = svc_rdma_rendezvous(&rdma_xprt->sm_dr.xprt);
+		if (rendezvous_status == XPRT_DIED || rendezvous_status == XPRT_DESTROYED) {
+			__warnx(TIRPC_DEBUG_FLAG_ERROR,
+				"%s() %p CONNECT_REQUEST rendezvous failed with status %d, "
+				"cleaning up connection attempt",
+				__func__, rdma_xprt, rendezvous_status);
+			/* Clean up the connection attempt */
+			rdma_reject(cm_id, NULL, 0);
+			rc = ECONNREFUSED;
+		}
 
 		break;
 
@@ -1413,6 +1502,9 @@ rpc_rdma_cm_thread(void *nullarg)
 				SVC_DESTROY(&rdma_xprt_event->sm_dr.xprt);
 		}
 	}
+	__warnx(TIRPC_DEBUG_FLAG_EVENT,
+		"%s() thread %p exiting, run_count = %d",
+		__func__, pthread_self(), atomic_fetch_int32_t(&rpc_rdma_state.run_count));
 	rcu_unregister_thread();
 	pthread_exit(NULL);
 }
@@ -1723,6 +1815,8 @@ rpc_rdma_allocate(const struct rpc_rdma_attr *xa)
 	rdma_xprt->sm_dr.ioq.rdma_ioq = true;
 	rdma_xprt->sm_dr.ioq.xdrs[0].x_lib[1] = rdma_xprt;
 	rdma_xprt->active_requests = 0;
+	rdma_xprt->active_client_callbacks = 0;
+	rdma_xprt->client_credits = xa->credits;
 
 	rc = mutex_init(&rdma_xprt->cm_lock, NULL);
 	if (rc) {

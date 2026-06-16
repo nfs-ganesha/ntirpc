@@ -1613,6 +1613,9 @@ xdr_rdma_svc_recv(struct rpc_rdma_cbc *cbc, u_int32_t xid)
 	cmsg = m_(cbc->call_head);
 	rpcrdma_dump_msg(cbc->call_uv, "call", cmsg->rdma_xid);
 
+	/* Update client credits from incoming message */
+	rdma_xprt->client_credits = ntohl(cmsg->rdma_credit);
+
 	switch (ntohl(cmsg->rdma_vers)) {
 	case RPCRDMA_VERSION:
 		break;
@@ -1737,12 +1740,40 @@ xdr_rdma_svc_recv(struct rpc_rdma_cbc *cbc, u_int32_t xid)
 
 	assert(cbc->recvq.ioq_uv.uvqh.qcount == 0);
 
+	/* Store the boundary of the read_chunk list to prevent buffer overrun.
+	 * The write_chunk pointer marks the end of the read_chunk list.
+	 */
+	void *read_chunk_end = cbc->write_chunk;
+	uint32_t read_chunk_count = 0;
+	const uint32_t MAX_READ_CHUNKS = 1024; /* Safety limit to prevent infinite loops */
+
 	while (rl(cbc->read_chunk)->present && status) {
+		/* Bounds check: ensure we haven't exceeded the read_chunk list boundary */
+		if ((char *)cbc->read_chunk >= (char *)read_chunk_end) {
+			__warnx(TIRPC_DEBUG_FLAG_ERROR,
+				"%s: read_chunk %p exceeded boundary %p (write_chunk), "
+				"possible buffer overrun or malformed read_chunk list",
+				__func__, cbc->read_chunk, read_chunk_end);
+			status = false;
+			break;
+		}
+
+		/* Safety limit to prevent infinite loops from corrupted data */
+		if (read_chunk_count >= MAX_READ_CHUNKS) {
+			__warnx(TIRPC_DEBUG_FLAG_ERROR,
+				"%s: exceeded maximum read_chunks limit %u, "
+				"possible infinite loop from malformed read_chunk list",
+				__func__, MAX_READ_CHUNKS);
+			status = false;
+			break;
+		}
+
+		read_chunk_count++;
 		l = ntohl(rl(cbc->read_chunk)->target.length);
 
 		__warnx(TIRPC_DEBUG_FLAG_XDR,
-			"%s() offset %u length %u",
-			__func__, offset, l);
+			"%s() offset %u length %u read_chunk_count %u",
+			__func__, offset, l, read_chunk_count);
 
 		if (!read_chunk_uv) {
 			read_chunk_uv = IOQ_(xdr_rdma_ioq_uv_fetch(&cbc->dataq,
@@ -1803,8 +1834,20 @@ xdr_rdma_svc_recv(struct rpc_rdma_cbc *cbc, u_int32_t xid)
 		pthread_mutex_unlock(&cbc->freeq.ioq_uv.uvqh.qmutex);
 		pthread_mutex_unlock(&cbc->recvq.ioq_uv.uvqh.qmutex);
 
-		cbc->read_chunk = (char *)cbc->read_chunk
-						+ sizeof(struct xdr_read_list);
+		/* Advance to next read_chunk entry, but validate bounds first */
+		void *next_read_chunk = (char *)cbc->read_chunk
+					+ sizeof(struct xdr_read_list);
+
+		if ((char *)next_read_chunk > (char *)read_chunk_end) {
+			__warnx(TIRPC_DEBUG_FLAG_ERROR,
+				"%s: next read_chunk %p would exceed boundary %p, "
+				"stopping read_chunk processing",
+				__func__, next_read_chunk, read_chunk_end);
+			status = false;
+			break;
+		}
+
+		cbc->read_chunk = next_read_chunk;
 
 		/* Move offset by length */
 		offset = offset + l;

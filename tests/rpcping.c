@@ -160,7 +160,7 @@ worker(void *arg)
 {
 	struct state *s = arg;
 	struct clnt_req *cc;
-	int i;
+	int i, rc = 0;
 
 	pthread_cond_init(&s->s_cond, NULL);
 	pthread_mutex_init(&s->s_mutex, NULL);
@@ -176,6 +176,7 @@ worker(void *arg)
 			rpc_perror(&cc->cc_error, "clnt_req_setup failed");
 			s->count = i;
 			clnt_req_release(cc);
+			rc = -1;
 			break;
 		}
 		cc->cc_refreshes = 1;
@@ -186,15 +187,17 @@ worker(void *arg)
 			rpc_perror(&cc->cc_error, "CLNT_CALL_BACK failed");
 			s->count = i;
 			clnt_req_release(cc);
+			rc = -1;
 			break;
 		}
 	}
 
-	if (s->proto != RDMA) {
+	if (!rc) {
 		pthread_mutex_lock(&s->s_mutex);
 		pthread_cond_wait(&s->s_cond, &s->s_mutex);
 		pthread_mutex_unlock(&s->s_mutex);
 	}
+
 	clock_gettime(CLOCK_MONOTONIC, &s->stopping);
 
 	if (atomic_dec_uint32_t(&rpcping_threads) > 0) {
