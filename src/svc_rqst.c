@@ -1047,9 +1047,9 @@ svc_rqst_evchan_write(SVCXPRT *xprt, struct xdr_ioq *xioq, bool has_blocked)
 		return (ENOENT);
 	}
 
+#if defined(TIRPC_EPOLL)
 	rec->ev_u.epoll.xioq_send = xioq;
 
-#if defined(TIRPC_EPOLL)
 	if (sr_rec->ev_type == SVC_EVENT_EPOLL) {
 		/* For send we need to dup the xprt fd */
 		if (xprt->xp_fd_send == -1) {
