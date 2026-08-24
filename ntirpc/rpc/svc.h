@@ -677,9 +677,6 @@ static inline void svc_destroy_it(SVCXPRT *xprt,
 	if ((atomic_fetch_uint16_t(&xprt->xp_flags) & SVC_XPRT_FLAG_CLOSE)
 	    && xprt->xp_fd != RPC_ANYFD) {
 		/*  need to tell the client about TLS Connection closure */
-#ifdef USE_TLS
-		svc_tls_close(xprt);
-#endif
 		(void)shutdown(xprt->xp_fd, SHUT_RDWR);
 		if (xprt->xp_fd_send != RPC_ANYFD)
 			(void)shutdown(xprt->xp_fd_send, SHUT_RDWR);
