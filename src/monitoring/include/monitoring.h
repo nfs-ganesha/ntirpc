@@ -78,16 +78,19 @@ typedef struct histogram_buckets {
 
 /* C wrapper for prometheus::Counter<int64_t> pointer */
 typedef struct counter_metric_handle {
+	void *family;
 	void *metric;
 } counter_metric_handle_t;
 
 /* C wrapper for prometheus::Gauge<int64_t> pointer */
 typedef struct gauge_metric_handle {
+	void *family;
 	void *metric;
 } gauge_metric_handle_t;
 
 /* C wrapper for prometheus::Histogram<int64_t> pointer */
 typedef struct histogram_metric_handle {
+	void *family;
 	void *metric;
 } histogram_metric_handle_t;
 
@@ -124,14 +127,24 @@ gauge_metric_handle_t monitoring__register_gauge(const char *name,
 						 uint16_t num_labels);
 
 /* Registers and initializes a new static histogram metric. */
-histogram_metric_handle_t
-monitoring__register_histogram(const char *name, metric_metadata_t metadata,
-			       const metric_label_t *labels,
-			       uint16_t num_labels,
-			       histogram_buckets_t buckets);
+histogram_metric_handle_t monitoring__register_histogram(
+	const char *name, metric_metadata_t metadata,
+	const metric_label_t *labels, uint16_t num_labels,
+	histogram_buckets_t buckets);
 
 /* Increments counter metric by value. */
 void monitoring__counter_inc(counter_metric_handle_t, int64_t val);
+
+/* Get the value of counter */
+uint64_t monitoring__counter_get(counter_metric_handle_t handle);
+
+/* Update if any change in increment value */
+void monitoring__counter_set(counter_metric_handle_t handle, uint64_t value);
+
+/* Remove the metric if not needed */
+void monitoring__counter_remove(counter_metric_handle_t handle);
+void monitoring__gauge_remove(gauge_metric_handle_t handle);
+void monitoring__histogram_remove(histogram_metric_handle_t handle);
 
 /* Increments gauge metric by value. */
 void monitoring__gauge_inc(gauge_metric_handle_t, int64_t val);
@@ -199,9 +212,31 @@ static inline histogram_metric_handle_t monitoring__register_histogram(
 	return dummy_ret;
 }
 
-static inline void
-monitoring__counter_inc(counter_metric_handle_t UNUSED(handle),
-			int64_t UNUSED(value))
+static inline void monitoring__counter_inc(
+	counter_metric_handle_t UNUSED(handle), int64_t UNUSED(value))
+{
+}
+
+static inline uint64_t
+monitoring__counter_get(counter_metric_handle_t UNUSED(handle))
+{
+}
+
+static inline void monitoring__counter_set(
+	counter_metric_handle_t UNUSED(handle), uint64_t UNUSED(value))
+{
+}
+
+static void monitoring__counter_remove(counter_metric_handle_t UNUSED(handle))
+{
+}
+
+static void monitoring__gauge_remove(gauge_metric_handle_t UNUSED(handle))
+{
+}
+
+static void
+monitoring__histogram_remove(histogram_metric_handle_t UNUSED(handle))
 {
 }
 
@@ -220,9 +255,8 @@ static inline void monitoring__gauge_set(gauge_metric_handle_t UNUSED(handle),
 {
 }
 
-static inline void
-monitoring__histogram_observe(histogram_metric_handle_t UNUSED(handle),
-			      int64_t UNUSED(value))
+static inline void monitoring__histogram_observe(
+	histogram_metric_handle_t UNUSED(handle), int64_t UNUSED(value))
 {
 }
 

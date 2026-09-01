@@ -46,6 +46,10 @@ using HistogramInt = prometheus::Histogram<int64_t>;
 using HistogramDouble = prometheus::Histogram<double>;
 using LabelsMap = std::map<const std::string, const std::string>;
 
+using CounterFamily = prometheus::CustomFamily<CounterInt>;
+using GaugeFamily = prometheus::CustomFamily<GaugeInt>;
+using HistogramFamily = prometheus::CustomFamily<HistogramInt>;
+using Histogramdoublefamily = prometheus::CustomFamily<HistogramDouble>;
 static prometheus::Registry registry;
 
 /**
@@ -75,15 +79,23 @@ static const LabelsMap get_labels(const metric_label_t *labels,
 	return labels_map;
 }
 
-template <typename X, typename Y> static X convert_to_handle(Y *metric)
+template <typename X, typename Y, typename Z>
+static X convert_to_handle(Y *family, Z *metric)
 {
-	void *const ptr = static_cast<void *>(metric);
-	return { ptr };
+	void *const family_ptr = static_cast<void *>(family);
+	void *const metric_ptr = static_cast<void *>(metric);
+	return { family_ptr, metric_ptr };
 }
 
-template <typename X, typename Y> static X *convert_from_handle(Y handle)
+template <typename X, typename Y> static X *convert_metric_from_handle(Y handle)
 {
 	void *const ptr = handle.metric;
+	return static_cast<X *>(ptr);
+}
+
+template <typename X, typename Y> static X *convert_family_from_handle(Y handle)
+{
+	void *const ptr = handle.family;
 	return static_cast<X *>(ptr);
 }
 
@@ -115,12 +127,13 @@ counter_metric_handle_t
 monitoring__register_counter(const char *name, metric_metadata_t metadata,
 			     const metric_label_t *labels, uint16_t num_labels)
 {
-	auto &counter = prometheus::Builder<CounterInt>()
-				.Name(name)
-				.Help(get_description(metadata))
-				.Register(registry)
-				.Add(get_labels(labels, num_labels));
-	return convert_to_handle<counter_metric_handle_t>(&counter);
+	auto &family = prometheus::Builder<CounterInt>()
+			       .Name(name)
+			       .Help(get_description(metadata))
+			       .Register(registry);
+	auto &counter = family.Add(get_labels(labels, num_labels));
+
+	return convert_to_handle<counter_metric_handle_t>(&family, &counter);
 }
 
 gauge_metric_handle_t monitoring__register_gauge(const char *name,
@@ -128,12 +141,13 @@ gauge_metric_handle_t monitoring__register_gauge(const char *name,
 						 const metric_label_t *labels,
 						 uint16_t num_labels)
 {
-	auto &gauge = prometheus::Builder<GaugeInt>()
-			      .Name(name)
-			      .Help(get_description(metadata))
-			      .Register(registry)
-			      .Add(get_labels(labels, num_labels));
-	return convert_to_handle<gauge_metric_handle_t>(&gauge);
+	auto &family = prometheus::Builder<GaugeInt>()
+			       .Name(name)
+			       .Help(get_description(metadata))
+			       .Register(registry);
+	auto &gauge = family.Add(get_labels(labels, num_labels));
+
+	return convert_to_handle<gauge_metric_handle_t>(&family, &gauge);
 }
 
 histogram_metric_handle_t
@@ -141,41 +155,82 @@ monitoring__register_histogram(const char *name, metric_metadata_t metadata,
 			       const metric_label_t *labels,
 			       uint16_t num_labels, histogram_buckets_t buckets)
 {
-	const auto &buckets_vector = HistogramInt::BucketBoundaries(
-		buckets.buckets, buckets.buckets + buckets.count);
+	const auto &buckets_vector =
+		HistogramInt::BucketBoundaries(buckets.buckets,
+					       buckets.buckets + buckets.count);
+	auto &family = prometheus::Builder<HistogramInt>()
+			       .Name(name)
+			       .Help(get_description(metadata))
+			       .Register(registry);
 	auto &histogram =
-		prometheus::Builder<HistogramInt>()
-			.Name(name)
-			.Help(get_description(metadata))
-			.Register(registry)
-			.Add(get_labels(labels, num_labels), buckets_vector);
-	return convert_to_handle<histogram_metric_handle_t>(&histogram);
+		family.Add(get_labels(labels, num_labels), buckets_vector);
+
+	return convert_to_handle<histogram_metric_handle_t>(&family,
+							    &histogram);
 }
 
 void monitoring__counter_inc(counter_metric_handle_t handle, int64_t value)
 {
-	convert_from_handle<CounterInt>(handle)->Increment(value);
+	convert_metric_from_handle<CounterInt>(handle)->Increment(value);
+}
+
+uint64_t monitoring__counter_get(counter_metric_handle_t handle)
+{
+	return convert_metric_from_handle<CounterInt>(handle)->Get();
+}
+
+void monitoring__counter_set(counter_metric_handle_t handle, uint64_t value)
+{
+	uint64_t old_value = monitoring__counter_get(handle);
+	uint64_t new_value_to_inc = (value > old_value) ? (value - old_value)
+							: 0;
+	convert_metric_from_handle<CounterInt>(handle)->Increment(
+		new_value_to_inc);
+}
+
+void monitoring__counter_remove(counter_metric_handle_t handle)
+{
+	auto *family = convert_family_from_handle<CounterFamily>(handle);
+	auto *counter = convert_metric_from_handle<CounterInt>(handle);
+
+	family->Remove(counter);
+}
+
+void monitoring__gauge_remove(gauge_metric_handle_t handle)
+{
+	auto *family = convert_family_from_handle<GaugeFamily>(handle);
+	auto *gauge = convert_metric_from_handle<GaugeInt>(handle);
+
+	family->Remove(gauge);
+}
+
+void monitoring__histogram_remove(histogram_metric_handle_t handle)
+{
+	auto *family = convert_family_from_handle<HistogramFamily>(handle);
+	auto *histogram = convert_metric_from_handle<HistogramInt>(handle);
+
+	family->Remove(histogram);
 }
 
 void monitoring__gauge_inc(gauge_metric_handle_t handle, int64_t value)
 {
-	convert_from_handle<GaugeInt>(handle)->Increment(value);
+	convert_metric_from_handle<GaugeInt>(handle)->Increment(value);
 }
 
 void monitoring__gauge_dec(gauge_metric_handle_t handle, int64_t value)
 {
-	convert_from_handle<GaugeInt>(handle)->Decrement(value);
+	convert_metric_from_handle<GaugeInt>(handle)->Decrement(value);
 }
 
 void monitoring__gauge_set(gauge_metric_handle_t handle, int64_t value)
 {
-	convert_from_handle<GaugeInt>(handle)->Set(value);
+	convert_metric_from_handle<GaugeInt>(handle)->Set(value);
 }
 
 void monitoring__histogram_observe(histogram_metric_handle_t handle,
 				   int64_t value)
 {
-	convert_from_handle<HistogramInt>(handle)->Observe(value);
+	convert_metric_from_handle<HistogramInt>(handle)->Observe(value);
 }
 
 prometheus_registry_handle_t monitoring__get_registry_handle(void)
