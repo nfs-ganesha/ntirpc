@@ -763,6 +763,9 @@ xdr_ioq_setup(struct xdr_ioq *xioq)
 	xdrs->x_flags = XDR_FLAG_VIO;
 
 	xioq->id = atomic_inc_uint64_t(&next_id);
+	xioq->zc_frag_header = 0;
+	xioq->zc_cookie_lo = 0;
+	xioq->zc_outstanding = 0;
 }
 
 struct xdr_ioq *

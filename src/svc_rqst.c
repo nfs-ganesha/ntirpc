@@ -26,6 +26,7 @@
 #include "config.h"
 
 #include <sys/types.h>
+#include <sys/socket.h>
 #include <sys/poll.h>
 #include <stdint.h>
 #include <err.h>
@@ -96,6 +97,11 @@ static_assert(sizeof(union svc_epoll_data) == sizeof(union epoll_data),
 		"incorrect size for svc_epoll_data");
 
 #define SVC_NO_XPRT_UNIQUE_ID	0
+/* Tag send-side epoll registrations so EPOLLERR-only can rearm the right
+ * oneshot (recv uses xp_fd, send uses xp_fd_send; both store xp_fd in
+ * user data for lookup). xp_unique_id must stay in the low 31 bits.
+ */
+#define SVC_EPOLL_SEND_FLAG	0x80000000u
 
 static uint32_t round_robin;
 /*static*/ uint32_t wakeups;
@@ -788,10 +794,17 @@ svc_rqst_rearm_events_locked(SVCXPRT *xprt, uint16_t ev_flags)
 		}
 
 		if (ev_flags & SVC_XPRT_FLAG_ADDED_SEND) {
+			union svc_epoll_data send_data = {
+				.data.fd = rec->xprt.xp_fd,
+				.data.unique_id = rec->xprt.xp_unique_id |
+						 SVC_EPOLL_SEND_FLAG
+			};
+
 			ev = &rec->ev_u.epoll.event_send;
 
 			/* wait for write events, edge triggered, oneshot */
 			ev->events = EPOLLONESHOT | EPOLLOUT | EPOLLET;
+			ev->data.u64 = send_data.serialized_data;
 
 			/* rearm in epoll vector */
 			code = epoll_ctl(sr_rec->ev_u.epoll.epoll_fd,
@@ -845,9 +858,13 @@ svc_rqst_hook_events(struct rpc_dplx_rec *rec, struct svc_rqst_rec *sr_rec,
 		     uint16_t ev_flags)
 {
 	int code = EINVAL;
-	const union svc_epoll_data ev_data = {
+	const union svc_epoll_data ev_data_recv = {
 			.data.fd = rec->xprt.xp_fd,
 			.data.unique_id = rec->xprt.xp_unique_id};
+	const union svc_epoll_data ev_data_send = {
+			.data.fd = rec->xprt.xp_fd,
+			.data.unique_id = rec->xprt.xp_unique_id |
+					 SVC_EPOLL_SEND_FLAG};
 
 	XPRT_AUTO_TRACEPOINT(&rec->xprt, hook, TRACE_DEBUG,
 		"Hook. ev_flags: {}", ev_flags);
@@ -884,7 +901,7 @@ svc_rqst_hook_events(struct rpc_dplx_rec *rec, struct svc_rqst_rec *sr_rec,
 			ev = &rec->ev_u.epoll.event_recv;
 
 			/* set up epoll user data */
-			ev->data.u64 = ev_data.serialized_data;
+			ev->data.u64 = ev_data_recv.serialized_data;
 
 			/* wait for read events, level triggered, oneshot */
 			ev->events = EPOLLONESHOT | EPOLLIN;
@@ -924,7 +941,7 @@ svc_rqst_hook_events(struct rpc_dplx_rec *rec, struct svc_rqst_rec *sr_rec,
 			ev = &rec->ev_u.epoll.event_send;
 
 			/* set up epoll user data.  Lookup needs the primary FD */
-			ev->data.u64 = ev_data.serialized_data;
+			ev->data.u64 = ev_data_send.serialized_data;
 
 			/* wait for write events, edge triggered, oneshot */
 			ev->events = EPOLLONESHOT | EPOLLOUT | EPOLLET;
@@ -1242,6 +1259,9 @@ static void clear_requests(struct rpc_dplx_rec *rec) {
 	for(int i = 0; i < release_count; i++) {
 		SVC_RELEASE(&rec->xprt, SVC_RELEASE_FLAG_NONE);
 	}
+
+	/* Also drop any replies still waiting on MSG_ZEROCOPY completion. */
+	svc_ioq_zc_release_all(&rec->xprt);
 }
 
 /*
@@ -1536,7 +1556,8 @@ svc_rqst_epoll_event(struct svc_rqst_rec *sr_rec, struct epoll_event *ev)
 	}
 	/* At this point, we have a ref on the xprt, and know it's valid */
 	/* verify that indeed this is the xprt as of the event. */
-	if (ev_data.data.unique_id != xprt->xp_unique_id) {
+	if ((ev_data.data.unique_id & ~SVC_EPOLL_SEND_FLAG) !=
+	    xprt->xp_unique_id) {
 		NTIRPC_AUTO_TRACEPOINT(xprt, unique_id_mismatch, TRACE_INFO,
 				"xprt for fd = {} found with unique_id = {}, but event unique_id = {}",
 				ev_data.data.fd, xprt->xp_unique_id,
@@ -1553,10 +1574,11 @@ svc_rqst_epoll_event(struct svc_rqst_rec *sr_rec, struct epoll_event *ev)
 	rec = REC_XPRT(xprt);
 
 	__warnx(TIRPC_DEBUG_FLAG_SVC_RQST,
-		"%s: event %p %08x%s%s rpc_dplx_rec %p (sr_rec %p)",
+		"%s: event %p %08x%s%s%s rpc_dplx_rec %p (sr_rec %p)",
 		__func__, ev, ev->events,
 		ev->events & EPOLLIN ? " RECV" : "",
 		ev->events & EPOLLOUT ? " SEND" : "",
+		ev->events & EPOLLERR ? " ERR" : "",
 		rec, sr_rec);
 
 #if USE_TLS
@@ -1572,6 +1594,51 @@ tls_dpr:
 		ev_flag = SVC_XPRT_FLAG_ADDED_SEND;
 		ioq = rec->ev_u.epoll.xioq_send;
 		fun = svc_rqst_xprt_task_send;
+	} else if (ev->events & EPOLLERR) {
+		/*
+		 * ERR alone (typical MSG_ZEROCOPY completion). ONESHOT
+		 * already disarmed this registration — rearm the same side
+		 * or recv/send stays hung forever. Lone EPOLLHUP is left to
+		 * the unhandled path (connection is going away).
+		 */
+		const bool is_send =
+			(ev_data.data.unique_id & SVC_EPOLL_SEND_FLAG) != 0;
+		uint16_t rearm_flag = is_send ? SVC_XPRT_FLAG_ADDED_SEND
+					      : SVC_XPRT_FLAG_ADDED_RECV;
+		uint16_t xp_flags;
+
+		if (ev->events & EPOLLHUP) {
+			SVC_RELEASE(&rec->xprt, SVC_RELEASE_FLAG_NONE);
+			return NULL;
+		}
+
+		/*
+		 * MSG_ZEROCOPY completion: DO NOT call svc_ioq_zc_drain() here
+		 * on the epoll thread. drain calls recvmsg(MSG_ERRQUEUE) which
+		 * acquires lock_sock_nested() on the TCP socket — the same
+		 * lock tcp_sendmsg holds on the worker thread. That cross-
+		 * thread contention measured +1.25% CPU in flamegraph L3
+		 * (lock_sock_nested 1.96%→3.21%, __lock_sock spin +1.51%).
+		 *
+		 * The drain is deferred to svc_ioq_write() on the worker
+		 * thread, which already serialises all sends for this xprt
+		 * under IOQ_WRITING. The TAILQ_EMPTY(&rec->zcq) guard there
+		 * is the trigger. No extra flag needed.
+		 */
+
+		xp_flags = atomic_postclear_uint16_t_bits(&rec->xprt.xp_flags,
+							  rearm_flag);
+		if ((xp_flags & rearm_flag)
+		    && !(xp_flags & SVC_XPRT_FLAG_DESTROYED)) {
+			if (unlikely(svc_rqst_rearm_events(&rec->xprt,
+							   rearm_flag))) {
+				__warnx(TIRPC_DEBUG_FLAG_ERROR,
+					"%s: %p fd %d failed rearm after EPOLLERR",
+					__func__, &rec->xprt, rec->xprt.xp_fd);
+			}
+		}
+		SVC_RELEASE(&rec->xprt, SVC_RELEASE_FLAG_NONE);
+		return NULL;
 	} else {
 		XPRT_UNIQUE_AUTO_TRACEPOINT(&rec->xprt, epoll_event, TRACE_INFO,
 			"Unhandled epoll event. ev_flag: {}", ev->events);
