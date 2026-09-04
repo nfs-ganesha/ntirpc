@@ -220,6 +220,7 @@ static inline void monitoring__counter_inc(
 static inline uint64_t
 monitoring__counter_get(counter_metric_handle_t UNUSED(handle))
 {
+	return 0;
 }
 
 static inline void monitoring__counter_set(
@@ -227,16 +228,17 @@ static inline void monitoring__counter_set(
 {
 }
 
-static void monitoring__counter_remove(counter_metric_handle_t UNUSED(handle))
+static inline void
+monitoring__counter_remove(counter_metric_handle_t UNUSED(handle))
 {
 }
 
-static void monitoring__gauge_remove(gauge_metric_handle_t UNUSED(handle))
+static inline void monitoring__gauge_remove(gauge_metric_handle_t UNUSED(handle))
 {
 }
 
-static void
-monitoring__histogram_remove(histogram_metric_handle_t UNUSED(handle))
+static void inline monitoring__histogram_remove(
+	histogram_metric_handle_t UNUSED(handle))
 {
 }
 
