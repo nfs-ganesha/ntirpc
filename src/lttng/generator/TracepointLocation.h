@@ -33,12 +33,20 @@
 namespace trace_generator {
 class TracepointLocation {
 public:
+  static std::string normalizePath(std::string path) {
+    while (path.rfind("./", 0) == 0) {
+      path = path.substr(2);
+    }
+    return path;
+  }
+
   explicit TracepointLocation(const clang::FullSourceLoc &location)
-      : filePath_(location.getFileEntry()->getName()),
+      : filePath_(
+            normalizePath(location.getFileEntry()->tryGetRealPathName().str())),
         line_(location.getLineNumber()) {}
 
   explicit TracepointLocation(const std::string &filePath, unsigned int line)
-      : filePath_(filePath), line_(line) {}
+      : filePath_(normalizePath(filePath)), line_(line) {}
 
   TracepointLocation(const TracepointLocation &location)
       : TracepointLocation(location.filePath_, location.line_) {}
