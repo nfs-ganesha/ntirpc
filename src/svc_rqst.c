@@ -1429,13 +1429,22 @@ svc_rqst_clean_func(SVCXPRT *xprt, void *arg)
 	if (xprt->xp_ops == NULL)
 		return (false);
 
-	if (xprt->xp_flags & (SVC_XPRT_FLAG_DESTROYED | SVC_XPRT_FLAG_UREG))
+	if (xprt->xp_flags & SVC_XPRT_FLAG_UREG)
 		return (false);
 
 	/* Make sure recv.ts is initialized */
 	if (REC_XPRT(xprt)->recv.ts.tv_sec &&
 	    ((acc->ts.tv_sec - REC_XPRT(xprt)->recv.ts.tv_sec) < acc->timeout))
 		return (false);
+
+	/* If another thread is destroying the xprt,
+	 * return true to indicate the caller that the xprt is being disposed,
+	 * but don't count it as cleaned since we didn't initate this destruction.
+	 * Note: there is still a small window between this check and
+	 * SVC_DESTROY() where another thread could start destroying this xprt.
+	 */
+	if (xprt->xp_flags & SVC_XPRT_FLAG_DESTROYING)
+		return (true);
 
 	SVC_DESTROY(xprt);
 	acc->cleaned++;
