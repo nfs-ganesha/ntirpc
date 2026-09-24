@@ -646,8 +646,11 @@ xdr_rdma_buf_pool_destroy_locked(struct poolq_head *ioqh,
 		if (0 == atomic_fetch_uint64_t(&io_buf->buf_count)) {
 			RDMAXPRT *rdma_xprt = (RDMAXPRT *)io_buf->ctx;
 			assert(io_buf->mr);
-			assert(!xdr_rdma_dereg_mr(rdma_xprt, io_buf->mr,
-			    io_buf->buffer_aligned, io_buf->buffer_total));
+			if (xdr_rdma_dereg_mr(rdma_xprt, io_buf->mr,
+			    io_buf->buffer_aligned, io_buf->buffer_total))
+				__warnx(TIRPC_DEBUG_FLAG_ERROR,
+				    "%s() dereg_mr failed xprt %p io_buf %p",
+				    __func__, rdma_xprt, io_buf);
 			io_buf->mr = NULL;
 
 			__warnx(TIRPC_DEBUG_FLAG_XDR, "%s() Free xprt %p mr "
