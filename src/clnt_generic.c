@@ -687,6 +687,10 @@ clnt_req_process_reply(SVCXPRT *xprt, struct svc_req *req)
 
 	_seterr_reply(&req->rq_msg, &(cc->cc_error));
 	if (cc->cc_error.re_status == RPC_SUCCESS) {
+		/* Validate the verifier decoded from this reply, not the empty
+		 * verifier installed when the client request was created.
+		 */
+		cc->cc_verf = req->rq_msg.RPCM_ack.ar_verf;
 		if (!AUTH_VALIDATE(cc->cc_auth, &(cc->cc_verf))) {
 			cc->cc_error.re_status = RPC_AUTHERROR;
 			cc->cc_error.re_why = AUTH_INVALIDRESP;
