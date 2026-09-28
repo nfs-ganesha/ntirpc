@@ -4,8 +4,8 @@ prov2:event2: { format = ( "main | float: {}, double: {}, long: {}, ulong: {}, l
 prov1:event1: { format = ( "enum: {}, int: {}, struct pointer: {}, result: {}" : container = 0 ), arg_1 = ( "TEST_VAL1" : container = 0 ), arg_2 = 8, strct_ptr = 0x444, arg_4 = 9 }
 prov2:event_arrays: { format = ( "variable len string: {}, variable len int array: {}, terminated string: {}" : container = 0 ), _arg_1_length = 11, arg_1 = "var_len_str", _arg_2_length = 4, arg_2 = [ = 20, = -21, = 22, = -23 ], arg_3 = "null terminated str" }
 prov2:event_arrays2: { format = ( "variable len uint array: {}, byte array: {}" : container = 0 ), _arg_1_length = 4, arg_1 = [ = 30, = 31, = 32, = 33 ], _arg_2_length = 3, arg_2 = [ = 0x1, = 0x2, = 0x3 ] }
-prov1:generated_event_de90f30: { format = ( "main | Test event {}" : container = 0 ), arg_1 = 1 }
-prov1:generated_event_de90f31: { format = ( "main | Test event {}" : container = 0 ), arg_1 = 1 }
+prov1:generated_event_b13c5f0: { format = ( "main | Test event {}" : container = 0 ), arg_1 = 1 }
+prov1:generated_event_b13c5f1: { format = ( "main | Test event {}" : container = 0 ), arg_1 = 1 }
 prov3:event_in_func: { format = ( "funcWithTracepoint | This is a tracepoint inside another function. {}" : container = 0 ), num = 10 }
 prov1:inline_event: { format = ( "inlineFuncWithTrace | inline function" : container = 0 ) }
 prov1:event_enum: { format = ( "enum1: {}, enum2: {}" : container = 0 ), e = ( "TEST_VAL1" : container = 0 ), arg_2 = ( "TEST_VAL2" : container = 1 ) }
