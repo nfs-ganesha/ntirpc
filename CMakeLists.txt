@@ -16,7 +16,7 @@ project(NTIRPC C CXX)
 # version numbers
 set(NTIRPC_MAJOR_VERSION 15)
 # This is .0 for a release, .N for a stable branch, blank for development
-set(NTIRPC_MINOR_VERSION .5)
+set(NTIRPC_MINOR_VERSION .7)
 # -something for dev releases
 set(NTIRPC_VERSION_EXTRA )
 set(VERSION_COMMENT
