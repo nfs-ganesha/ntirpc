@@ -35,7 +35,7 @@ if __name__ == "__main__":
 
     event = msg.event
 
-    time = datetime.datetime.utcfromtimestamp(
+    time = datetime.datetime.fromtimestamp(
         msg.default_clock_snapshot.ns_from_origin / NS_PER_SEC
     )
     payload = event.payload_field
