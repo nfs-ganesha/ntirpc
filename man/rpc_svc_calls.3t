@@ -45,7 +45,7 @@ The
 argument
 is the request.
 Its
-.Tn struct rpc_msg
+.Vt struct rpc_msg
 .Fa ar_results
 fields must be set:
 .Fa proc
