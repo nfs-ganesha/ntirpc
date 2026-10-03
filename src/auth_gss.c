@@ -152,7 +152,7 @@ static const struct timespec to = { 3, 0 };
 AUTH *
 authgss_ncreate(CLIENT *clnt, gss_name_t name, struct rpc_gss_sec *sec)
 {
-	struct rpc_gss_data *gd = mem_alloc(sizeof(*gd));
+	struct rpc_gss_data *gd = mem_zalloc(sizeof(*gd));
 	AUTH *auth = &gd->gd_auth;
 	OM_uint32 maj_stat;
 	OM_uint32 min_stat = 0;
