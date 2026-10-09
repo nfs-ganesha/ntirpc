@@ -157,6 +157,7 @@ clnt_rdma_create(int fd, char *host, int port, int recv_sz, int send_sz,
 	}
 	RDMAXPRT *rdma_xprt = (RDMAXPRT *)xprt;
 	rdma_xprt->xa = use_xa;
+	rdma_xprt->client_credits = use_xa->credits;
 	struct rpc_dplx_rec *rec = REC_XPRT(xprt);
 	rec->recvsz = RDMA_DATA_CHUNK_SZ;
 	rec->sendsz = RDMA_DATA_CHUNK_SZ;
