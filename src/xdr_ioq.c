@@ -617,7 +617,18 @@ xdr_rdma_buf_pool_destroy_locked(struct poolq_head *ioqh,
 	/* pool_head may not be initialized, so check for qcount */
 	if (ioqh->qcount && !TAILQ_EMPTY(&ioqh->qh)) {
 
-		assert(io_buf->refs == 0);
+		/*
+		 * On a clean TIMEWAIT_EXIT teardown io_buf->refs is always 0
+		 * here.  When the transport is force-destroyed from a CQ error
+		 * callback (xdr_rdma_destroy_callback_recv → SVC_DESTROY) the
+		 * QP is already gone so no more completions will arrive for the
+		 * outstanding cbcs; it is safe to free the pool despite the
+		 * non-zero ref count.
+		 */
+		if (io_buf->refs != 0)
+			__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA | TIRPC_DEBUG_FLAG_ERROR,
+			    "%s() io_buf %p refs %u non-zero at destroy (force-destroy path)",
+			    __func__, io_buf, io_buf->refs);
 
 		struct poolq_entry *have = TAILQ_FIRST(&ioqh->qh);
 
@@ -643,12 +654,28 @@ xdr_rdma_buf_pool_destroy_locked(struct poolq_head *ioqh,
 			xdr_rdma_ioq_uv_destroy(IOQ_(have));
 			have = next;
 		}
-		if (0 == atomic_fetch_uint64_t(&io_buf->buf_count)) {
+		/*
+		 * Deregister the MR and free the DMA buffer when:
+		 *   buf_count == 0 : clean path — all uv entries were freed
+		 *                    by the pool walk above.
+		 *   io_buf->refs != 0 : force-destroy path — checked-out uv
+		 *                    entries kept buf_count > 0, but the QP is
+		 *                    already destroyed so the hardware cannot
+		 *                    DMA through the MR; deregister and free
+		 *                    now.  Those uv structs are freed later by
+		 *                    rdma_destroy_cbcs().
+		 * Guard with io_buf->mr != NULL: for IO_BUF_ALL io_bufs
+		 * rdma_destroy_io_bufs() calls us once per sub-pool (up to 4
+		 * times); the first call frees the MR, subsequent calls must
+		 * skip it.
+		 */
+		if (io_buf->mr &&
+			((0 == atomic_fetch_uint64_t(&io_buf->buf_count)) ||
+			 io_buf->refs != 0)) {
 			RDMAXPRT *rdma_xprt = (RDMAXPRT *)io_buf->ctx;
-			assert(io_buf->mr);
 			if (xdr_rdma_dereg_mr(rdma_xprt, io_buf->mr,
 			    io_buf->buffer_aligned, io_buf->buffer_total))
-				__warnx(TIRPC_DEBUG_FLAG_ERROR,
+				__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA | TIRPC_DEBUG_FLAG_ERROR,
 				    "%s() dereg_mr failed xprt %p io_buf %p",
 				    __func__, rdma_xprt, io_buf);
 			io_buf->mr = NULL;
