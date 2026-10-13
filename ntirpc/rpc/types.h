@@ -152,6 +152,7 @@ typedef int32_t rpc_inline_t;
 #define TIRPC_DEBUG_FLAG_RPC_MSG        0x2000000
 #define TIRPC_DEBUG_FLAG_RPC_RDMA       0x4000000
 #define TIRPC_DEBUG_FLAG_XDR_RDMA       0x8000000
+#define TIRPC_DEBUG_FLAG_ZEROCOPY_TX    0x10000000
 
 /* or symbolic names for default */
 #define TIRPC_DEBUG_FLAG_DEFAULT \

@@ -128,6 +128,14 @@ struct xdr_ioq {
 	uint32_t write_start; /* Position to start write at */
 	int frag_hdr_bytes_sent; /* Indicates a fragment header has been sent */
 	bool has_blocked;
+	/*
+	 * MSG_ZEROCOPY: kernel pins iov pages until errqueue completion.
+	 * zc_frag_header must not be stack memory when MSG_ZEROCOPY is set.
+	 * zc_outstanding counts successful ZC sendmsgs still awaiting notice.
+	 */
+	uint32_t zc_frag_header;
+	uint32_t zc_cookie_lo;
+	uint32_t zc_outstanding;
 
 #ifdef USE_RPC_RDMA
 	bool rdma_ioq;

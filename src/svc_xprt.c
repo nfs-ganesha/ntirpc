@@ -195,7 +195,15 @@ svc_xprt_lookup(int fd, svc_xprt_setup_t setup)
 			xprt->xp_flags = SVC_XPRT_FLAG_INITIAL;
 			xprt->xp_dispatch.remote_addr_set_cb = NULL;
 			xprt->xp_unique_id =
-					atomic_inc_uint32_t(&xprt_unique_id);
+					atomic_inc_uint32_t(&xprt_unique_id)
+					& ~0x80000000u;
+			/* 0 is reserved; keep high bit clear for send-side
+			 * epoll tagging (SVC_EPOLL_SEND_FLAG).
+			 */
+			if (unlikely(xprt->xp_unique_id == 0))
+				xprt->xp_unique_id =
+					atomic_inc_uint32_t(&xprt_unique_id)
+					& ~0x80000000u;
 			xprt->recv_rearm_allowed = true;
 			/* Get ref for caller */
 			SVC_REF(xprt, SVC_REF_FLAG_NONE);

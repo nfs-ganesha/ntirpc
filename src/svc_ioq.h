@@ -29,8 +29,19 @@
 #include <rpc/svc.h>
 #include <rpc/xdr_ioq.h>
 
+/* Named list type for ZC harvest — avoids anonymous-struct warnings. */
+TAILQ_HEAD(zc_harvest_list, poolq_entry);
+typedef struct zc_harvest_list zc_harvest_list_t;
+
 void svc_ioq_write(SVCXPRT *);
 void svc_ioq_write_now(SVCXPRT *, struct xdr_ioq *);
 void svc_ioq_write_submit(SVCXPRT *, struct xdr_ioq *);
+/* Non-blocking MSG_ZEROCOPY errqueue drain; safe from epoll/recv/send paths */
+void svc_ioq_zc_drain(SVCXPRT *);
+/* Split drain: collect completions (before postclear), release after. */
+int  svc_ioq_zc_drain_collect(SVCXPRT *, zc_harvest_list_t *);
+void svc_ioq_zc_drain_release(SVCXPRT *, zc_harvest_list_t *, int);
+/* Drop any xioqs still waiting for ZC completion (xprt teardown) */
+void svc_ioq_zc_release_all(SVCXPRT *);
 
 #endif				/* SVC_IOQ_H */
