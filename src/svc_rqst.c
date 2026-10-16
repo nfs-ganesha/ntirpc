@@ -198,6 +198,19 @@ void svc_rqst_rec_destroy(struct svc_rqst_rec *sr_rec)
 		close(sr_rec->ev_u.epoll.epoll_fd);
 		sr_rec->ev_u.epoll.epoll_fd = -1;
 	}
+
+	if (sr_rec->ev_u.epoll.events != NULL) {
+		__warnx(TIRPC_DEBUG_FLAG_SVC_RQST,
+			"%s: sr_rec %p free epoll events %p",
+			__func__, sr_rec, sr_rec->ev_u.epoll.events);
+		mem_free(sr_rec->ev_u.epoll.events,
+			 sr_rec->ev_u.epoll.max_events *
+			 sizeof(struct epoll_event));
+		sr_rec->ev_u.epoll.events = NULL;
+		sr_rec->ev_u.epoll.max_events = 0;
+	}
+
+	sr_rec->ev_u.epoll.sv1_added = false;
 #endif
 }
 
@@ -501,9 +514,6 @@ svc_rqst_new_evchan(uint32_t *chan_id /* OUT */, void *u_data, uint32_t flags)
 			__warnx(TIRPC_DEBUG_FLAG_ERROR,
 				"%s: epoll_create failed (%d)", __func__,
 				errno);
-			mem_free(sr_rec->ev_u.epoll.events,
-				 sr_rec->ev_u.epoll.max_events *
-				 sizeof(struct epoll_event));
 			code = EINVAL;
 			goto fail;
 		}
@@ -1802,10 +1812,9 @@ static void svc_rqst_epoll_loop(struct work_pool_entry *wpe)
 			sr_rec, sr_rec->id_k, sr_rec->ev_refcnt,
 			sr_rec->ev_u.epoll.epoll_fd);
 
-		close(sr_rec->ev_u.epoll.epoll_fd);
-		mem_free(sr_rec->ev_u.epoll.events,
-			 sr_rec->ev_u.epoll.max_events *
-			 sizeof(struct epoll_event));
+		/* epoll_fd and events are closed/freed by
+		 * svc_rqst_rec_destroy() at final release.
+		 */
 	}
 
 	svc_complete_task(sr_rec, finished);

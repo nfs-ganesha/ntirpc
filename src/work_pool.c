@@ -300,6 +300,7 @@ work_pool_spawn(struct work_pool *pool)
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s() pthread_create failed (%d)\n",
 			__func__, rc);
+		mem_free(wpt, sizeof(*wpt));
 		return rc;
 	}
 
