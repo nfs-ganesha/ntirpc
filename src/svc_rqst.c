@@ -191,13 +191,20 @@ void svc_rqst_rec_destroy(struct svc_rqst_rec *sr_rec)
 	}
 
 #if defined(TIRPC_EPOLL)
-	if (sr_rec->ev_u.epoll.epoll_fd > 0) {
+	if (sr_rec->ev_u.epoll.epoll_fd >= 0) {
 		__warnx(TIRPC_DEBUG_FLAG_SVC_RQST,
 			"%s: sr_rec %p epoll_fd=%d close",
 			__func__, sr_rec, sr_rec->ev_u.epoll.epoll_fd);
 		close(sr_rec->ev_u.epoll.epoll_fd);
 		sr_rec->ev_u.epoll.epoll_fd = -1;
 	}
+	if (sr_rec->ev_u.epoll.events != NULL) {
+		mem_free(sr_rec->ev_u.epoll.events,
+			 sr_rec->ev_u.epoll.max_events *
+			 sizeof(struct epoll_event));
+		sr_rec->ev_u.epoll.events = NULL;
+	}
+	sr_rec->ev_u.epoll.sv1_added = false;
 #endif
 }
 
@@ -504,6 +511,7 @@ svc_rqst_new_evchan(uint32_t *chan_id /* OUT */, void *u_data, uint32_t flags)
 			mem_free(sr_rec->ev_u.epoll.events,
 				 sr_rec->ev_u.epoll.max_events *
 				 sizeof(struct epoll_event));
+			sr_rec->ev_u.epoll.events = NULL;
 			code = EINVAL;
 			goto fail;
 		}
@@ -1138,6 +1146,7 @@ svc_rqst_evchan_reg(uint32_t chan_id, SVCXPRT *xprt, uint32_t flags)
 		if (rec->ev_p == sr_rec) {
 			if (!(flags & RPC_DPLX_LOCKED))
 				rpc_dplx_rui(rec);
+			svc_rqst_release(sr_rec);
 			__warnx(TIRPC_DEBUG_FLAG_SVC_RQST,
 				"%s: %p already registered evchan %d",
 				__func__, xprt, chan_id);
@@ -1510,9 +1519,12 @@ svc_rqst_epoll_event(struct svc_rqst_rec *sr_rec, struct epoll_event *ev)
 			/* next 4 bytes indicates DPR fd */
 			read(sr_rec->sv[1], &tls_dpr_fd, sizeof(uint32_t));
 			xprt = svc_xprt_lookup(tls_dpr_fd, NULL);
-			if (xprt && svc_tls_datapending(xprt)) {
-				rec = REC_XPRT(xprt);
-				goto tls_dpr;
+			if (xprt) {
+				if (svc_tls_datapending(xprt)) {
+					rec = REC_XPRT(xprt);
+					goto tls_dpr;
+				}
+				SVC_RELEASE(xprt, SVC_RELEASE_FLAG_NONE);
 			}
 		}
 #else
@@ -1801,11 +1813,6 @@ static void svc_rqst_epoll_loop(struct work_pool_entry *wpe)
 			__func__,
 			sr_rec, sr_rec->id_k, sr_rec->ev_refcnt,
 			sr_rec->ev_u.epoll.epoll_fd);
-
-		close(sr_rec->ev_u.epoll.epoll_fd);
-		mem_free(sr_rec->ev_u.epoll.events,
-			 sr_rec->ev_u.epoll.max_events *
-			 sizeof(struct epoll_event));
 	}
 
 	svc_complete_task(sr_rec, finished);
