@@ -491,6 +491,8 @@ svc_vc_rendezvous(SVCXPRT *xprt)
 		close(fd);
 		return (XPRT_DIED);
 	}
+	svc_vc_override_ops(newxprt, xprt);
+
 	if (unlikely(!(newxprt->xp_flags & SVC_XPRT_FLAG_INITIAL))) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s: %p fd %d with xp_refcnt %" PRId32 ", failed (will set dead)",
@@ -500,8 +502,6 @@ svc_vc_rendezvous(SVCXPRT *xprt)
 		SVC_RELEASE(newxprt, SVC_RELEASE_FLAG_NONE);
 		return (XPRT_DIED);
 	}
-
-	svc_vc_override_ops(newxprt, xprt);
 
 	__rpc_address_setup(&newxprt->xp_remote);
 	memcpy(newxprt->xp_remote.nb.buf, &addr, len);
