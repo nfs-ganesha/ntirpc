@@ -1579,6 +1579,15 @@ svc_vc_reply(struct svc_req *req)
 	}
 	xdr_tail_update(xioq->xdrs);
 
+	/* Snapshot timing before async send; nfs_request may be freed soon */
+	if (req->rq_stime.tv_sec != 0 || req->rq_stage_t10_ns != 0) {
+		xioq->ioq_rq_stime = req->rq_stime;
+		xioq->ioq_reply_time = req->rq_reply_time;
+		xioq->ioq_stats_opcode = req->rq_stats_opcode;
+		xioq->ioq_stage_t10_ns = req->rq_stage_t10_ns;
+		xioq->ioq_stats_valid = true;
+	}
+
 	xioq->xdrs[0].x_lib[1] = (void *)req->rq_xprt;
 	svc_ioq_write_now(req->rq_xprt, xioq);
 	return (XPRT_IDLE);

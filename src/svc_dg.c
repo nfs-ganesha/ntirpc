@@ -471,6 +471,13 @@ svc_dg_reply(struct svc_req *req)
 		return (XPRT_DIED);
 	}
 
+	/* UDP send is synchronous: T4 / T11 here */
+	if ((req->rq_stime.tv_sec != 0 || req->rq_stage_t10_ns != 0) &&
+	    __svc_params->reply_done_cb)
+		__svc_params->reply_done_cb(&req->rq_stime, &req->rq_reply_time,
+					    req->rq_stats_opcode, 0,
+					    req->rq_stage_t10_ns);
+
 	return (XPRT_IDLE);
 }
 
