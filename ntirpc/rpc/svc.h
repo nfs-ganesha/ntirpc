@@ -946,6 +946,39 @@ svc_vc_ncreate(const int fd, const u_int sendsize, const u_int recvsize)
 	return (svc_vc_ncreatef(fd, sendsize, recvsize, SVC_CREATE_FLAG_CLOSE));
 }
 
+/**
+ * Enable header staging for upper-layer WRITE payload alloc.
+ * Large LAST_FRAG bodies beyond @p hdr_stage_max stay on the socket as
+ * sx_body_remain until xdr_ioq_fill_payload readvs them (including any
+ * trailing compound bytes after the WRITE opaque). Leftover after a failed
+ * decode is drained; a failed drain destroys the xprt. @p hdr_stage_max 0
+ * selects the default (256KiB).
+ *
+ * Enable at TCP accept (before the first recv). Turning it on mid-request
+ * after EPOLLIN was rearmed races a concurrent recv into body_remain and
+ * can hang a worker in drain.
+ */
+void svc_vc_set_payload_defer(SVCXPRT *xprt, bool enable, u_int hdr_stage_max);
+
+/** Bytes still deferred on the socket for the in-flight call (0 if none). */
+uint32_t svc_vc_body_remain(SVCXPRT *xprt);
+
+/**
+ * readv up to @p nbytes of deferred body into @p iov (starting at byte
+ * @p iov_off within the iovec). Decrements sx_body_remain.
+ * @return bytes read, or -1 on error.
+ */
+ssize_t svc_vc_readv_body(SVCXPRT *xprt, struct iovec *iov, int iovcnt,
+			  size_t iov_off, size_t nbytes);
+
+/**
+ * Recv any leftover sx_body_remain into a throwaway buffer (stream sync).
+ * @return true if the socket body was fully discarded (or none remained).
+ *         false if read failed — sx_body_remain is left unchanged so the
+ *         caller can destroy the xprt rather than desync the stream.
+ */
+bool svc_vc_drain_body_remain(SVCXPRT *xprt);
+
 extern SVCXPRT *svc_dg_ncreatef(const int, const u_int, const u_int,
 				const uint32_t);
 /*

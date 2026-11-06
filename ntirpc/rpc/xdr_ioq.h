@@ -29,11 +29,29 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <time.h>
+#include <sys/uio.h>
 #include <misc/opr.h>
 #include <misc/queue.h>
 #include <rpc/pool_queue.h>
 #include <rpc/work_pool.h>
 #include <rpc/xdr.h>
+
+/**
+ * Upper-layer allocator for WRITE payload pages.
+ *
+ * @param ctx       xioq->payload_alloc_ctx
+ * @param data_len  exact payload byte count (no XDR pad)
+ * @param iov_out   set to an iovec array owned with @p cookie_out
+ * @param iovcnt_out
+ * @param cookie_out opaque (e.g. ceph_bufferlist *); released via @p release_out
+ * @param release_out called as release(cookie) if fill fails after alloc, or by
+ *                    the FSAL when it declines ownership
+ * @return true on success
+ */
+typedef bool (*xdr_payload_alloc_fn)(void *ctx, u_int data_len,
+				     struct iovec **iov_out, int *iovcnt_out,
+				     void **cookie_out,
+				     void (**release_out)(void *cookie));
 
 #ifdef USE_RPC_RDMA
 
@@ -159,6 +177,15 @@ struct xdr_ioq {
 #endif
 
 	struct rpc_dplx_rec *rec;
+
+	/**
+	 * Optional upper-layer WRITE payload allocator.
+	 * When set, xdr_ioq_fill_payload() asks this callback for pages,
+	 * copies any already-buffered body, and readvs deferred socket
+	 * remainder into those pages.
+	 */
+	xdr_payload_alloc_fn payload_alloc;
+	void *payload_alloc_ctx;
 };
 
 #define _IOQ(p) (opr_containerof((p), struct xdr_ioq, ioq_s))
@@ -186,6 +213,67 @@ extern struct poolq_entry *xdr_ioq_uv_fetch_nothing(struct xdr_ioq *xioq,
 						     u_int count,
 						     u_int ioq_flags);
 extern void xdr_ioq_uv_release(struct xdr_ioq_uv *uv);
+
+/**
+ * Opaque cookie for recv-buffer donate → claim_iov.
+ *
+ * After a successful @c xdr_ioq_donate_iovs, XDR_DESTROY will not free the
+ * underlying UV payload. Pass the cookie as @c priv to the claim deleter
+ * (@c xdr_ioq_donate_deleter). Cancel only if claim/submit never takes the
+ * buffers (before async write consumes them).
+ */
+struct xdr_donate_cookie;
+
+/**
+ * Mark ioq UVs that back @p iov as @c UIO_FLAG_DONATED (clear FREE).
+ *
+ * @return cookie for @c xdr_ioq_donate_deleter, or NULL if @p xdrs is not an
+ *         ioq stream or any iov cannot be mapped to a FREE UV (nothing changed).
+ */
+struct xdr_donate_cookie *xdr_ioq_donate_iovs(XDR *xdrs,
+					      const struct iovec *iov,
+					      int iovcnt);
+
+/** Restore FREE on donated UVs and free @p cookie. No-op if @p cookie is NULL. */
+void xdr_ioq_donate_cancel(struct xdr_donate_cookie *cookie);
+
+/**
+ * Thread-safe claim deleter: maps slice → UV allocation base and frees the
+ * base when the last donated slice of that allocation is released. Frees the
+ * cookie when every segment has been released.
+ */
+void xdr_ioq_donate_deleter(void *buf, size_t len, void *priv);
+
+/**
+ * Register upper-layer WRITE payload allocator on this decode stream.
+ * Typically set by Ganesha before COMPOUND/WRITE decode when the export
+ * wants allocate_own_write_buffer.
+ */
+void xdr_ioq_set_payload_alloc(XDR *xdrs, xdr_payload_alloc_fn fn, void *ctx);
+
+/** @return true if @c xdr_ioq_set_payload_alloc installed a callback. */
+bool xdr_ioq_has_payload_alloc(XDR *xdrs);
+
+/**
+ * Fill WRITE payload into upper-layer pages (Phase 1).
+ *
+ * Calls @c payload_alloc for @p data_len bytes, copies any body already
+ * buffered at @p start, then readvs any VC-deferred remainder from the
+ * socket. Appends @c UIO_FLAG_UPPER UVs for deferred bytes so SETPOS past
+ * RNDUP(@p data_len) succeeds, then pulls any trailing deferred bytes
+ * (compound ops after WRITE) into a FREE UV for continued decode. On
+ * success, @p iov_out / @p cookie_out / @p release_out are owned by the
+ * caller (do not free_buffer the iov bases). Call @p release_out(@p cookie_out)
+ * if ownership is not transferred to the FSAL write path.
+ *
+ * @return false if no callback, alloc failure, or I/O error — when a
+ *         payload_alloc callback is registered, callers must not fall back
+ *         to XDR_FILLBUFS (deferred body is not visible to IOVCOUNT).
+ */
+bool xdr_ioq_fill_payload(XDR *xdrs, u_int start, u_int data_len,
+			  struct iovec **iov_out, int *iovcnt_out,
+			  void **cookie_out,
+			  void (**release_out)(void *cookie));
 
 extern struct xdr_ioq *xdr_ioq_create(size_t min_bsize, size_t max_bsize,
 				      u_int uio_flags);

@@ -161,7 +161,11 @@ NTIRPC_${NTIRPC_VERSION_BASE} {
     svc_tp_ncreate;
     svc_unreg;
     svc_validate_xprt_list;
+    svc_vc_body_remain;
+    svc_vc_drain_body_remain;
     svc_vc_ncreatef;
+    svc_vc_readv_body;
+    svc_vc_set_payload_defer;
     svc_xprt_trace;
     svcauth_gss_acquire_cred;
     svcauth_gss_destroy;
@@ -198,6 +202,12 @@ NTIRPC_${NTIRPC_VERSION_BASE} {
     xdr_float;
     xdr_free_null_stream;
     xdr_int;
+    xdr_ioq_donate_cancel;
+    xdr_ioq_donate_deleter;
+    xdr_ioq_donate_iovs;
+    xdr_ioq_fill_payload;
+    xdr_ioq_has_payload_alloc;
+    xdr_ioq_set_payload_alloc;
     xdr_long;
     xdr_longlong_t;
     xdr_naccepted_reply;

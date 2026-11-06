@@ -145,6 +145,13 @@ typedef struct xdr_vio {
 #define UIO_FLAG_MORE		0x0008
 #define UIO_FLAG_REALLOC	0x0010
 #define UIO_FLAG_REFER		0x0020
+/** Payload ownership transferred (e.g. Ceph claim_iov); do not free_buffer */
+#define UIO_FLAG_DONATED	0x0040
+/**
+ * Upper-layer owned recv payload (e.g. Ceph alloc_buffers). Do not
+ * free_buffer; caller/FSAL releases via the fill_payload cookie.
+ */
+#define UIO_FLAG_UPPER		0x0080
 
 struct xdr_uio;
 typedef void (*xdr_uio_release)(struct xdr_uio *, u_int);

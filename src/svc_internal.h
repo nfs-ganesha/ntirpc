@@ -144,6 +144,16 @@ struct svc_dg_xprt {
 struct svc_vc_xprt {
 	struct rpc_dplx_rec sx_dr;	/* SVCXPRT indexed by fd */
 	int32_t sx_fbtbc;		/* fragment bytes to be consumed */
+	/**
+	 * Upper-layer WRITE: bytes of the current LAST_FRAG still on
+	 * the socket after header staging. Consumed by xdr_ioq_fill_payload
+	 * via readv, or drained after svc_request if unused.
+	 */
+	uint32_t sx_body_remain;
+	/** Cap for staging UV when payload defer is enabled (0 = default). */
+	uint32_t sx_hdr_stage_max;
+	/** When true, stage only hdr_stage_max of a large LAST_FRAG. */
+	bool sx_payload_defer;
 };
 #define VC_DR(p) (opr_containerof((p), struct svc_vc_xprt, sx_dr))
 

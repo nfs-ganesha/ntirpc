@@ -102,6 +102,9 @@ static void svc_vc_override_ops(SVCXPRT *, SVCXPRT *);
 
 #define LAST_FRAG ((u_int32_t)(1 << 31))
 
+/* Max wait for deferred body readv (ms). Avoids mount hang on raced drain. */
+#define SVC_VC_BODY_POLL_MS 30000
+
 /*
  * Usage:
  * xprt = svc_vc_ncreate(sock, send_buf_size, recv_buf_size);
@@ -1370,8 +1373,30 @@ again:
 			return SVC_STAT(xprt);
 		}
 
-		/* one buffer per fragment */
-		uv = xdr_ioq_uv_create(xd->sx_fbtbc, flags);
+		/*
+		 * Upper-layer WRITE: for a large LAST_FRAG, stage only
+		 * hdr_stage_max into a FREE UV and leave the rest on the socket
+		 * as sx_body_remain for xdr_ioq_fill_payload to readv.
+		 */
+		{
+			int32_t frag = xd->sx_fbtbc;
+			int32_t alloc_sz = frag;
+			u_int stage = xd->sx_hdr_stage_max ?
+				xd->sx_hdr_stage_max : (256u * 1024u);
+
+			if (xd->sx_payload_defer &&
+			    !(flags & UIO_FLAG_MORE) &&
+			    frag > (int32_t)stage) {
+				xd->sx_body_remain = (uint32_t)(frag - stage);
+				alloc_sz = (int32_t)stage;
+				xd->sx_fbtbc = alloc_sz;
+				__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
+					"%s: %p defer body %u after staging %d",
+					__func__, xprt, xd->sx_body_remain,
+					alloc_sz);
+			}
+			uv = xdr_ioq_uv_create((size_t)alloc_sz, flags);
+		}
 		(xioq->ioq_uv.uvqh.qcount)++;
 		TAILQ_INSERT_TAIL(&xioq->ioq_uv.uvqh.qh, &uv->uvq, q);
 	} else {
@@ -1461,7 +1486,7 @@ again:
 		return SVC_STAT(xprt);
 	}
 
-	/* finished a request */
+	/* finished a request (staging UV full; body may still be deferred) */
 	(rec->ioq.ioq_uv.uvqh.qcount)--;
 	TAILQ_REMOVE(&rec->ioq.ioq_uv.uvqh.qh, &xioq->ioq_s, q);
 	xdr_ioq_reset(xioq, 0);
@@ -1471,6 +1496,52 @@ again:
 			SVC_DESTROY(xprt);
 			return SVC_STAT(xprt);
 		}
+	}
+
+	/*
+	 * Expose xprt on the decode stream for fill_payload / body_remain.
+	 * When body bytes remain on the socket, do not rearm EPOLLIN until
+	 * after svc_request (fill_payload or drain) consumes them — otherwise
+	 * another recv could steal the payload.
+	 */
+	xioq->xdrs[0].x_lib[1] = (void *)xprt;
+
+	XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, calling_svc_request,
+		TRACE_DEBUG, "Calling svc_request");
+
+	if (xd->sx_body_remain) {
+		enum xprt_stat st = svc_request(xprt, xioq->xdrs);
+
+		/*
+		 * Decode may leave deferred body (fill failed) or pull it
+		 * into the stream (trailing compound ops). Any leftover must
+		 * be discarded before EPOLLIN is rearmed; a failed drain
+		 * means the TCP stream is desynced — destroy rather than
+		 * clear the counter and continue.
+		 */
+		if (xd->sx_body_remain) {
+			if (!svc_vc_drain_body_remain(xprt)) {
+				__warnx(TIRPC_DEBUG_FLAG_ERROR,
+					"%s: %p fd %d body drain failed (will set dead)",
+					__func__, xprt, xprt->xp_fd);
+				SVC_DESTROY(xprt);
+				return SVC_STAT(xprt);
+			}
+		}
+
+		if (unlikely(svc_rqst_rearm_events(
+				     xprt, SVC_XPRT_FLAG_ADDED_RECV))) {
+			__warnx(TIRPC_DEBUG_FLAG_ERROR,
+				"%s: %p fd %d svc_rqst_rearm_events failed (will set dead)",
+				__func__, xprt, xprt->xp_fd);
+			SVC_DESTROY(xprt);
+			return SVC_STAT(xprt);
+		}
+#if USE_TLS
+		if (svc_tls_datapending(xprt) == true)
+			svc_tls_send_event(xprt);
+#endif
+		return st;
 	}
 
 	if (unlikely(svc_rqst_rearm_events(xprt, SVC_XPRT_FLAG_ADDED_RECV))) {
@@ -1490,9 +1561,6 @@ again:
 	if (svc_tls_datapending(xprt) == true)
 		svc_tls_send_event(xprt);
 #endif
-
-	XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, calling_svc_request,
-		TRACE_DEBUG, "Calling svc_request");
 
 	return svc_request(xprt, xioq->xdrs);
 }
@@ -1671,4 +1739,170 @@ __rpc_get_local_uid(SVCXPRT *transp, uid_t *uid)
 		return (ret);
 	} else
 		return (-1);
+}
+
+void
+svc_vc_set_payload_defer(SVCXPRT *xprt, bool enable, u_int hdr_stage_max)
+{
+	struct svc_vc_xprt *xd;
+
+	if (xprt == NULL || xprt->xp_type != XPRT_TCP)
+		return;
+
+	xd = VC_DR(REC_XPRT(xprt));
+	xd->sx_payload_defer = enable;
+	xd->sx_hdr_stage_max = hdr_stage_max ? hdr_stage_max : (256u * 1024u);
+}
+
+uint32_t
+svc_vc_body_remain(SVCXPRT *xprt)
+{
+	if (xprt == NULL || xprt->xp_type != XPRT_TCP)
+		return 0;
+	return VC_DR(REC_XPRT(xprt))->sx_body_remain;
+}
+
+ssize_t
+svc_vc_readv_body(SVCXPRT *xprt, struct iovec *iov, int iovcnt,
+		  size_t iov_off, size_t nbytes)
+{
+	struct svc_vc_xprt *xd;
+	struct iovec tmp[IOV_MAX];
+	struct iovec *use = tmp;
+	int use_cnt = 0;
+	size_t off = iov_off;
+	size_t left = nbytes;
+	size_t total = 0;
+	int i;
+
+	if (xprt == NULL || xprt->xp_type != XPRT_TCP || iov == NULL ||
+	    iovcnt <= 0 || nbytes == 0)
+		return -1;
+
+	xd = VC_DR(REC_XPRT(xprt));
+	if (xd->sx_body_remain < nbytes)
+		return -1;
+
+	if (iovcnt > IOV_MAX)
+		return -1;
+
+	for (i = 0; i < iovcnt && left > 0; i++) {
+		size_t ilen = iov[i].iov_len;
+		char *base = iov[i].iov_base;
+
+		if (off >= ilen) {
+			off -= ilen;
+			continue;
+		}
+		{
+			size_t chunk = ilen - off;
+
+			if (chunk > left)
+				chunk = left;
+			use[use_cnt].iov_base = base + off;
+			use[use_cnt].iov_len = chunk;
+			use_cnt++;
+			left -= chunk;
+			off = 0;
+		}
+	}
+
+	if (use_cnt == 0 || left != 0)
+		return -1;
+
+	while (total < nbytes) {
+		ssize_t n;
+		int j;
+		size_t skip = total;
+		struct iovec cur[IOV_MAX];
+		int cur_cnt = 0;
+
+		for (j = 0; j < use_cnt; j++) {
+			if (skip >= use[j].iov_len) {
+				skip -= use[j].iov_len;
+				continue;
+			}
+			cur[cur_cnt].iov_base =
+				(char *)use[j].iov_base + skip;
+			cur[cur_cnt].iov_len = use[j].iov_len - skip;
+			cur_cnt++;
+			skip = 0;
+		}
+		if (cur_cnt == 0)
+			break;
+
+		n = readv(xprt->xp_fd, cur, cur_cnt);
+		if (n < 0) {
+			if (errno == EINTR)
+				continue;
+			if (errno == EAGAIN || errno == EWOULDBLOCK) {
+				/*
+				 * Wait for deferred body, but never forever:
+				 * a raced concurrent recv can steal the bytes
+				 * and leave us hung across a mount/client stall.
+				 */
+				struct pollfd pfd = {
+					.fd = xprt->xp_fd,
+					.events = POLLIN,
+				};
+				int pr = poll(&pfd, 1, SVC_VC_BODY_POLL_MS);
+
+				if (pr < 0) {
+					if (errno == EINTR)
+						continue;
+					return -1;
+				}
+				if (pr == 0) {
+					errno = ETIMEDOUT;
+					__warnx(TIRPC_DEBUG_FLAG_ERROR,
+						"%s: %p fd %d body poll timeout remain %u want %zu got %zu",
+						__func__, xprt, xprt->xp_fd,
+						xd->sx_body_remain, nbytes,
+						total);
+					return -1;
+				}
+				continue;
+			}
+			return -1;
+		}
+		if (n == 0)
+			return -1;
+		total += (size_t)n;
+	}
+
+	xd->sx_body_remain -= (uint32_t)total;
+	return (ssize_t)total;
+}
+
+bool
+svc_vc_drain_body_remain(SVCXPRT *xprt)
+{
+	struct svc_vc_xprt *xd;
+	char buf[65536];
+
+	if (xprt == NULL || xprt->xp_type != XPRT_TCP)
+		return true;
+
+	xd = VC_DR(REC_XPRT(xprt));
+	while (xd->sx_body_remain > 0) {
+		size_t chunk = xd->sx_body_remain;
+
+		if (chunk > sizeof(buf))
+			chunk = sizeof(buf);
+		{
+			struct iovec iov = { .iov_base = buf,
+					     .iov_len = chunk };
+			ssize_t n = svc_vc_readv_body(xprt, &iov, 1, 0, chunk);
+
+			if (n < 0) {
+				__warnx(TIRPC_DEBUG_FLAG_ERROR,
+					"%s: %p fd %d drain failed remain %u errno %d",
+					__func__, xprt, xprt->xp_fd,
+					xd->sx_body_remain, errno);
+				/* Leave remain set — caller must destroy. */
+				return false;
+			}
+		}
+	}
+	return true;
 }
