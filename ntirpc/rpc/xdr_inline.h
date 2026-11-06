@@ -939,8 +939,8 @@ xdr_string_decode(XDR *xdrs, char **cpp, u_int maxsize)
 		return (false);
 	}
 
-	nodesize = (uint32_t)(size + 1);
-	if (nodesize < (size + 1)) {
+	/* The terminator must fit before adding one in 32-bit arithmetic. */
+	if (size == UINT32_MAX) {
 		/* caller provided very large maxsize */
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s:%u ERROR overflow %" PRIu32,
@@ -948,6 +948,8 @@ xdr_string_decode(XDR *xdrs, char **cpp, u_int maxsize)
 			size);
 		return (false);
 	}
+
+	nodesize = size + 1;
 
 	/*
 	 * now deal with the actual bytes
