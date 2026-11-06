@@ -58,7 +58,10 @@ int svc_xprt_init(void);
 typedef void (*svc_xprt_setup_t) (SVCXPRT **);
 
 /*
- * returns with lock taken
+ * On non-NULL return, the rec duplex lock is held and one reference is
+ * taken for the caller; the caller must rpc_dplx_rui() and eventually
+ * SVC_RELEASE(). NULL (not found, max_connections exceeded, or DESTROYED)
+ * returns with no lock held and no reference taken.
  */
 SVCXPRT *svc_xprt_lookup(int, svc_xprt_setup_t);
 void svc_xprt_clear(SVCXPRT *);

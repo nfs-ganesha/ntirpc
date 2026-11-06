@@ -271,14 +271,13 @@ svc_xprt_lookup(int fd, svc_xprt_setup_t setup)
 		    SVC_XPRT_FLAG_INITIAL);
 	}
 
-	rpc_dplx_rui(rec);
-
 	if (!(xp_flags & SVC_XPRT_FLAG_DESTROYED)) {
 		/* do not return destroyed xprts */
 		return (xprt);
 	}
 
 	/* unlock before release permits releasing here after destroy */
+	rpc_dplx_rui(rec);
 	__warnx(TIRPC_DEBUG_FLAG_ERROR,
 		"%s: fd %d found DESTROYED xprt %p - calling RELEASE",
 		__func__, fd, xprt);

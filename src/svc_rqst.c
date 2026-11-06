@@ -1540,9 +1540,13 @@ svc_rqst_epoll_event(struct svc_rqst_rec *sr_rec, struct epoll_event *ev)
 			/* next 4 bytes indicates DPR fd */
 			read(sr_rec->sv[1], &tls_dpr_fd, sizeof(uint32_t));
 			xprt = svc_xprt_lookup(tls_dpr_fd, NULL);
-			if (xprt && svc_tls_datapending(xprt)) {
-				rec = REC_XPRT(xprt);
-				goto tls_dpr;
+			if (xprt) {
+				rpc_dplx_rui(REC_XPRT(xprt));
+				if (svc_tls_datapending(xprt)) {
+					rec = REC_XPRT(xprt);
+					goto tls_dpr;
+				}
+				SVC_RELEASE(xprt, SVC_RELEASE_FLAG_NONE);
 			}
 		}
 #else
@@ -1564,6 +1568,7 @@ svc_rqst_epoll_event(struct svc_rqst_rec *sr_rec, struct epoll_event *ev)
 			__func__, ev_data.data.fd);
 		return (NULL);
 	}
+	rpc_dplx_rui(REC_XPRT(xprt));
 	/* At this point, we have a ref on the xprt, and know it's valid */
 	/* verify that indeed this is the xprt as of the event. */
 	if ((ev_data.data.unique_id & ~SVC_EPOLL_SEND_FLAG) !=
