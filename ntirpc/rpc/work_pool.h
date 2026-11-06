@@ -88,6 +88,7 @@ struct work_pool_entry {
 int work_pool_init(struct work_pool *, const char *, struct work_pool_params *);
 bool work_pool_update(struct work_pool *, struct work_pool_params *);
 int work_pool_submit(struct work_pool *, struct work_pool_entry *);
+bool work_pool_cancel(struct work_pool *, struct work_pool_entry *);
 int work_pool_shutdown(struct work_pool *);
 
 #endif				/* WORK_POOL_H */

@@ -1211,7 +1211,9 @@ static void clear_requests(struct rpc_dplx_rec *rec) {
 		.tv_sec = 0,
 		.tv_nsec = 0,
 	};
+	int release_count = 0;
 
+again:
 	while (atomic_postset_uint16_t_bits(&rec->xprt.xp_flags,
 			SVC_XPRT_FLAG_IOQ_WRITING)
 	       & SVC_XPRT_FLAG_IOQ_WRITING) {
@@ -1220,16 +1222,34 @@ static void clear_requests(struct rpc_dplx_rec *rec) {
 			"xprt is being transmitted by another thread, can't clear");
 	}
 
-	int release_count = 0;
 	mutex_lock(&rec->writeq.qmutex);
 	have = TAILQ_FIRST(&rec->writeq.qh);
-	while(have != NULL) {
+	while (have != NULL) {
 		xioq = _IOQ(have);
-		while (atomic_postset_uint16_t_bits(&(xioq->ioq_s.qflags),
-						    IOQ_FLAG_WORKING)
-		       & IOQ_FLAG_WORKING) {
-			nanosleep(&ts, NULL);
-			/* We can't clear request when it is in work pool */
+		/*
+		 * postset returns previous flags. If WORKING was already set,
+		 * ioq_wpe is still on/in the svc work pool - drop locks and
+		 * wait (holding them deadlocks svc_ioq_write). If clear, we
+		 * claimed the entry and may free it.
+		 */
+		if (atomic_postset_uint16_t_bits(&xioq->ioq_s.qflags,
+						 IOQ_FLAG_WORKING) &
+		    IOQ_FLAG_WORKING) {
+			mutex_unlock(&rec->writeq.qmutex);
+			atomic_clear_uint16_t_bits(&rec->xprt.xp_flags,
+						   SVC_XPRT_FLAG_IOQ_WRITING);
+			/*
+			 * If ioq_wpe is still only queued, cancel it so we
+			 * do not wait forever when every worker is blocked
+			 * (e.g. nsm_mutex). If already running, wait.
+			 */
+			if (work_pool_cancel(&svc_work_pool, &xioq->ioq_wpe)) {
+				atomic_clear_uint16_t_bits(&xioq->ioq_s.qflags,
+							   IOQ_FLAG_WORKING);
+			} else {
+				nanosleep(&ts, NULL);
+			}
+			goto again;
 		}
 
 		release_count++;
@@ -1239,9 +1259,11 @@ static void clear_requests(struct rpc_dplx_rec *rec) {
 	}
 	mutex_unlock(&rec->writeq.qmutex);
 
-	for(int i = 0; i < release_count; i++) {
+	atomic_clear_uint16_t_bits(&rec->xprt.xp_flags,
+				   SVC_XPRT_FLAG_IOQ_WRITING);
+
+	for (int i = 0; i < release_count; i++)
 		SVC_RELEASE(&rec->xprt, SVC_RELEASE_FLAG_NONE);
-	}
 }
 
 /*
