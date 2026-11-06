@@ -85,6 +85,12 @@ struct svc_params {
 #if defined(_USE_NFS_RDMA) || defined(USE_RPC_RDMA)
 	u_int max_rdma_connections;
 #endif
+
+/* TCP zerocopy parameters (Linux MSG_ZEROCOPY) */
+#if defined(__linux__) && defined(MSG_ZEROCOPY) && defined(SO_ZEROCOPY)
+	bool tcp_zerocopy_enabled;	/* enable/disable TCP MSG_ZEROCOPY */
+	uint32_t tcp_zerocopy_min_bytes; /* minimum send size for ZC in bytes */
+#endif
 };
 
 enum xprt_stat svc_request(SVCXPRT *xprt, XDR *xdrs);
