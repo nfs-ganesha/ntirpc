@@ -136,11 +136,14 @@ __rpc_getbroadifs(int af, int proto, int socktype, broadlist_t *list)
 	hints.ai_protocol = proto;
 	hints.ai_socktype = socktype;
 
-	if (getaddrinfo(NULL, "sunrpc", &hints, &res) != 0)
+	if (getaddrinfo(NULL, "sunrpc", &hints, &res) != 0) {
+		freeifaddrs(ifp);
 		return 0;
+	}
 
 	for (ifap = ifp; ifap != NULL; ifap = ifap->ifa_next) {
-		if (ifap->ifa_addr->sa_family != af
+		if (ifap->ifa_addr == NULL
+		    || ifap->ifa_addr->sa_family != af
 		    || !(ifap->ifa_flags & IFF_UP))
 			continue;
 		bip = (struct broadif *)mem_alloc(sizeof(*bip));
@@ -164,6 +167,7 @@ __rpc_getbroadifs(int af, int proto, int socktype, broadlist_t *list)
 			sin6 = (struct sockaddr_in6 *)(void *)&bip->broadaddr;
 			if (inet_pton(af, RPCB_MULTICAST_ADDR, &sin6->sin6_addr)
 			    != 1) {
+				mem_free(bip, sizeof(*bip));
 				continue;
 			}
 			sin6->sin6_family = af;
@@ -314,6 +318,7 @@ rpc_broadcast_exp(rpcprog_t prog,	/* program number */
 
 		fd = socket(si.si_af, si.si_socktype, si.si_proto);
 		if (fd < 0) {
+			__rpc_freebroadifs(&fdlist[fdlistno].nal);
 			stat = RPC_CANTSEND;
 			continue;
 		}
@@ -381,6 +386,7 @@ rpc_broadcast_exp(rpcprog_t prog,	/* program number */
 	    ||
 	    (!xdr_rpcb_rmtcallargs
 	     (xdrs, (struct rpcb_rmtcallargs *)(void *)&barg))) {
+		xdr_destroy(xdrs);
 		stat = RPC_CANTENCODEARGS;
 		goto done_broad;
 	}
@@ -409,6 +415,7 @@ rpc_broadcast_exp(rpcprog_t prog,	/* program number */
 		xdrmem_create(xdrs, outbuf_pmap, udpbufsz, XDR_ENCODE);
 		if ((!xdr_callmsg(xdrs, &msg))
 		    || (!xdr_rmtcall_args(xdrs, &barg_pmap))) {
+			xdr_destroy(xdrs);
 			stat = RPC_CANTENCODEARGS;
 			goto done_broad;
 		}
@@ -618,7 +625,12 @@ rpc_broadcast_exp(rpcprog_t prog,	/* program number */
 						    (*eachresult) (resultsp, np,
 								   fdlist[i].
 								   nconf);
-						mem_free(np, 0);
+						if (np != NULL) {
+							if (np->buf != NULL)
+								mem_free(np->buf,
+									 np->maxlen);
+							mem_free(np, sizeof(*np));
+						}
 #ifdef PORTMAP
 					}
 #endif				/* PORTMAP */
