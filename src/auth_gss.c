@@ -188,9 +188,10 @@ authgss_ncreate(CLIENT *clnt, gss_name_t name, struct rpc_gss_sec *sec)
 	gd->gc.gc_proc = RPCSEC_GSS_INIT;
 	gd->gc.gc_svc = gd->sec.svc;
 
-	if (!authgss_refresh(auth, NULL))
+	if (!authgss_refresh(auth, NULL)) {
+		authgss_destroy(auth);
 		auth = NULL;
-	else
+	} else
 		auth_get(auth);	/* Reference for caller */
 
 	return (auth);
@@ -351,6 +352,9 @@ authgss_validate(AUTH *auth, struct opaque_auth *verf)
 		 * INIT phase packet after decode if the major
 		 * status is GSS_S_COMPLETE
 		 */
+		if (gd->gc_wire_verf.value != NULL)
+			mem_free(gd->gc_wire_verf.value,
+				 gd->gc_wire_verf.length);
 		gd->gc_wire_verf.value = mem_alloc(verf->oa_length);
 		memcpy(gd->gc_wire_verf.value, verf->oa_body, verf->oa_length);
 		gd->gc_wire_verf.length = verf->oa_length;
@@ -476,8 +480,15 @@ authgss_refresh(AUTH *auth, void *arg)
 
 			if (call_stat != RPC_SUCCESS
 			    || (gr.gr_major != GSS_S_COMPLETE
-				&& gr.gr_major != GSS_S_CONTINUE_NEEDED))
+				&& gr.gr_major != GSS_S_CONTINUE_NEEDED)) {
+				if (gr.gr_ctx.length != 0)
+					gss_release_buffer(&min_stat,
+							   &gr.gr_ctx);
+				if (gr.gr_token.length != 0)
+					gss_release_buffer(&min_stat,
+							   &gr.gr_token);
 				authgss_refresh_return(false);
+			}
 
 			if (gr.gr_ctx.length != 0) {
 				if (gd->gc.gc_ctx.value)
@@ -612,6 +623,7 @@ authgss_destroy(AUTH *auth)
 	if (gd->name != GSS_C_NO_NAME)
 		gss_release_name(&min_stat, &gd->name);
 
+	mutex_destroy(&gd->lock);
 	mem_free(gd, sizeof(*gd));
 }
 
