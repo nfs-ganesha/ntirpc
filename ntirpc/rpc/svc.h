@@ -627,7 +627,8 @@ static inline void svc_release_it(SVCXPRT *xprt, u_int flags,
 	}
 
 	/* Releasing last reference */
-	(*(xprt)->xp_ops->xp_destroy)(xprt, flags, tag, line);
+	if ((xprt)->xp_ops && (xprt)->xp_ops->xp_destroy)
+		(*(xprt)->xp_ops->xp_destroy)(xprt, flags, tag, line);
 }
 #define SVC_RELEASE2(xprt, flags, tag, line)				\
 	svc_release_it(xprt, flags, __func__, __LINE__)
@@ -671,13 +672,12 @@ static inline void svc_destroy_it(SVCXPRT *xprt,
 	};
 
 	/* unlink before dropping last ref */
-	if ((xprt)->xp_ops->xp_unlink)
+	if ((xprt)->xp_ops && (xprt)->xp_ops->xp_unlink)
 		(*(xprt)->xp_ops->xp_unlink)(xprt, flags, tag, line);
 
 	/* Remove references: of xprt from user-data; of user-data from xprt */
-	if ((xprt)->xp_ops->xp_unref_user_data) {
+	if ((xprt)->xp_ops && (xprt)->xp_ops->xp_unref_user_data)
 		(*(xprt)->xp_ops->xp_unref_user_data)(xprt);
-	}
 
 	/* Check if the connection was already set as dead or closed,
 	 * If set, let's cleanup and close the FDs, so that FIN-ACK
