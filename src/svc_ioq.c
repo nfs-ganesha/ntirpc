@@ -948,6 +948,22 @@ void svc_ioq_write(SVCXPRT *xprt)
 			nanosleep(&ts, NULL);
 		}
 		if (xprt->xp_flags & SVC_XPRT_FLAG_DESTROYED) {
+			struct poolq_entry *ent;
+
+			/*
+			 * We never took IOQ_WRITING, so we will not
+			 * reach the normal clear of IOQ_FLAG_WORKING.
+			 * Drop it here or clear_requests() can wait
+			 * forever.
+			 */
+			mutex_lock(&rec->writeq.qmutex);
+			TAILQ_FOREACH(ent, &rec->writeq.qh, q)
+			{
+				atomic_clear_uint16_t_bits(
+					&_IOQ(ent)->ioq_s.qflags,
+					IOQ_FLAG_WORKING);
+			}
+			mutex_unlock(&rec->writeq.qmutex);
 			XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, ioq_working, TRACE_INFO,
 				"xprt is being cleared, no need for transmit");
 			return;
@@ -993,6 +1009,8 @@ void svc_ioq_write(SVCXPRT *xprt)
 			destroy_xprt = true;
 			XPRT_AUTO_TRACEPOINT(xprt, destroy_xprt,
 				TRACE_INFO, "IO failed, destroy xprt.");
+			atomic_clear_uint16_t_bits(&xioq->ioq_s.qflags,
+						   IOQ_FLAG_WORKING);
 			mutex_unlock(&rec->writeq.qmutex);
 			break;
 		} else if (rc == EWOULDBLOCK){
@@ -1006,6 +1024,9 @@ void svc_ioq_write(SVCXPRT *xprt)
 				TRACE_DEBUG, "Write got EWOULDBLOCK.");
 
 			svc_rqst_evchan_write(xprt, xioq, has_blocked);
+
+			atomic_clear_uint16_t_bits(&xioq->ioq_s.qflags,
+						   IOQ_FLAG_WORKING);
 
 			XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, mutex_unlock,
 				TRACE_DEBUG, "Unlocking mutex");
@@ -1038,6 +1059,8 @@ void svc_ioq_write(SVCXPRT *xprt)
 
 		/* Dequeue the completed request */
 		TAILQ_REMOVE(&rec->writeq.qh, have, q);
+		atomic_clear_uint16_t_bits(&xioq->ioq_s.qflags,
+					   IOQ_FLAG_WORKING);
 
 		/* Fetch the next request */
 		have = TAILQ_FIRST(&rec->writeq.qh);
@@ -1141,8 +1164,9 @@ svc_ioq_write_callback(struct work_pool_entry *wpe)
 	svc_ioq_write(xioq->xdrs[0].x_lib[1]);
 }
 
-
-static bool add_ioq_to_write_queue(SVCXPRT *xprt, struct xdr_ioq *xioq) {
+static bool add_ioq_to_write_queue(SVCXPRT *xprt, struct xdr_ioq *xioq,
+				   bool defer_to_worker)
+{
 	struct rpc_dplx_rec *rec = REC_XPRT(xprt);
 	bool need_processing;
 
@@ -1159,6 +1183,15 @@ static bool add_ioq_to_write_queue(SVCXPRT *xprt, struct xdr_ioq *xioq) {
 	}
 	SVC_REF(xprt, SVC_REF_FLAG_NONE);
 	need_processing = TAILQ_FIRST(&rec->writeq.qh) == NULL;
+	/*
+	 * Mark before the xioq is visible on writeq. clear_requests() must
+	 * not free an entry whose ioq_wpe is only queued on svc_work_pool
+	 * and has not entered svc_ioq_write() yet.
+	 */
+	if (defer_to_worker && need_processing) {
+		xioq->ioq_wpe.fun = svc_ioq_write_callback;
+		atomic_set_uint16_t_bits(&xioq->ioq_s.qflags, IOQ_FLAG_WORKING);
+	}
 	/* always queue output requests on the duplex record's writeq */
 	TAILQ_INSERT_TAIL(&rec->writeq.qh, &(xioq->ioq_s), q);
 
@@ -1171,7 +1204,7 @@ static bool add_ioq_to_write_queue(SVCXPRT *xprt, struct xdr_ioq *xioq) {
 void
 svc_ioq_write_now(SVCXPRT *xprt, struct xdr_ioq *xioq)
 {
-	const bool need_processing = add_ioq_to_write_queue(xprt, xioq);
+	const bool need_processing = add_ioq_to_write_queue(xprt, xioq, false);
 	if (need_processing) {
 		svc_ioq_write(xprt);
 	}
@@ -1187,11 +1220,19 @@ svc_ioq_write_now(SVCXPRT *xprt, struct xdr_ioq *xioq)
 void
 svc_ioq_write_submit(SVCXPRT *xprt, struct xdr_ioq *xioq)
 {
-	const bool need_processing = add_ioq_to_write_queue(xprt, xioq);
+	const bool need_processing = add_ioq_to_write_queue(xprt, xioq, true);
 
-	if (need_processing) {
-		/* Schedule work to process output for this duplex record. */
-		xioq->ioq_wpe.fun = svc_ioq_write_callback;
-		work_pool_submit(&svc_work_pool, &xioq->ioq_wpe);
+	if (!need_processing)
+		return;
+
+	/* fun and IOQ_FLAG_WORKING were set under writeq.qmutex before insert.
+	 * If the pool is drained, run the write here instead of leaving the
+	 * mark set with no callback.
+	 */
+	if (unlikely(!svc_work_pool.params.thrd_max)) {
+		svc_ioq_write(xprt);
+		return;
 	}
+
+	work_pool_submit(&svc_work_pool, &xioq->ioq_wpe);
 }

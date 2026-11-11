@@ -337,6 +337,34 @@ work_pool_submit(struct work_pool *pool, struct work_pool_entry *work)
 	return rc;
 }
 
+/*
+ * Remove a still-queued entry before a worker has claimed it.
+ * Returns true if cancelled; false if already running / not queued
+ * (caller must wait for completion).
+ */
+bool work_pool_cancel(struct work_pool *pool, struct work_pool_entry *work)
+{
+	struct poolq_entry *have;
+	bool cancelled = false;
+
+	if (unlikely(!pool->params.thrd_max))
+		return false;
+
+	pthread_mutex_lock(&pool->pqh.qmutex);
+	TAILQ_FOREACH(have, &pool->pqh.qh, q)
+	{
+		if (have == &work->pqe) {
+			TAILQ_REMOVE(&pool->pqh.qh, have, q);
+			work->fun = NULL;
+			work->wpt = NULL;
+			cancelled = true;
+			break;
+		}
+	}
+	pthread_mutex_unlock(&pool->pqh.qmutex);
+	return cancelled;
+}
+
 int
 work_pool_shutdown(struct work_pool *pool)
 {
