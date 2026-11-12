@@ -724,11 +724,13 @@ svcerr_progvers(struct svc_req *req, rpcvers_t low_vers, rpcvers_t high_vers)
 bool
 svc_validate_xprt_list(SVCXPRT *xprt)
 {
-	bool code;
+	SVCXPRT *found = svc_xprt_lookup(xprt->xp_fd, NULL);
+	bool code = (found == xprt);
 
-	code = (xprt == svc_xprt_lookup(xprt->xp_fd, NULL));
-	if (code)
-		rpc_dplx_rui(REC_XPRT(xprt));
+	if (found) {
+		rpc_dplx_rui(REC_XPRT(found));
+		SVC_RELEASE(found, SVC_RELEASE_FLAG_NONE);
+	}
 
 	return (code);
 }
