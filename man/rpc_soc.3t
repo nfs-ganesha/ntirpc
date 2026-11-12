@@ -345,7 +345,7 @@ result will not get overwritten on each call.
 Print a message to standard error indicating why an
 .Tn RPC
 call failed;
-.Tn struct rpc_err
+.Vt struct rpc_err
 .Fa e
 is the error value.
 The message is prepended with string
@@ -398,7 +398,7 @@ The
 argument
 is the request.
 Its
-.Tn struct rpc_msg
+.Vt struct rpc_msg
 .Fa ar_results
 fields must be set:
 .Fa proc
