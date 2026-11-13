@@ -139,6 +139,7 @@ NTIRPC_${NTIRPC_VERSION_BASE} {
     svc_dg_ncreatef;
     svc_fd_ncreatef;
     svc_init;
+    svc_set_stage_timing;
     svc_ncreate;
     svc_raw_ncreate;
     svc_reg;

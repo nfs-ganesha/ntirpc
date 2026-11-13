@@ -153,6 +153,7 @@ svc_init(svc_init_params *params)
 		if (original.disconnect_cb != params->disconnect_cb ||
 		    original.alloc_cb != params->alloc_cb ||
 		    original.free_cb != params->free_cb ||
+		    original.reply_done_cb != params->reply_done_cb ||
 		    (original.flags & SVC_INIT_NO_UPDATE) !=
 			(params->flags & SVC_INIT_NO_UPDATE) ||
 		    original.gss_ctx_hash_partitions !=
@@ -171,7 +172,10 @@ svc_init(svc_init_params *params)
 		__svc_params->disconnect_cb = params->disconnect_cb;
 		__svc_params->alloc_cb = params->alloc_cb;
 		__svc_params->free_cb = params->free_cb;
+		__svc_params->reply_done_cb = params->reply_done_cb;
 	}
+
+	__svc_params->stage_timing = params->stage_timing;
 
 	__svc_params->max_connections =
 	    (params->max_connections) ? params->max_connections : FD_SETSIZE;
@@ -311,6 +315,11 @@ svc_init(svc_init_params *params)
 	}
 #endif
 	return true;
+}
+
+void svc_set_stage_timing(bool enable)
+{
+	__svc_params->stage_timing = enable;
 }
 
 /* ***************  SVCXPRT related stuff **************** */

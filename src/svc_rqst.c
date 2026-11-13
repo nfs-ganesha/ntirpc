@@ -49,6 +49,27 @@
 #include <misc/timespec.h>
 #include "clnt_internal.h"
 #include "svc_internal.h"
+
+/*
+ * Fine CLOCK_MONOTONIC for request-start / stage timing.
+ * Must match Ganesha now_mono() — do not use CLOCK_MONOTONIC_COARSE
+ * (CLOCK_MONOTONIC_FAST on Linux): mixing coarse start with fine end
+ * inflates FULLV4/e2e latency by up to ~1ms on short ops.
+ */
+static inline void
+svc_now_mono(struct timespec *ts)
+{
+	(void)clock_gettime(CLOCK_MONOTONIC, ts);
+}
+
+static inline uint64_t
+svc_stage_now_ns(void)
+{
+	struct timespec ts;
+
+	svc_now_mono(&ts);
+	return ((uint64_t)ts.tv_sec * 1000000000ULL) + (uint64_t)ts.tv_nsec;
+}
 #include "svc_xprt.h"
 #include <rpc/svc_auth.h>
 #include "svc_ioq.h"
@@ -1281,6 +1302,7 @@ again:
 
 		release_count++;
 		TAILQ_REMOVE(&rec->writeq.qh, have, q);
+		svc_ioq_reply_done(xioq, ECONNABORTED);
 		XDR_DESTROY(xioq->xdrs);
 		have = TAILQ_FIRST(&rec->writeq.qh);
 	}
@@ -1370,13 +1392,17 @@ svc_rqst_xprt_task_recv(struct work_pool_entry *wpe)
 
 	XPRT_AUTO_TRACEPOINT(&rec->xprt, task_recv, TRACE_DEBUG, "Hook");
 
+	if (__svc_params->stage_timing && ioq->stage_t02_ns == 0)
+		ioq->stage_t02_ns = svc_stage_now_ns();
+
 	/* atomic barrier (above) should protect following values */
 	if (rec->xprt.xp_refcnt > 1
 	    && !(rec->xprt.xp_flags & SVC_XPRT_FLAG_DESTROYED)) {
 		/* (idempotent) xp_flags and xp_refcnt are set atomic.
 		 * xp_refcnt need more than 1 (this task).
 		 */
-		(void)clock_gettime(CLOCK_MONOTONIC_FAST, &rec->recv.ts);
+		/* Fine mono: feeds rq_stime for e2e latency (see svc_now_mono). */
+		svc_now_mono(&rec->recv.ts);
 		(void)SVC_RECV(&rec->xprt);
 	}
 
@@ -1389,6 +1415,24 @@ enum xprt_stat svc_request(SVCXPRT *xprt, XDR *xdrs)
 	enum xprt_stat stat;
 	struct svc_req *req = __svc_params->alloc_cb(xprt, xdrs);
 	struct rpc_dplx_rec *rpc_dplx_rec = REC_XPRT(xprt);
+	struct xdr_ioq *ioq = &rpc_dplx_rec->ioq;
+
+	/*
+	 * Snapshot recv.ts before decode (fine CLOCK_MONOTONIC from task_recv).
+	 * recv.ts also tracks xprt idle activity (second-scale; fine clock OK).
+	 */
+	req->rq_stime = rpc_dplx_rec->recv.ts;
+	req->rq_stats_opcode = -1;
+
+	/* Copy early stage stamps onto the request (ioq reused after). */
+	if (__svc_params->stage_timing) {
+		req->rq_stage_t00_ns = ioq->stage_t00_ns;
+		req->rq_stage_t01_ns = ioq->stage_t01_ns;
+		req->rq_stage_t02_ns = ioq->stage_t02_ns;
+		ioq->stage_t00_ns = 0;
+		ioq->stage_t01_ns = 0;
+		ioq->stage_t02_ns = 0;
+	}
 
 	/* Track the request we are processing */
 	rpc_dplx_rec->svc_req = req;
@@ -1766,8 +1810,17 @@ svc_rqst_epoll_events(struct svc_rqst_rec *sr_rec, int n_events)
 		/* Queue up additional RECV or SEND events */
 		struct xdr_ioq *ioq = svc_rqst_epoll_event(sr_rec,
 					    &(sr_rec->ev_u.epoll.events[ix++]));
-		if (ioq)
+		if (ioq) {
+			if (__svc_params->stage_timing) {
+				uint64_t now_ns = svc_stage_now_ns();
+
+				if (ioq->stage_t00_ns == 0)
+					ioq->stage_t00_ns = now_ns;
+				if (ioq->stage_t01_ns == 0)
+					ioq->stage_t01_ns = now_ns;
+			}
 			work_pool_submit(&svc_work_pool, &ioq->ioq_wpe);
+		}
 	}
 
 	/* submit another task to handle events in order */
@@ -1840,6 +1893,8 @@ static void svc_rqst_epoll_loop(struct work_pool_entry *wpe)
 			break;
 		}
 		if (n_events > 0) {
+			uint64_t epoll_ready_ns = 0;
+
 			__warnx(TIRPC_DEBUG_FLAG_SVC_RQST |
 				TIRPC_DEBUG_FLAG_REFCNT,
 				"%s: sr_rec %p evchan %d ev_refcnt %" PRId32
@@ -1848,12 +1903,24 @@ static void svc_rqst_epoll_loop(struct work_pool_entry *wpe)
 				sr_rec, sr_rec->id_k, sr_rec->ev_refcnt,
 				sr_rec->ev_u.epoll.epoll_fd, n_events);
 
+			if (__svc_params->stage_timing)
+				epoll_ready_ns = svc_stage_now_ns();
+
 			atomic_add_uint32_t(&wakeups, n_events);
 			struct xdr_ioq *ioq;
 
 			ioq = svc_rqst_epoll_events(sr_rec, n_events);
 
 			if (ioq != NULL) {
+				if (__svc_params->stage_timing) {
+					if (ioq->stage_t00_ns == 0)
+						ioq->stage_t00_ns =
+							epoll_ready_ns;
+					/* First event runs inline — T01=T00 */
+					if (ioq->stage_t01_ns == 0)
+						ioq->stage_t01_ns =
+							epoll_ready_ns;
+				}
 				/* use this hot thread for the first event */
 				ioq->ioq_wpe.fun(&ioq->ioq_wpe);
 

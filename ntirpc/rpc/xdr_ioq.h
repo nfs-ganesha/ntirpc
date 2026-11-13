@@ -28,6 +28,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <time.h>
 #include <misc/opr.h>
 #include <misc/queue.h>
 #include <rpc/pool_queue.h>
@@ -136,6 +137,21 @@ struct xdr_ioq {
 	uint32_t zc_frag_header;
 	uint32_t zc_cookie_lo;
 	uint32_t zc_outstanding;
+
+	/*
+	 * Reply timing cookie copied from svc_req before async send.
+	 * Do not retain pointers to svc_req / nfs_request (freed earlier).
+	 */
+	struct timespec ioq_rq_stime;
+	struct timespec ioq_reply_time;
+	int32_t ioq_stats_opcode;
+	bool ioq_stats_valid;
+	/* Fine-grained IO stage stamps (ns); 0 = unset */
+	uint64_t stage_t00_ns;
+	uint64_t stage_t01_ns;
+	uint64_t stage_t02_ns;
+	/* Copied from svc_req at send for T11 (reply flush) delta */
+	uint64_t ioq_stage_t10_ns;
 
 #ifdef USE_RPC_RDMA
 	bool rdma_ioq;

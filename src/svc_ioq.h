@@ -43,5 +43,7 @@ int  svc_ioq_zc_drain_collect(SVCXPRT *, zc_harvest_list_t *);
 void svc_ioq_zc_drain_release(SVCXPRT *, zc_harvest_list_t *, int);
 /* Drop any xioqs still waiting for ZC completion (xprt teardown) */
 void svc_ioq_zc_release_all(SVCXPRT *);
+/* Fire reply_done_cb once for this xioq (clears ioq_stats_valid) */
+void svc_ioq_reply_done(struct xdr_ioq *xioq, int status);
 
 #endif				/* SVC_IOQ_H */

@@ -134,11 +134,24 @@ typedef enum xprt_stat (*svc_xprt_fun_t) (SVCXPRT *);
 typedef void (*svc_xprt_void_fun_t) (SVCXPRT *);
 typedef struct svc_req *(*svc_xprt_alloc_fun_t) (SVCXPRT *, XDR *);
 typedef void (*svc_xprt_free_fun_t) (struct svc_req *, enum xprt_stat);
+/*
+ * Called when a reply has been fully sent (or abandoned).
+ * @stime / @reply_time are monotonic stamps from the request (T0 / T3).
+ * @opcode is the upper-layer stats opcode (-1 if unset).
+ * @status is 0 on success, errno-style on failure/destroy.
+ */
+typedef void (*svc_reply_done_fun_t)(const struct timespec *stime,
+				     const struct timespec *reply_time,
+				     int opcode, int status,
+				     uint64_t stage_t10_ns);
 
 typedef struct svc_init_params {
 	svc_xprt_fun_t disconnect_cb;	/* no dynamic update */
 	svc_xprt_alloc_fun_t alloc_cb;	/* no dynamic update */
 	svc_xprt_free_fun_t free_cb;	/* no dynamic update */
+	svc_reply_done_fun_t reply_done_cb;	/* no dynamic update */
+	/** When true, stamp fine CLOCK_MONOTONIC stage times on ioq/svc_req */
+	bool stage_timing;		/* dynamic */
 
 	u_long flags;			/* no dynamic update */
 	u_int max_connections;		/* dynamnic, xprts */
@@ -443,6 +456,27 @@ struct svc_req {
 	/* blkin tracing */
 	struct blkin_trace bl_trace;
 #endif
+	/*
+	 * Fine CLOCK_MONOTONIC start for this request, copied from the
+	 * transport's recv.ts at svc_request() (set in task_recv before
+	 * SVC_RECV). Same clock as Ganesha now_mono() so FULLV4/e2e latency
+	 * is not inflated by COARSE/FAST resolution. Do not reuse recv.ts
+	 * across the request lifetime (it also tracks xprt idle/activity).
+	 */
+	struct timespec rq_stime;
+	/* Fine CLOCK_MONOTONIC when reply send begins (set by upper layer, T3) */
+	struct timespec rq_reply_time;
+	/* Terminal NFSv4 opcode for reply-done stats; -1 if unset */
+	int32_t rq_stats_opcode;
+	/*
+	 * Fine CLOCK_MONOTONIC stage stamps (ns since epoch of that clock)
+	 * filled when svc_init_params.stage_timing is set. 0 = unset.
+	 */
+	uint64_t rq_stage_t00_ns;
+	uint64_t rq_stage_t01_ns;
+	uint64_t rq_stage_t02_ns;
+	/* T10 at complete_request; copied to ioq for T11 at reply_done */
+	uint64_t rq_stage_t10_ns;
 	uint32_t rq_refcnt;
 };
 
@@ -455,6 +489,9 @@ struct svc_req {
 #define svc_getrpclocal(x) (&(x)->xp_local.ss)
 
 extern void svc_resume(struct svc_req *req);
+
+/** Enable/disable fine-grained IO stage stamps in ntirpc (runtime). */
+extern void svc_set_stage_timing(bool enable);
 
 extern void svc_rqst_qos_suspend_socket(struct svc_xprt *xprt);
 
