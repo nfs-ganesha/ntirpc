@@ -254,8 +254,8 @@ rpc_rdma_pd_put(RDMAXPRT *rdma_xprt)
 		return;
 	}
 
+	mutex_lock(&rpc_rdma_state.lock);
 	if (atomic_dec_uint32_t(&rdma_xprt->pd->pd_used) == 0) {
-		mutex_lock(&rpc_rdma_state.lock);
 		LIST_REMOVE(rdma_xprt->pd, pdl);
 		mutex_unlock(&rpc_rdma_state.lock);
 
@@ -271,6 +271,8 @@ rpc_rdma_pd_put(RDMAXPRT *rdma_xprt)
 			xdr_ioq_destroy_pool(&rdma_xprt->pd->srqh);
 		}
 		mem_free(rdma_xprt->pd, sizeof(*rdma_xprt->pd));
+	} else {
+		mutex_unlock(&rpc_rdma_state.lock);
 	}
 	rdma_xprt->pd = NULL;
 }
