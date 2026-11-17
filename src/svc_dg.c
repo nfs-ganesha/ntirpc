@@ -160,6 +160,7 @@ svc_dg_ncreatef(const int fd, const u_int sendsz, const u_int recvsz,
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s: fd %d could not get transport information",
 			__func__, fd);
+		SVC_RELEASE(xprt, SVC_RELEASE_FLAG_NONE);
 		return (NULL);
 	}
 	/*
@@ -174,6 +175,7 @@ svc_dg_ncreatef(const int fd, const u_int sendsz, const u_int recvsz,
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s: fd %d transport does not support data transfer",
 			__func__, fd);
+		SVC_RELEASE(xprt, SVC_RELEASE_FLAG_NONE);
 		return (NULL);
 	}
 
@@ -186,6 +188,7 @@ svc_dg_ncreatef(const int fd, const u_int sendsz, const u_int recvsz,
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s: fd %d getsockname failed (%d)",
 			 __func__, fd, rc);
+		SVC_RELEASE(xprt, SVC_RELEASE_FLAG_NONE);
 		return (NULL);
 	}
 
