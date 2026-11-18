@@ -538,18 +538,22 @@ svc_vc_rendezvous(SVCXPRT *xprt)
 	}
 
 #if defined(__linux__) && defined(SO_ZEROCOPY)
-	/* Required for MSG_ZEROCOPY in svc_ioq_flushv(). Completions are
-	 * drained asynchronously via EPOLLERR + MSG_ERRQUEUE (never poll).
-	 */
-	len = 1;
-	if (setsockopt(fd, SOL_SOCKET, SO_ZEROCOPY, &len, sizeof(len)) != 0) {
-		__warnx(TIRPC_DEBUG_FLAG_ZEROCOPY_TX,
-			"fd %d SO_ZEROCOPY failed (%d)", __func__, fd, errno);
-		REC_XPRT(newxprt)->zc_sock_ok = false;
-	} else {
-		REC_XPRT(newxprt)->zc_sock_ok = true;
-		__warnx(TIRPC_DEBUG_FLAG_ZEROCOPY_TX,
+	/* Only enable SO_ZEROCOPY when the feature is configured on. */
+	if (__svc_params->tcp_zerocopy_enabled) {
+		len = 1;
+		if (setsockopt(fd, SOL_SOCKET, SO_ZEROCOPY, &len,
+			       sizeof(len)) != 0) {
+			__warnx(TIRPC_DEBUG_FLAG_ZEROCOPY_TX,
+				"fd %d SO_ZEROCOPY failed (%d)", __func__, fd,
+				errno);
+			REC_XPRT(newxprt)->zc_sock_ok = false;
+		} else {
+			REC_XPRT(newxprt)->zc_sock_ok = true;
+			__warnx(TIRPC_DEBUG_FLAG_ZEROCOPY_TX,
 				"fd %d SO_ZEROCOPY enabled", fd);
+		}
+	} else {
+		REC_XPRT(newxprt)->zc_sock_ok = false;
 	}
 #endif
 
