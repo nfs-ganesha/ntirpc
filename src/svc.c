@@ -317,18 +317,17 @@ svc_init(svc_init_params *params)
 
 /*
  * This is used to set local and remote addresses in a way legacy
- * apps can deal with, at the same time setting up a corresponding
- * netbuf -- with no alloc/free needed.
+ * apps can deal with.
  */
 u_int
 __rpc_address_port(struct rpc_address *rpca)
 {
 	switch (rpca->ss.ss_family) {
 	case AF_INET:
-		return ntohs(((struct sockaddr_in *)rpca->nb.buf)->sin_port);
+		return ntohs(((struct sockaddr_in *)&rpca->ss)->sin_port);
 #ifdef INET6
 	case AF_INET6:
-		return ntohs(((struct sockaddr_in6 *)rpca->nb.buf)->sin6_port);
+		return ntohs(((struct sockaddr_in6 *)&rpca->ss)->sin6_port);
 #endif
 	case AF_LOCAL:
 #ifdef RPC_VSOCK
@@ -347,23 +346,26 @@ __rpc_address_set_length(struct rpc_address *rpca, socklen_t sl)
 {
 	switch (rpca->ss.ss_family) {
 	case AF_INET:
-		rpca->nb.len = sl ? sl : sizeof(struct sockaddr_in);
+		rpca->len = sl ? sl : sizeof(struct sockaddr_in);
 		break;
 #ifdef INET6
 	case AF_INET6:
-		rpca->nb.len = sl ? sl : sizeof(struct sockaddr_in6);
+		rpca->len = sl ? sl : sizeof(struct sockaddr_in6);
 		break;
 #endif
 	case AF_LOCAL:
-		rpca->nb.len = sl ? sl : sizeof(struct sockaddr);
+	{
+		struct sockaddr_un *un = (struct sockaddr_un *)&rpca->ss;
+		rpca->len = sl ? sl : SUN_LEN(un);
 		break;
+	}
 #ifdef RPC_VSOCK
 	case AF_VSOCK:
-		rpca->nb.len = sl ? sl : sizeof(struct sockaddr_vm);
+		rpca->len = sl ? sl : sizeof(struct sockaddr_vm);
 		break;
 #endif /* VSOCK */
 	default:
-		rpca->nb.len = sl ? sl : sizeof(struct sockaddr);
+		rpca->len = sl ? sl : sizeof(struct sockaddr);
 		rpca->ss.ss_family = AF_UNSPEC;
 		break;
 	}
@@ -434,15 +436,14 @@ rpcb_it:
 			__func__, (unsigned)prog, (unsigned)vers,
 			nconf->nc_netid);
 
-		if (!xprt->xp_local.nb.buf || xprt->xp_local.nb.len == 0) {
+		if (xprt->xp_local.len == 0) {
 			__warnx(TIRPC_DEBUG_FLAG_SVC | TIRPC_DEBUG_FLAG_WARN,
-				"%s: xp_local.nb is empty or invalid",
-				__func__);
+				"%s: xp_local is empty or invalid", __func__);
 		}
 
 		/*LINTED const castaway */
 		dummy = rpcb_set(prog, vers, (struct netconfig *)nconf,
-				 &((SVCXPRT *)xprt)->xp_local.nb);
+				 &((SVCXPRT *)xprt)->xp_local.ss);
 
 		__warnx(TIRPC_DEBUG_FLAG_SVC,
 			"%s: rpcb_set returned %s",

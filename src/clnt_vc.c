@@ -83,7 +83,6 @@ static struct clnt_ops *clnt_vc_ops(void);
 struct ct_data {
 	struct cx_data ct_cx;
 	struct sockaddr_storage ct_raddr;	/* remote addr */
-	int ct_rlen;
 };
 #define CT_DATA(p) (opr_containerof((p), struct ct_data, ct_cx))
 
@@ -184,7 +183,7 @@ clnt_rdma_create(int fd, char *host, int port, int recv_sz, int send_sz,
  */
 CLIENT *
 clnt_vc_ncreatef(const int fd,	/* open file descriptor */
-		 const struct netbuf *raddr,	/* servers address */
+		 const struct sockaddr_storage *raddr,	/* servers address */
 		 const rpcprog_t prog,	/* program number */
 		 const rpcvers_t vers,	/* version number */
 		 const u_int sendsz,	/* buffer send size */
@@ -210,16 +209,6 @@ clnt_vc_ncreatef(const int fd,	/* open file descriptor */
 		clnt->cl_error.re_status = RPC_UNKNOWNADDR;
 		return (clnt);
 	}
-	if (sizeof(struct sockaddr_storage) < raddr->len) {
-		__warnx(TIRPC_DEBUG_FLAG_ERROR,
-			"%s: fd %d called with invalid address length"
-			" (max %z < %u len)",
-			__func__, fd,
-			sizeof(struct sockaddr_storage),
-			raddr->len);
-		clnt->cl_error.re_status = RPC_UNKNOWNADDR;
-		return (clnt);
-	}
 
 	sigfillset(&newmask);
 	thr_sigsetmask(SIG_SETMASK, &newmask, &mask);
@@ -233,8 +222,7 @@ clnt_vc_ncreatef(const int fd,	/* open file descriptor */
 				goto err;
 			}
 			if (connect
-			    (fd, (struct sockaddr *)raddr->buf,
-			     raddr->len) < 0) {
+			    (fd, (struct sockaddr *)raddr, sizeof(*raddr)) < 0) {
 				clnt->cl_error.re_status = RPC_SYSTEMERROR;
 				clnt->cl_error.re_errno = errno;
 				goto err;
@@ -268,8 +256,7 @@ clnt_vc_ncreatef(const int fd,	/* open file descriptor */
 	}
 	ct->ct_cx.cx_rec = &xd->sx_dr;
 
-	memcpy(&ct->ct_raddr, raddr->buf, raddr->len);
-	ct->ct_rlen = raddr->len;
+	ct->ct_raddr = *raddr;
 
 	/*
 	 * initialize call message
@@ -331,7 +318,7 @@ clnt_vc_ncreate_svc(const SVCXPRT *xprt, const rpcprog_t prog,
 {
 	struct svc_vc_xprt *xd = VC_DR(REC_XPRT(xprt));
 
-	return clnt_vc_ncreatef(xprt->xp_fd, &xprt->xp_remote.nb, prog, vers,
+	return clnt_vc_ncreatef(xprt->xp_fd, &xprt->xp_remote.ss, prog, vers,
 				xd->sx_dr.sendsz, xd->sx_dr.recvsz,
 				flags | CLNT_CREATE_FLAG_SVCXPRT);
 }
@@ -417,7 +404,6 @@ clnt_vc_control(CLIENT *clnt, u_int request, void *info)
 	struct cx_data *cx = CX_DATA(clnt);
 	struct ct_data *ct = CT_DATA(cx);
 	struct rpc_dplx_rec *rec = cx->cx_rec;
-	struct netbuf *addr;
 	u_int32_t *uint32p;
 	bool rslt = true;
 
@@ -450,17 +436,14 @@ clnt_vc_control(CLIENT *clnt, u_int request, void *info)
 	switch (request) {
 	case CLGET_SERVER_ADDR:
 		/* Now obsolete. Only for backward compatibility */
-		(void)memcpy(info, &ct->ct_raddr, (size_t) ct->ct_rlen);
+		(void)memcpy(info, &ct->ct_raddr, sizeof(ct->ct_raddr));
 		break;
 	case CLGET_FD:
 		*(int *)info = rec->xprt.xp_fd;
 		break;
 	case CLGET_SVC_ADDR:
 		/* The caller should not free this memory area */
-		addr = (struct netbuf *)info;
-		addr->buf = &ct->ct_raddr;
-		addr->len = ct->ct_rlen;
-		addr->maxlen = sizeof(ct->ct_raddr);
+		ct->ct_raddr = *(struct sockaddr_storage *)info;
 		break;
 
 	case CLGET_XID:

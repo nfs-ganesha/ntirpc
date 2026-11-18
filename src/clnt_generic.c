@@ -248,7 +248,7 @@ clnt_tp_ncreate_timed(const char *hostname, rpcprog_t prog,
 		      rpcvers_t vers, const struct netconfig *nconf,
 		      const struct timeval *tp)
 {
-	struct netbuf *svcaddr;	/* servers address */
+	struct sockaddr_storage *svcaddr;
 	CLIENT *cl = NULL;	/* client handle */
 
 	if (nconf == NULL) {
@@ -262,18 +262,18 @@ clnt_tp_ncreate_timed(const char *hostname, rpcprog_t prog,
 	/*
 	 * Get the address of the server
 	 */
-	svcaddr =
-		__rpcb_findaddr_timed(prog, vers, (struct netconfig *)nconf,
-				      (char *)hostname, &cl,
-				      (struct timeval *)tp);
+	svcaddr = __rpcb_findaddr_timed(prog, vers, (struct netconfig *)nconf,
+					(char *)hostname, &cl,
+					(struct timeval *)tp);
 	if (svcaddr == NULL) {
 		/* appropriate error number is set by rpcbind libraries */
 		return (cl);
 	}
+
 	if (cl == NULL) {
 		/* __rpc_findaddr_timed failed? */
-		cl = clnt_tli_ncreate(RPC_ANYFD, nconf, NULL, svcaddr, prog,
-				      vers, 0, 0);
+		cl = clnt_tli_ncreate(RPC_ANYFD, nconf, NULL, svcaddr,
+				      prog, vers, 0, 0);
 	}
 	if (CLNT_SUCCESS(cl)) {
 		/* Reuse the CLIENT handle and change the appropriate fields */
@@ -290,7 +290,7 @@ clnt_tp_ncreate_timed(const char *hostname, rpcprog_t prog,
 					      prog, vers, 0, 0);
 		}
 	}
-	mem_free(svcaddr->buf, sizeof(*svcaddr->buf));
+
 	mem_free(svcaddr, sizeof(*svcaddr));
 	return (cl);
 }
@@ -305,7 +305,8 @@ clnt_tp_ncreate_timed(const char *hostname, rpcprog_t prog,
  */
 CLIENT *
 clnt_tli_ncreate_opt(int fd, const struct netconfig *nconf,
-		     struct netbuf *bindaddr, struct netbuf *svcaddr,
+		     struct sockaddr_storage *bindaddr,
+		     struct sockaddr_storage *svcaddr,
 		     rpcprog_t prog, rpcvers_t vers,
 		     u_int sendsz, u_int recvsz, int opt)
 {
@@ -339,11 +340,7 @@ clnt_tli_ncreate_opt(int fd, const struct netconfig *nconf,
 		if (bindaddr == NULL)
 			bindresvport(fd, NULL);
 		else {
-			struct sockaddr *addr;
-
-			addr = (struct sockaddr *)bindaddr->buf;
-
-			if (si.si_af != addr->sa_family) {
+			if (si.si_af != bindaddr->ss_family) {
 				__warnx(TIRPC_DEBUG_FLAG_ERROR,
 					"%s: %s address family mismatch",
 					__func__,
@@ -354,7 +351,7 @@ clnt_tli_ncreate_opt(int fd, const struct netconfig *nconf,
 				goto err1;
 			}
 
-			bindresvport(fd, (struct sockaddr_in *)addr);
+			bindresvport(fd, (struct sockaddr_in *)bindaddr);
 		}
 	} else {
 		if (!__rpc_fd2sockinfo(fd, &si))
@@ -369,7 +366,7 @@ clnt_tli_ncreate_opt(int fd, const struct netconfig *nconf,
 		}
 	}
 
-	if (si.si_af != ((struct sockaddr *)svcaddr->buf)->sa_family) {
+	if (si.si_af != svcaddr->ss_family) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR, "%s: %s",
 			__func__, clnt_sperrno(RPC_UNKNOWNHOST));
 		cl = clnt_raw_ncreate(prog, vers);

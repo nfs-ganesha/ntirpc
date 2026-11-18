@@ -249,7 +249,7 @@ The structure is defined in
 for compatibility as:
 .Bd -literal
 struct t_bind {
-    struct netbuf addr;	/* network address, see rpc(3) */
+    struct sockaddr_storage addr;	/* network address, see rpc(3) */
     unsigned int  qlen;	/* queue length (for listen(2)) */
 };
 .Ed

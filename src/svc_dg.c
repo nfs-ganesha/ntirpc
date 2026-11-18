@@ -178,7 +178,8 @@ svc_dg_ncreatef(const int fd, const u_int sendsz, const u_int recvsz,
 	}
 
 	__rpc_address_setup(&xprt->xp_local);
-	rc = getsockname(fd, xprt->xp_local.nb.buf, &xprt->xp_local.nb.len);
+	rc = getsockname(fd, (struct sockaddr *)&xprt->xp_local.ss,
+			 &xprt->xp_local.len);
 	if (rc < 0) {
 		atomic_clear_uint16_t_bits(&xprt->xp_flags,
 					   SVC_XPRT_FLAG_INITIALIZED);
@@ -239,7 +240,6 @@ svc_dg_rendezvous(SVCXPRT *xprt)
 	struct svc_dg_xprt *req_su = su_data(xprt);
 	struct svc_dg_xprt *su = svc_dg_xprt_zalloc(req_su->su_dr.maxrec);
 	SVCXPRT *newxprt = &su->su_dr.xprt;
-	struct sockaddr *sp = (struct sockaddr *)&newxprt->xp_remote.ss;
 	struct msghdr *mesgp;
 	struct timespec now;
 	struct iovec iov;
@@ -247,6 +247,7 @@ svc_dg_rendezvous(SVCXPRT *xprt)
 
 	newxprt->xp_fd = xprt->xp_fd;
 	newxprt->xp_flags = SVC_XPRT_FLAG_INITIAL | SVC_XPRT_FLAG_INITIALIZED;
+	newxprt->xp_local_port = svc_get_port(&xprt->xp_local.ss);
 
 	(void)clock_gettime(CLOCK_MONOTONIC_FAST, &now);
 	su->su_dr.call_xid = __RPC_GETXID(&now);
@@ -262,8 +263,8 @@ again:
 	memset(mesgp, 0, sizeof(*mesgp));
 	mesgp->msg_iov = &iov;
 	mesgp->msg_iovlen = 1;
-	mesgp->msg_name = sp;
-	sp->sa_family = (sa_family_t) 0xffff;
+	mesgp->msg_name = &newxprt->xp_remote.ss;
+	newxprt->xp_remote.ss.ss_family = AF_UNSPEC;
 	mesgp->msg_namelen = sizeof(struct sockaddr_storage);
 	mesgp->msg_control = su->su_cmsg;
 	mesgp->msg_controllen = sizeof(su->su_cmsg);
@@ -281,9 +282,9 @@ again:
 		return (XPRT_DIED);
 	}
 
-	if (sp->sa_family == (sa_family_t) 0xffff) {
+	if (newxprt->xp_remote.ss.ss_family == AF_UNSPEC) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
-			"%s: xprt(%p) newxprt(%p) fd %d Bad message sa_family is 0xffff",
+			"%s: xprt(%p) newxprt(%p) fd %d Bad message ss_family is AF_UNSPEC",
 			__func__, xprt, newxprt, newxprt->xp_fd);
 		svc_dg_xprt_free(su);
 		return SVC_STAT(xprt);
@@ -297,16 +298,16 @@ again:
 		return SVC_STAT(xprt);
 	}
 
+	newxprt->xp_remote.len = mesgp->msg_namelen;
+
 	__rpc_address_setup(&newxprt->xp_local);
-	__rpc_address_setup(&newxprt->xp_remote);
-	newxprt->xp_remote.nb.len = mesgp->msg_namelen;
 
 	/* Check whether there's an IP_PKTINFO or IP6_PKTINFO control message.
 	 * If yes, preserve it for svc_dg_reply; otherwise just zap any cmsgs */
 	if (!svc_dg_store_pktinfo(mesgp, newxprt)) {
 		mesgp->msg_control = NULL;
 		mesgp->msg_controllen = 0;
-		newxprt->xp_local.nb.len = 0;
+		newxprt->xp_local.len = 0;
 	}
 	XPRT_TRACE(newxprt, __func__, __func__, __LINE__);
 
@@ -411,7 +412,7 @@ svc_dg_reply(struct svc_req *req)
 	size_t slen;
         char msg_control[sizeof(struct cmsghdr) + sizeof(struct in6_pktinfo)] = {0};
 
-	if (!xprt->xp_remote.nb.len) {
+	if (!xprt->xp_remote.len) {
 		__warnx(TIRPC_DEBUG_FLAG_WARN,
 			"%s: %p fd %d has no remote address",
 			__func__, xprt, xprt->xp_fd);
@@ -441,7 +442,7 @@ svc_dg_reply(struct svc_req *req)
 	msg->msg_iov = &iov;
 	msg->msg_iovlen = 1;
 	msg->msg_name = (struct sockaddr *)&xprt->xp_remote.ss;
-	msg->msg_namelen = sizeof(struct sockaddr_storage);
+	msg->msg_namelen = xprt->xp_remote.len;
 	msg->msg_control = msg_control;
 	msg->msg_controllen = sizeof(msg_control);
 	msg->msg_flags = 0;
@@ -452,11 +453,9 @@ svc_dg_reply(struct svc_req *req)
 	cmsg->cmsg_type = (xprt->xp_local.ss.ss_family == AF_INET)
 		? IP_PKTINFO : IPV6_PKTINFO;
 	if (xprt->xp_local.ss.ss_family == AF_INET)
-		*(struct in_pktinfo*)CMSG_DATA(cmsg) =
-			*(struct in_pktinfo*) &xprt->xp_pktinfo;
+		*(struct in_pktinfo*)CMSG_DATA(cmsg) = xprt->xp_pktinfo.in;
 	else
-		*(struct in6_pktinfo*)CMSG_DATA(cmsg) =
-			*(struct in6_pktinfo*) &xprt->xp_pktinfo;
+		*(struct in6_pktinfo*)CMSG_DATA(cmsg) = xprt->xp_pktinfo.in6;
 	cmsg->cmsg_len = (xprt->xp_local.ss.ss_family == AF_INET)
 		? CMSG_LEN(sizeof(struct in_pktinfo))
 		: CMSG_LEN(sizeof(struct in6_pktinfo));
@@ -678,10 +677,16 @@ svc_dg_store_in_pktinfo(struct cmsghdr *cmsg, SVCXPRT *xprt)
 	if (cmsg->cmsg_level == SOL_IP &&
 	    cmsg->cmsg_type == IP_PKTINFO &&
 	    cmsg->cmsg_len >= CMSG_LEN(sizeof(struct in_pktinfo))) {
-		xprt->xp_pktinfo.in = *(struct in_pktinfo *) CMSG_DATA(cmsg);
-		xprt->xp_local.ss.ss_family = AF_INET;
-		xprt->xp_local.nb.buf = &xprt->xp_pktinfo;
-		xprt->xp_local.nb.len = sizeof(struct sockaddr_in);
+		struct in_pktinfo *ip = (struct in_pktinfo *) CMSG_DATA(cmsg);
+		struct sockaddr_in *in;
+
+		in = (struct sockaddr_in *)&xprt->xp_local.ss;
+
+		xprt->xp_pktinfo.in = *ip;
+		in->sin_family = AF_INET;
+		in->sin_addr = ip->ipi_addr;
+		in->sin_port = htons(xprt->xp_local_port);
+		xprt->xp_local.len = sizeof(struct sockaddr_in);
 		return 1;
 	}
 	return 0;
@@ -693,11 +698,16 @@ svc_dg_store_in6_pktinfo(struct cmsghdr *cmsg, SVCXPRT *xprt)
 	if (cmsg->cmsg_level == SOL_IPV6 &&
 	    cmsg->cmsg_type == IPV6_PKTINFO &&
 	    cmsg->cmsg_len >= CMSG_LEN(sizeof(struct in6_pktinfo))) {
+		struct in6_pktinfo *ip = (struct in6_pktinfo *) CMSG_DATA(cmsg);
+		struct sockaddr_in6 *in;
 
-		xprt->xp_pktinfo.in6 = *(struct in6_pktinfo *) CMSG_DATA(cmsg);
-		xprt->xp_local.ss.ss_family = AF_INET6;
-		xprt->xp_local.nb.buf = &xprt->xp_pktinfo;
-		xprt->xp_local.nb.len = sizeof(struct sockaddr_in6);
+		in = (struct sockaddr_in6 *)&xprt->xp_local.ss;
+
+		xprt->xp_pktinfo.in6 = *ip;
+		in->sin6_family = AF_INET6;
+		in->sin6_addr = ip->ipi6_addr;
+		in->sin6_port = htons(xprt->xp_local_port);
+		xprt->xp_local.len = sizeof(struct sockaddr_in6);
 		return 1;
 	}
 	return 0;

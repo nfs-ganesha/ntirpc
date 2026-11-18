@@ -75,8 +75,8 @@
 __BEGIN_DECLS
 extern int bindresvport(int, struct sockaddr_in *);
 
-char *taddr2uaddr(const struct netconfig *, const struct netbuf *);
-struct netbuf *uaddr2taddr(const struct netconfig *, const char *);
+char *taddr2uaddr(const struct netconfig *, const struct sockaddr_storage *);
+struct sockaddr_storage *uaddr2taddr(const struct netconfig *, const char *);
 
 struct sockaddr;
 extern int bindresvport_sa(int, struct sockaddr *);

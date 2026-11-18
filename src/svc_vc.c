@@ -236,7 +236,8 @@ svc_vc_ncreatef(const int fd, const u_int sendsz, const u_int recvsz,
 	}
 
 	__rpc_address_setup(&xprt->xp_local);
-	rc = getsockname(fd, xprt->xp_local.nb.buf, &xprt->xp_local.nb.len);
+	rc = getsockname(fd, (struct sockaddr *)&xprt->xp_local.ss,
+			 &xprt->xp_local.len);
 	if (rc < 0) {
 		atomic_clear_uint16_t_bits(&xprt->xp_flags,
 					   SVC_XPRT_FLAG_INITIALIZED);
@@ -388,10 +389,11 @@ svc_fd_ncreatef(const int fd, const u_int sendsize, const u_int recvsize,
 	svc_vc_override_ops(xprt, NULL);
 
 	__rpc_address_setup(&xprt->xp_local);
-	rc = getsockname(fd, xprt->xp_local.nb.buf, &xprt->xp_local.nb.len);
+	rc = getsockname(fd, (struct sockaddr *)&xprt->xp_local.ss,
+			 &xprt->xp_local.len);
 	if (rc < 0) {
-		xprt->xp_local.nb.len = sizeof(struct sockaddr_storage);
-		memset(xprt->xp_local.nb.buf, 0xfe, xprt->xp_local.nb.len);
+		xprt->xp_local.len = sizeof(struct sockaddr_storage);
+		memset(&xprt->xp_local.ss, 0xfe, xprt->xp_local.len);
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s: fd %d getsockname failed (%d)",
 			 __func__, fd, rc);
@@ -400,10 +402,11 @@ svc_fd_ncreatef(const int fd, const u_int sendsize, const u_int recvsize,
 	}
 
 	__rpc_address_setup(&xprt->xp_remote);
-	rc = getpeername(fd, xprt->xp_remote.nb.buf, &xprt->xp_remote.nb.len);
+	rc = getpeername(fd, (struct sockaddr *)&xprt->xp_remote.ss,
+			 &xprt->xp_remote.len);
 	if (rc < 0) {
-		xprt->xp_remote.nb.len = sizeof(struct sockaddr_storage);
-		memset(xprt->xp_remote.nb.buf, 0xfe, xprt->xp_remote.nb.len);
+		xprt->xp_remote.len = sizeof(struct sockaddr_storage);
+		memset(&xprt->xp_remote.ss, 0xfe, xprt->xp_remote.len);
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s: fd %d getpeername failed (%d)",
 			 __func__, fd, rc);
@@ -504,13 +507,13 @@ svc_vc_rendezvous(SVCXPRT *xprt)
 	svc_vc_override_ops(newxprt, xprt);
 
 	__rpc_address_setup(&newxprt->xp_remote);
-	memcpy(newxprt->xp_remote.nb.buf, &addr, len);
-	newxprt->xp_remote.nb.len = len;
+	memcpy(&newxprt->xp_remote.ss, &addr, len);
+	newxprt->xp_remote.len = len;
 	XPRT_TRACE(newxprt, __func__, __func__, __LINE__);
 
-	sa = (struct sockaddr *)newxprt->xp_remote.nb.buf;
+	sa = (struct sockaddr *)&newxprt->xp_remote.ss;
 	/* Store client information (IP & Port) in SVCXPRT */
-	if (newxprt->xp_remote.nb.len > 0 && sa != NULL) {
+	if (newxprt->xp_remote.len > 0 && sa != NULL) {
 		if (sa->sa_family == AF_INET) {
 			struct sockaddr_in *sin = (struct sockaddr_in *)sa;
 			inet_ntop(AF_INET, &sin->sin_addr, newxprt->xp_clnt_addr,
@@ -564,12 +567,11 @@ svc_vc_rendezvous(SVCXPRT *xprt)
 	}
 
 	__rpc_address_setup(&newxprt->xp_local);
-	rc = getsockname(fd, newxprt->xp_local.nb.buf,
-			 &newxprt->xp_local.nb.len);
+	rc = getsockname(fd, (struct sockaddr *)&newxprt->xp_local.ss,
+			 &newxprt->xp_local.len);
 	if (rc < 0) {
-		newxprt->xp_local.nb.len = sizeof(struct sockaddr_storage);
-		memset(newxprt->xp_local.nb.buf, 0xfe,
-		       newxprt->xp_local.nb.len);
+		newxprt->xp_local.len = sizeof(struct sockaddr_storage);
+		memset(&newxprt->xp_local.ss, 0xfe, newxprt->xp_local.len);
 		__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
 			"%s: fd %d getsockname failed (%d)",
 			 __func__, fd, rc);
@@ -603,7 +605,7 @@ svc_vc_rendezvous(SVCXPRT *xprt)
 		"New client connected "
 		"xprt %p, fd %d, port %d",
 		newxprt, newxprt->xp_fd,
-		svc_get_port(newxprt->xp_local.nb.buf));
+		svc_get_port(&newxprt->xp_local.ss));
 
 	/* We're not using a ref for the hook anymore, since epoll doesn't store
 	 * the transport pointer.  Drop the extra ref here. */
@@ -1086,6 +1088,7 @@ static enum haproxy_ret_code handle_haproxy_header_cmd_v2_parse_address(
 		}
 
 		struct sockaddr_in6 *ss6;
+
 		xprt->xp_proxy = xprt->xp_remote;
 		ss6 = (struct sockaddr_in6 *)&xprt->xp_remote.ss;
 		xprt->xp_remote.ss.ss_family = AF_INET6;

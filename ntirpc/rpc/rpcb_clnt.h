@@ -63,7 +63,7 @@
 __BEGIN_DECLS
 extern bool rpcb_set(const rpcprog_t, const rpcvers_t,
 		     const struct netconfig *,
-		     const struct netbuf *);
+		     const struct sockaddr_storage *);
 extern bool rpcb_unset(const rpcprog_t, const rpcvers_t,
 		       const struct netconfig *);
 extern rpcblist *rpcb_getmaps(const struct netconfig *, const char *);
@@ -72,9 +72,9 @@ extern enum clnt_stat rpcb_rmtcall(const struct netconfig *, const char *,
 				   const rpcproc_t, const xdrproc_t,
 				   void *, const xdrproc_t,
 				   void *, const struct timeval,
-				   const struct netbuf *);
+				   struct sockaddr_storage *);
 extern bool rpcb_getaddr(const rpcprog_t, const rpcvers_t,
-			 const struct netconfig *, struct netbuf *,
+			 const struct netconfig *, struct sockaddr_storage *,
 			 const char *);
 extern bool rpcb_gettime(const char *, time_t *);
 extern char *rpcb_taddr2uaddr(struct netconfig *, struct netbuf *);

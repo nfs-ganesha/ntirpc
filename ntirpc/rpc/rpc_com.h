@@ -62,17 +62,17 @@ extern int __rpc_dtbsize(void);
 extern int _rpc_dtablesize(void);
 extern struct netconfig *__rpcgettp(int);
 extern int __rpc_get_default_domain(char **);
-char *__rpc_taddr2uaddr_af(int, const struct netbuf *);
-struct netbuf *__rpc_uaddr2taddr_af(int, const char *);
-int __rpc_fixup_addr(struct netbuf *, const struct netbuf *);
+char *__rpc_taddr2uaddr_af(int, const struct sockaddr_storage *);
+struct sockaddr_storage *__rpc_uaddr2taddr_af(int, const char *);
+int __rpc_fixup_addr(struct sockaddr_storage *, const struct sockaddr_storage *);
 int __rpc_sockinfo2netid(struct __rpc_sockinfo *, const char **);
 int __rpc_seman2socktype(int);
 int __rpc_socktype2seman(int);
 void *rpc_nullproc(CLIENT *);
 int __rpc_sockisbound(int);
-struct netbuf *__rpc_set_netbuf(struct netbuf *, const void *, size_t);
-struct netbuf *__rpcb_findaddr(rpcprog_t, rpcvers_t, const struct netconfig *,
-			       const char *, CLIENT **);
+struct sockaddr_storage *
+__rpcb_findaddr(rpcprog_t, rpcvers_t, const struct netconfig *, const char *,
+		CLIENT **);
 bool rpc_control(int, void *);
 char *_get_next_token(char *, int);
 

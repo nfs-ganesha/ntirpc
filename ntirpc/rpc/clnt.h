@@ -258,7 +258,7 @@ struct rpc_timers {
 /* reserved 4 */
 /* reserved 5 */
 #define CLGET_FD  6		/* get connections file descriptor */
-#define CLGET_SVC_ADDR  7	/* get server's address (netbuf) */
+#define CLGET_SVC_ADDR  7	/* get server's address (sockaddr_storage) */
 #define CLSET_FD_CLOSE  8	/* close fd while clnt_destroy */
 #define CLSET_FD_NCLOSE  9	/* Do not close fd while clnt_destroy */
 #define CLGET_XID   10		/* Get xid */
@@ -267,7 +267,7 @@ struct rpc_timers {
 #define CLSET_VERS  13		/* Set version number */
 #define CLGET_PROG  14		/* Get program number */
 #define CLSET_PROG  15		/* Set program number */
-#define CLSET_SVC_ADDR  16	/* get server's address (netbuf) */
+#define CLSET_SVC_ADDR  16	/* get server's address (sockaddr_storage) */
 #define CLSET_PUSH_TIMOD 17	/* push timod if not already present */
 #define CLSET_POP_TIMOD  18	/* pop timod */
 
@@ -460,13 +460,15 @@ clnt_tp_ncreate(const char *hostname, const rpcprog_t prog,
  */
 
 extern CLIENT *clnt_tli_ncreate_opt(const int, const struct netconfig *,
-				    struct netbuf *, struct netbuf *,
+				    struct sockaddr_storage *,
+				    struct sockaddr_storage *,
 				    const rpcprog_t, const rpcvers_t,
 				    const u_int, const u_int, int);
 
 static inline CLIENT *
 clnt_tli_ncreate(int fd, const struct netconfig *nconf,
-		 struct netbuf *bindaddr, struct netbuf *svcaddr,
+		 struct sockaddr_storage *bindaddr,
+		 struct sockaddr_storage *svcaddr,
 		 rpcprog_t prog, rpcvers_t vers,
 		 u_int sendsz, u_int recvsz)
 {
@@ -483,7 +485,7 @@ clnt_tli_ncreate(int fd, const struct netconfig *nconf,
 /*
  * const register int fd;  -- fd
  * const struct netconfig *nconf; -- netconfig structure
- * struct netbuf *svcaddr;  -- servers address
+ * struct sockaddr_storage *svcaddr;  -- servers address
  * const u_long prog;   -- program number
  * const u_long vers;   -- version number
  * const u_int sendsz;   -- send size
@@ -505,7 +507,7 @@ clnt_tli_ncreate(int fd, const struct netconfig *nconf,
 #define CLNT_CREATE_FLAG_XPRT_DOREG	SVC_CREATE_FLAG_XPRT_DOREG
 #define CLNT_CREATE_FLAG_XPRT_NOREG	SVC_CREATE_FLAG_XPRT_NOREG
 
-extern CLIENT *clnt_vc_ncreatef(const int, const struct netbuf *,
+extern CLIENT *clnt_vc_ncreatef(const int, const struct sockaddr_storage *,
 				const rpcprog_t, const rpcvers_t,
 				const u_int, const u_int, const uint32_t);
 
@@ -517,7 +519,7 @@ clnt_rdma_create(int fd, char *host, int port, int recv_sz,
 #endif
 
 static inline CLIENT *
-clnt_vc_ncreate(const int fd, const struct netbuf *raddr,
+clnt_vc_ncreate(const int fd, const struct sockaddr_storage *raddr,
 		const rpcprog_t prog, const rpcvers_t vers,
 		const u_int sendsz, const u_int recvsz)
 {
@@ -545,12 +547,12 @@ extern CLIENT *clnt_rdma_ncreatef(const SVCXPRT *, const rpcprog_t,
 /*
  * Low level clnt create routine for connectionless transports, e.g. udp.
  */
-extern CLIENT *clnt_dg_ncreatef(const int, const struct netbuf *,
+extern CLIENT *clnt_dg_ncreatef(const int, const struct sockaddr_storage *,
 				const rpcprog_t, const rpcvers_t,
 				const u_int, const u_int, const uint32_t);
 /*
  * const int fd;    -- open file descriptor
- * const struct netbuf *svcaddr;  -- servers address
+ * const struct sockaddr_storage *svcaddr;  -- servers address
  * const rpcprog_t program;  -- program number
  * const rpcvers_t version;  -- version number
  * const u_int sendsz;   -- buffer recv size
@@ -558,7 +560,7 @@ extern CLIENT *clnt_dg_ncreatef(const int, const struct netbuf *,
  */
 
 static inline CLIENT *
-clnt_dg_ncreate(const int fd, const struct netbuf *raddr,
+clnt_dg_ncreate(const int fd, const struct sockaddr_storage *raddr,
 		const rpcprog_t prog, const rpcvers_t vers,
 		const u_int sendsz, const u_int recvsz)
 {
@@ -675,7 +677,7 @@ __END_DECLS
  *  done = eachresult(resp, raddr, nconf)
  *   bool done;
  *   void *resp;
- *   struct netbuf *raddr;
+ *   struct sockaddr_storage *raddr;
  *   struct netconfig *nconf;
  * where resp points to the results of the call and raddr is the
  * address if the responder to the broadcast.  nconf is the transport

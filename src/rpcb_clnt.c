@@ -75,7 +75,7 @@ struct address_cache {
 	char *ac_host;
 	char *ac_netid;
 	char *ac_uaddr;
-	struct netbuf *ac_taddr;
+	struct sockaddr_storage ac_taddr;
 	struct address_cache *ac_next;
 };
 
@@ -88,13 +88,11 @@ static int cachesize;
 extern int __rpc_lowvers;
 
 static struct address_cache *check_cache(const char *, const char *);
-static void delete_cache(struct netbuf *);
-static void add_cache(const char *, const char *, struct netbuf *, char *);
+static void delete_cache(struct sockaddr_storage *);
+static void add_cache(const char *, const char *, struct sockaddr_storage *,
+		      char *);
 static CLIENT *getclnthandle(const char *, const struct netconfig *, char **);
 static CLIENT *local_rpcb(const char *);
-#ifdef NOTUSED
-static struct netbuf *got_entry(rpcb_entry_list_ptr, const struct netconfig *);
-#endif
 
 /*
  * This routine adjusts the timeout used for calls to the remote rpcbind.
@@ -161,17 +159,15 @@ check_cache(const char *host, const char *netid)
 }
 
 static void
-delete_cache(struct netbuf *addr)
+delete_cache(struct sockaddr_storage *addr)
 {
 	struct address_cache *cptr, *prevptr = NULL;
 
 	/* WRITE LOCK HELD ON ENTRY: rpcbaddr_cache_lock */
 	for (cptr = front; cptr != NULL; cptr = cptr->ac_next) {
-		if (!memcmp(cptr->ac_taddr->buf, addr->buf, addr->len)) {
+		if (!memcmp(&cptr->ac_taddr, addr, sizeof(*addr))) {
 			mem_free(cptr->ac_host, 0);	/* XXX */
 			mem_free(cptr->ac_netid, 0);
-			mem_free(cptr->ac_taddr->buf, cptr->ac_taddr->len);
-			mem_free(cptr->ac_taddr, sizeof(struct netbuf));
 			if (cptr->ac_uaddr)
 				mem_free(cptr->ac_uaddr, 0);
 			if (prevptr)
@@ -187,7 +183,7 @@ delete_cache(struct netbuf *addr)
 }
 
 static void
-add_cache(const char *host, const char *netid, struct netbuf *taddr,
+add_cache(const char *host, const char *netid, struct sockaddr_storage *taddr,
 	  char *uaddr)
 {
 	struct address_cache *ad_cache, *cptr, *prevptr;
@@ -201,10 +197,7 @@ add_cache(const char *host, const char *netid, struct netbuf *taddr,
 	ad_cache->ac_host = mem_strdup(host);
 	ad_cache->ac_netid = mem_strdup(netid);
 	ad_cache->ac_uaddr = uaddr ? mem_strdup(uaddr) : NULL;
-	ad_cache->ac_taddr = (struct netbuf *)mem_zalloc(sizeof(struct netbuf));
-	ad_cache->ac_taddr->len = ad_cache->ac_taddr->maxlen = taddr->len;
-	ad_cache->ac_taddr->buf = (char *)mem_zalloc(taddr->len);
-	memcpy(ad_cache->ac_taddr->buf, taddr->buf, taddr->len);
+	ad_cache->ac_taddr = *taddr;
 #ifdef ND_DEBUG
 	fprintf(stderr, "Added to cache: %s : %s\n", host, netid);
 #endif
@@ -230,8 +223,6 @@ add_cache(const char *host, const char *netid, struct netbuf *taddr,
 #endif
 		mem_free(cptr->ac_host, 0);	/* XXX */
 		mem_free(cptr->ac_netid, 0);
-		mem_free(cptr->ac_taddr->buf, cptr->ac_taddr->len);
-		mem_free(cptr->ac_taddr, sizeof(struct netbuf));
 		if (cptr->ac_uaddr)
 			mem_free(cptr->ac_uaddr, 0);
 
@@ -260,15 +251,13 @@ static CLIENT *getclnthandle(const char *host, const struct netconfig *nconf,
 			     char **targaddr)
 {
 	CLIENT *client;
-	struct netbuf *addr, taddr;
-	struct netbuf addr_to_delete;
+	struct sockaddr_storage taddr;
+	struct sockaddr_storage addr_to_delete;
+	bool remove = false;
 	struct __rpc_sockinfo si;
 	struct addrinfo hints, *res, *tres;
 	struct address_cache *ad_cache;
-	char *tmpaddr;
 	char *t;
-
-	memset(&addr_to_delete, '\0', sizeof(addr_to_delete));
 
 /* VARIABLES PROTECTED BY rpcbaddr_cache_lock:  ad_cache */
 
@@ -276,15 +265,13 @@ static CLIENT *getclnthandle(const char *host, const struct netconfig *nconf,
 	client = NULL;
 	if (targaddr)
 		*targaddr = NULL;
-	addr_to_delete.len = 0;
 	rwlock_rdlock(&rpcbaddr_cache_lock);
 	ad_cache = NULL;
 	if (host != NULL)
 		ad_cache = check_cache(host, nconf->nc_netid);
 	if (ad_cache != NULL) {
-		addr = ad_cache->ac_taddr;
 		client =
-		    clnt_tli_ncreate(RPC_ANYFD, nconf, NULL, addr,
+		    clnt_tli_ncreate(RPC_ANYFD, nconf, NULL, &ad_cache->ac_taddr,
 				     (rpcprog_t) RPCBPROG,
 				     (rpcvers_t) RPCBVERS4, 0, 0);
 		if (CLNT_SUCCESS(client)) {
@@ -298,12 +285,11 @@ static CLIENT *getclnthandle(const char *host, const struct netconfig *nconf,
 		__warnx(TIRPC_DEBUG_FLAG_CLNT_RPCB, "%s", t);
 		free_sperror(t);
 
-		addr_to_delete.len = addr->len;
-		addr_to_delete.buf = (char *)mem_zalloc(addr->len);
-		memcpy(addr_to_delete.buf, addr->buf, addr->len);
+		addr_to_delete = ad_cache->ac_taddr;
+		remove = true;
 	}
 	rwlock_unlock(&rpcbaddr_cache_lock);
-	if (addr_to_delete.len != 0) {
+	if (remove) {
 		/*
 		 * Assume this may be due to cache data being
 		 *  outdated
@@ -311,7 +297,6 @@ static CLIENT *getclnthandle(const char *host, const struct netconfig *nconf,
 		rwlock_wrlock(&rpcbaddr_cache_lock);
 		delete_cache(&addr_to_delete);
 		rwlock_unlock(&rpcbaddr_cache_lock);
-		mem_free(addr_to_delete.buf, addr_to_delete.len);
 	}
 	if (!__rpc_nconf2sockinfo(nconf, &si)) {
 		if (client != NULL) {
@@ -373,16 +358,14 @@ static CLIENT *getclnthandle(const char *host, const struct netconfig *nconf,
 	}
 
 	for (tres = res; tres != NULL; tres = tres->ai_next) {
-		taddr.buf = tres->ai_addr;
-		taddr.len = taddr.maxlen = tres->ai_addrlen;
+		char *ua = NULL;
+
+		memcpy(&taddr, tres->ai_addr, tres->ai_addrlen);
 
 #ifdef ND_DEBUG
 		{
-			char *ua;
-
 			ua = taddr2uaddr(nconf, &taddr);
 			fprintf(stderr, "Got it [%s]\n", ua);
-			mem_free(ua, 0);	/* XXX */
 		}
 #endif
 
@@ -390,12 +373,10 @@ static CLIENT *getclnthandle(const char *host, const struct netconfig *nconf,
 		{
 			int i;
 
-			fprintf(stderr, "\tnetbuf len = %d, maxlen = %d\n",
-				taddr.len, taddr.maxlen);
+			fprintf(stderr, "\Address len = %d\n", tres->ai_addrlen);
 			fprintf(stderr, "\tAddress is ");
-			for (i = 0; i < taddr.len; i++)
-				fprintf(stderr, "%u.",
-					((char *)(taddr.buf))[i]);
+			for (i = 0; i < tres->ai_addrlen; i++)
+				fprintf(stderr, "%u.", ((char *)(taddr))[i]);
 			fprintf(stderr, "\n");
 		}
 #endif
@@ -404,11 +385,18 @@ static CLIENT *getclnthandle(const char *host, const struct netconfig *nconf,
 				     (rpcprog_t) RPCBPROG,
 				     (rpcvers_t) RPCBVERS4, 0, 0);
 		if (CLNT_SUCCESS(client)) {
-			tmpaddr = targaddr ? taddr2uaddr(nconf, &taddr) : NULL;
-			add_cache(host, nconf->nc_netid, &taddr, tmpaddr);
+			if (ua == NULL) {
+				ua = taddr2uaddr(nconf, &taddr);
+			}
+			add_cache(host, nconf->nc_netid, &taddr, ua);
 			if (targaddr)
-				*targaddr = tmpaddr;
+				*targaddr = ua;
 			break;
+		}
+
+		if (ua) {
+			mem_free(ua, 0);
+			ua = NULL;
 		}
 
 		t = rpc_sperror(&client->cl_error, __func__);
@@ -418,8 +406,6 @@ static CLIENT *getclnthandle(const char *host, const struct netconfig *nconf,
 	if (res)
 		freeaddrinfo(res);
  out_err:
-	if (CLNT_FAILURE(client) && targaddr)
-		mem_free(*targaddr, 0);
 	return (client);
 }
 
@@ -430,7 +416,7 @@ static CLIENT *getclnthandle(const char *host, const struct netconfig *nconf,
 bool
 rpcb_set(rpcprog_t program, rpcvers_t version, const struct netconfig *nconf,
 	 /* Network structure of transport */
-	 const struct netbuf *address /* Services netconfig address */)
+	 const struct sockaddr_storage *address /* Services netconfig address */)
 {
 	CLIENT *client;
 	struct clnt_req *cc;
@@ -458,9 +444,8 @@ rpcb_set(rpcprog_t program, rpcvers_t version, const struct netconfig *nconf,
 
 	/* convert to universal */
 	/*LINTED const castaway */
-	parms.r_addr =
-		taddr2uaddr((struct netconfig *)nconf,
-			    (struct netbuf *)address);
+	parms.r_addr = taddr2uaddr((struct netconfig *)nconf, address);
+
 	if (!parms.r_addr) {
 		CLNT_DESTROY(client);
 		__warnx(TIRPC_DEBUG_FLAG_WARN,
@@ -559,36 +544,6 @@ rpcb_unset(rpcprog_t program, rpcvers_t version,
 	return (rslt);
 }
 
-#ifdef NOTUSED
-/*
- * From the merged list, find the appropriate entry
- */
-static struct netbuf *
-got_entry(rpcb_entry_list_ptr relp,
-	  const struct netconfig *nconf)
-{
-	struct netbuf *na = NULL;
-	rpcb_entry_list_ptr sp;
-	rpcb_entry *rmap;
-
-	for (sp = relp; sp != NULL; sp = sp->rpcb_entry_next) {
-		rmap = &sp->rpcb_entry_map;
-		if ((strcmp(nconf->nc_proto, rmap->r_nc_proto) == 0)
-		    && (strcmp(nconf->nc_protofmly, rmap->r_nc_protofmly) == 0)
-		    && (nconf->nc_semantics == rmap->r_nc_semantics)
-		    && (rmap->r_maddr != NULL) && (rmap->r_maddr[0] != 0)) {
-			na = uaddr2taddr(nconf, rmap->r_maddr);
-			if (!na)
-				__warnx(TIRPC_DEBUG_FLAG_WARN, "%s: %s",
-					__func__,
-					clnt_sperrno(RPC_N2AXLATEFAILURE));
-			break;
-		}
-	}
-	return (na);
-}
-#endif
-
 /*
  * Quick check to see if rpcbind is up.  Tries to connect over
  * local transport.
@@ -649,20 +604,20 @@ __rpcbind_is_up(void)
  * client handle.  This code will change if t_connect() ever
  * starts working properly.  Also look under clnt_vc.c.
  */
-struct netbuf *
+struct sockaddr_storage *
 __rpcb_findaddr_timed(rpcprog_t program, rpcvers_t version,
 		      const struct netconfig *nconf,
 		      const char *host, CLIENT **clpp,
 		      struct timeval *tp)
 {
 	char *ua = NULL;
-	struct netbuf *address = NULL;
+	struct sockaddr_storage *address = NULL;
 	CLIENT *client = NULL;
 	struct clnt_req *cc;
 	char *t;
 	AUTH *auth;
 	RPCB parms;
-	struct netbuf servaddr;
+	struct sockaddr_storage servaddr;
 	struct timespec tv;
 	rpcvers_t vers;
 	rpcvers_t start_vers = RPCBVERS4;
@@ -695,7 +650,7 @@ __rpcb_findaddr_timed(rpcprog_t program, rpcvers_t version,
 #ifdef PORTMAP
 	/* Try version 2 for TCP or UDP */
 	if (strcmp(nconf->nc_protofmly, NC_INET) == 0) {
-		struct netbuf remote;
+		struct sockaddr_storage remote;
 		struct pmap pmapparms;
 		rpcvers_t pmapvers = 2;
 		uint16_t port = 0;
@@ -745,13 +700,11 @@ __rpcb_findaddr_timed(rpcprog_t program, rpcvers_t version,
 		port = htons(port);
 		CLNT_CONTROL(client, CLGET_SVC_ADDR, (char *)&remote);
 
-		address = (struct netbuf *)mem_zalloc(sizeof(struct netbuf));
-		address->buf = (char *)mem_alloc(remote.len);
+		address = mem_zalloc(sizeof(*address));
 
-		memcpy(address->buf, remote.buf, remote.len);
-		memcpy(&((char *)address->buf)[sizeof(uint16_t)],
-		       (char *)(void *)&port, sizeof(uint16_t));
-		address->len = address->maxlen = remote.len;
+		*address = remote;
+		((struct sockaddr_in *)address)->sin_port = port;
+
 		goto done;
 	}
 
@@ -840,7 +793,7 @@ __rpcb_findaddr_timed(rpcprog_t program, rpcvers_t version,
 		clnt_req_reset(cc);
 	}
 
-	if ((address == NULL) || (address->len == 0)) {
+	if ((address == NULL)) {
 		client->cl_error.re_status = RPC_PROGNOTREGISTERED;
 	}
 	clnt_req_release(cc);
@@ -867,16 +820,16 @@ __rpcb_findaddr_timed(rpcprog_t program, rpcvers_t version,
 /*
  * Helper routine to find mapped address (for NLM).
  */
-extern struct netbuf *
+extern struct sockaddr_storage *
 rpcb_find_mapped_addr(char *nettype, rpcprog_t prog,
 		      rpcvers_t vers, char *local_addr)
 {
-	struct netbuf *nbuf;
+	struct sockaddr_storage *ret;
 	void *handle = __rpc_setconf(nettype);
 	struct netconfig *nconf = __rpc_getconf(handle);
-	nbuf = __rpcb_findaddr_timed(prog, vers, nconf, local_addr, NULL, NULL);
+	ret = __rpcb_findaddr_timed(prog, vers, nconf, local_addr, NULL, NULL);
 	__rpc_endconf(handle);
-	return (nbuf);
+	return ret;
 }
 
 /*
@@ -889,10 +842,10 @@ rpcb_find_mapped_addr(char *nettype, rpcprog_t prog,
  */
 bool
 rpcb_getaddr(rpcprog_t program, rpcvers_t version,
-	     const struct netconfig *nconf, struct netbuf *address,
+	     const struct netconfig *nconf, struct sockaddr_storage *address,
 	     const char *host)
 {
-	struct netbuf *na;
+	struct sockaddr_storage *na;
 
 	na = __rpcb_findaddr_timed(
 		program, version, (struct netconfig *)nconf,
@@ -901,18 +854,7 @@ rpcb_getaddr(rpcprog_t program, rpcvers_t version,
 	if (!na)
 		return (false);
 
-	if (na->len > address->maxlen) {
-		/* Too long address */
-		mem_free(na->buf, 0);
-		mem_free(na, 0);
-		__warnx(TIRPC_DEBUG_FLAG_CLNT_RPCB,
-			"%s: address too long (%u > %u)",
-			__func__, na->len, address->maxlen);
-		return (false);
-	}
-	memcpy(address->buf, na->buf, (size_t) na->len);
-	address->len = na->len;
-	mem_free(na->buf, 0);
+	memcpy(address, na, sizeof(*address));
 	mem_free(na, 0);
 	return (true);
 }
@@ -998,8 +940,7 @@ rpcb_rmtcall(const struct netconfig *nconf, /* Netconfig structure */
 	     const xdrproc_t xdrargs, void *argsp,
 	     const xdrproc_t xdrres, void *resp, /* Argument and Result */
 	     const struct timeval tout,	/* Timeout value for this call */
-	     const struct netbuf *addr_ptr
-	     /* Preallocated netbuf address */)
+	     struct sockaddr_storage *addr_ptr /* Preallocated address */)
 {
 	CLIENT *client;
 	struct clnt_req *cc;
@@ -1041,7 +982,7 @@ rpcb_rmtcall(const struct netconfig *nconf, /* Netconfig structure */
 		}
 
 		if ((stat == RPC_SUCCESS) && (addr_ptr != NULL)) {
-			struct netbuf *na;
+			struct sockaddr_storage *na;
 			/*LINTED const castaway */
 			na = uaddr2taddr((struct netconfig *)nconf, r.addr);
 			if (!na) {
@@ -1049,26 +990,9 @@ rpcb_rmtcall(const struct netconfig *nconf, /* Netconfig structure */
 					__func__,
 					clnt_sperrno(RPC_N2AXLATEFAILURE));
 				stat = RPC_N2AXLATEFAILURE;
-				/*LINTED const castaway */
-				((struct netbuf *)addr_ptr)->len = 0;
 				goto error;
 			}
-			if (na->len > addr_ptr->maxlen) {
-				/* Too long address */
-				__warnx(TIRPC_DEBUG_FLAG_CLNT_RPCB,
-					"%s: address too long (%u > %u)",
-					__func__, na->len, addr_ptr->maxlen);
-				stat = RPC_FAILED; /* XXX A better error no */
-				mem_free(na->buf, 0);	/* XXX */
-				mem_free(na, 0);
-				/*LINTED const castaway */
-				((struct netbuf *)addr_ptr)->len = 0;
-				goto error;
-			}
-			memcpy(addr_ptr->buf, na->buf, (size_t) na->len);
-			/*LINTED const castaway */
-			((struct netbuf *)addr_ptr)->len = na->len;
-			mem_free(na->buf, 0);
+			memcpy(addr_ptr, na, sizeof(*addr_ptr));
 			mem_free(na, 0);
 			break;
 		} else if ((stat != RPC_PROGVERSMISMATCH)
@@ -1290,7 +1214,6 @@ static CLIENT *local_rpcb(const char *tag)
 	static struct netconfig *loopnconf = NULL;
 	static char *hostname;
 	extern mutex_t loopnconf_lock;
-	struct netbuf nbuf;
 	struct sockaddr_un sun;
 	size_t tsize;
 	int sock;
@@ -1309,14 +1232,11 @@ static CLIENT *local_rpcb(const char *tag)
 	}
 	sun.sun_family = AF_LOCAL;
 	strcpy(sun.sun_path, _PATH_RPCBINDSOCK);
-	nbuf.len = SUN_LEN(&sun);
-	nbuf.maxlen = sizeof(struct sockaddr_un);
-	nbuf.buf = &sun;
 
 	tsize = __rpc_get_t_size(AF_LOCAL, 0, 0);
-	client = clnt_vc_ncreatef(sock, &nbuf, (rpcprog_t) RPCBPROG,
-				  (rpcvers_t) RPCBVERS, tsize, tsize,
-				  CLNT_CREATE_FLAG_CLOSE |
+	client = clnt_vc_ncreatef(sock, (struct sockaddr_storage *)&sun,
+				  (rpcprog_t) RPCBPROG, (rpcvers_t) RPCBVERS,
+				  tsize, tsize, CLNT_CREATE_FLAG_CLOSE |
 				  CLNT_CREATE_FLAG_CONNECT);
 
 	if (CLNT_SUCCESS(client)) {

@@ -353,11 +353,7 @@ int main(int argc, char *argv[])
 		} else if (strcmp(proto, "rdma")) {
 			proto_used = TCP;
 			/* connect to host:port */
-			struct sockaddr_storage ss;
-			struct netbuf raddr = {
-				.buf = &ss,
-				.len = sizeof(ss)
-			};
+			struct sockaddr_storage raddr;
 			int fd = get_conn_fd(host, port);
 
 			if (fd <= 0) {

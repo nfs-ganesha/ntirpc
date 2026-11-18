@@ -256,8 +256,8 @@ struct netbuf {
 };
 
 struct rpc_address {
-	struct netbuf nb;
 	struct sockaddr_storage ss;	/* address buffer */
+	socklen_t  len;
 };
 
 /*
@@ -283,7 +283,7 @@ struct network_id {
  */
 
 struct t_bind {
-	struct netbuf addr;
+	struct sockaddr_storage addr;
 	unsigned int qlen;
 };
 

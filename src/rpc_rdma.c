@@ -1970,27 +1970,26 @@ rpc_rdma_ncreatef(const struct rpc_rdma_attr *xa,
 	}
 
 	/* Initialize xp_local for rpcbind registration */
-	struct sockaddr_storage *ss =
-		(struct sockaddr_storage *)rdma_get_local_addr(rdma_xprt->cm_id);
-	if (ss) {
+	struct sockaddr *sa = rdma_get_local_addr(rdma_xprt->cm_id);
+	if (sa) {
 		socklen_t len;
 
 		__rpc_address_setup(&rdma_xprt->sm_dr.xprt.xp_local);
 
 		/* Determine actual address length based on family */
-		if (ss->ss_family == AF_INET)
+		if (sa->sa_family == AF_INET)
 			len = sizeof(struct sockaddr_in);
-		else if (ss->ss_family == AF_INET6)
+		else if (sa->sa_family == AF_INET6)
 			len = sizeof(struct sockaddr_in6);
 		else
 			len = sizeof(struct sockaddr_storage);
 
-		memcpy(rdma_xprt->sm_dr.xprt.xp_local.nb.buf, ss, len);
-		rdma_xprt->sm_dr.xprt.xp_local.nb.len = len;
+		memcpy(&rdma_xprt->sm_dr.xprt.xp_local.ss, sa, len);
+		rdma_xprt->sm_dr.xprt.xp_local.len = len;
 
 		__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA,
 			"%s() Initialized xp_local: family=%d len=%d",
-			__func__, ss->ss_family, len);
+			__func__, sa->sa_family, len);
 	} else {
 		__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA | TIRPC_DEBUG_FLAG_WARN,
 			"%s() Could not get local address for xp_local initialization",

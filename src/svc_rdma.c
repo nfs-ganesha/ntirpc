@@ -86,13 +86,13 @@ svc_rdma_rendezvous(SVCXPRT *xprt)
 
 	ss = (struct sockaddr_storage *)rdma_get_local_addr(rdma_xprt->cm_id);
 	__rpc_address_setup(&rdma_xprt->sm_dr.xprt.xp_local);
-	memcpy(rdma_xprt->sm_dr.xprt.xp_local.nb.buf, ss,
-		rdma_xprt->sm_dr.xprt.xp_local.nb.len);
+	memcpy(&rdma_xprt->sm_dr.xprt.xp_local.ss, ss,
+		rdma_xprt->sm_dr.xprt.xp_local.len);
 
 	ss = (struct sockaddr_storage *)rdma_get_peer_addr(rdma_xprt->cm_id);
 	__rpc_address_setup(&rdma_xprt->sm_dr.xprt.xp_remote);
-	memcpy(rdma_xprt->sm_dr.xprt.xp_remote.nb.buf, ss,
-		rdma_xprt->sm_dr.xprt.xp_remote.nb.len);
+	memcpy(&rdma_xprt->sm_dr.xprt.xp_remote.ss, ss,
+		rdma_xprt->sm_dr.xprt.xp_remote.len);
 
 	rdma_xprt->sm_dr.xprt.xp_ip = mem_alloc(SOCK_NAME_MAX);
 	sprint_sockip(ss, rdma_xprt->sm_dr.xprt.xp_ip,
@@ -102,8 +102,8 @@ svc_rdma_rendezvous(SVCXPRT *xprt)
 	__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA,
 		"%s:%u local %p remote %p xprt %p remote ip %s",
 		__func__, __LINE__,
-		&rdma_xprt->sm_dr.xprt.xp_local.nb,
-		&rdma_xprt->sm_dr.xprt.xp_remote.nb,
+		&rdma_xprt->sm_dr.xprt.xp_local.ss,
+		&rdma_xprt->sm_dr.xprt.xp_remote.ss,
 		&rdma_xprt->sm_dr.xprt,
 		rdma_xprt->sm_dr.xprt.xp_ip);
 
@@ -166,10 +166,10 @@ svc_rdma_rendezvous(SVCXPRT *xprt)
 		&rdma_xprt->sm_dr.xprt, rdma_xprt->sm_dr.xprt.xp_fd,
 		rdma_xprt->qp->qp_num,
 		rdma_xprt->sm_dr.xprt.xp_fd, rdma_xprt->sm_dr.xprt.xp_rdma,
-		rdma_xprt->sm_dr.xprt.xp_local.nb.buf ?
-		svc_get_port(rdma_xprt->sm_dr.xprt.xp_local.nb.buf) : 0,
-		rdma_xprt->sm_dr.xprt.xp_remote.nb.buf ?
-		svc_get_port(rdma_xprt->sm_dr.xprt.xp_remote.nb.buf) : 0,
+		rdma_xprt->sm_dr.xprt.xp_local.len ?
+		svc_get_port(&rdma_xprt->sm_dr.xprt.xp_local.ss) : 0,
+		rdma_xprt->sm_dr.xprt.xp_remote.len ?
+		svc_get_port(&rdma_xprt->sm_dr.xprt.xp_remote.ss) : 0,
 		rdma_xprt->sm_dr.xprt.xp_refcnt,
 		rdma_xprt->sm_dr.xprt.xp_flags,
 		rdma_xprt->sm_dr.xprt.xp_ip);

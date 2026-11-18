@@ -15,7 +15,7 @@
 .Lb libc
 .Sh SYNOPSIS
 .In rpc/rpc.h
-.Ft "struct netbuf *"
+.Ft "struct sockaddr_storage *"
 .Fn svc_getrpccaller "const SVCXPRT *xprt"
 .Ft enum xprt_stat
 .Fn svc_sendreply "struct svc_req *request"

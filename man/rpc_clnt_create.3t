@@ -41,17 +41,17 @@ handles
 .Ft void
 .Fn CLNT_DESTROY "CLIENT *clnt"
 .Ft "CLIENT *"
-.Fn clnt_dg_create "const int fildes" "const struct netbuf *svcaddr" "const rpcprog_t prognum" "const rpcvers_t versnum" "const u_int sendsz" "const u_int recvsz"
+.Fn clnt_dg_create "const int fildes" "const struct sockaddr_storage *svcaddr" "const rpcprog_t prognum" "const rpcvers_t versnum" "const u_int sendsz" "const u_int recvsz"
 .Ft "CLIENT *"
 .Fn clnt_raw_create "const rpcprog_t prognum" "const rpcvers_t versnum"
 .Ft "CLIENT *"
-.Fn clnt_tli_create "const int fildes" "const struct netconfig *netconf" "const struct netbuf *svcaddr" "const rpcprog_t prognum" "const rpcvers_t versnum" "const u_int sendsz" "const u_int recvsz"
+.Fn clnt_tli_create "const int fildes" "const struct netconfig *netconf" "const struct sockaddr_storage *svcaddr" "const rpcprog_t prognum" "const rpcvers_t versnum" "const u_int sendsz" "const u_int recvsz"
 .Ft "CLIENT *"
 .Fn clnt_tp_create "const char * host" "const rpcprog_t prognum" "const rpcvers_t versnum" "const struct netconfig *netconf"
 .Ft "CLIENT *"
 .Fn clnt_tp_create_timed "const char * host" "const rpcprog_t prognum" "const rpcvers_t versnum" "const struct netconfig *netconf" "const struct timeval *timeout"
 .Ft "CLIENT *"
-.Fn clnt_vc_create "const int fildes" "const struct netbuf *svcaddr" "const rpcprog_t prognum" "const rpcvers_t versnum" "u_int sendsz" "u_int recvsz"
+.Fn clnt_vc_create "const int fildes" "const struct sockaddr_storage *svcaddr" "const rpcprog_t prognum" "const rpcvers_t versnum" "u_int sendsz" "u_int recvsz"
 .Sh DESCRIPTION
 RPC library routines allow C language programs to make procedure
 calls on other machines across the network.
@@ -77,7 +77,7 @@ the supported values of
 .Fa req
 and their argument types and what they do are:
 .Bl -column CLSET_FD_NCLOSE "struct timeval *" "do not close fd on destroy"
-.It Dv CLGET_SVC_ADDR Ta "struct netbuf *" Ta "get servers address"
+.It Dv CLGET_SVC_ADDR Ta "struct sockaddr_storage *" Ta "get servers address"
 .It Dv CLGET_FD Ta "int *" Ta "get fd from handle"
 .It Dv CLSET_FD_CLOSE Ta "void" Ta "close fd on destroy"
 .It Dv CLSET_FD_NCLOSE Ta void Ta "don't close fd on destroy"

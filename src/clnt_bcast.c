@@ -593,9 +593,9 @@ rpc_broadcast_exp(rpcprog_t prog,	/* program number */
 			if (xdr_replymsg(xdrs, &msg)) {
 				if ((msg.rm_reply.rp_stat == MSG_ACCEPTED)
 				    && (msg.RPCM_ack.ar_stat == SUCCESS)) {
-					struct netbuf *np;
+					struct sockaddr_storage *np;
 #ifdef PORTMAP
-					struct netbuf taddr;
+					struct sockaddr_storage taddr;
 					struct sockaddr_in sin;
 
 					if (pmap_flag && pmap_reply_flag) {
@@ -605,9 +605,7 @@ rpc_broadcast_exp(rpcprog_t prog,	/* program number */
 						    htons(bres_pmap.port);
 						memcpy(&fdlist[i].raddr, &sin,
 						       sizeof(sin));
-						taddr.len = taddr.maxlen =
-						    sizeof(fdlist[i].raddr);
-						taddr.buf = &fdlist[i].raddr;
+						taddr = fdlist[i].raddr;
 						done =
 						    (*eachresult) (resultsp,
 								   &taddr,
@@ -625,12 +623,8 @@ rpc_broadcast_exp(rpcprog_t prog,	/* program number */
 						    (*eachresult) (resultsp, np,
 								   fdlist[i].
 								   nconf);
-						if (np != NULL) {
-							if (np->buf != NULL)
-								mem_free(np->buf,
-									 np->maxlen);
+						if (np != NULL)
 							mem_free(np, sizeof(*np));
-						}
 #ifdef PORTMAP
 					}
 #endif				/* PORTMAP */

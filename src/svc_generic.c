@@ -238,7 +238,7 @@ svc_tli_ncreate(int fd,	/* Connection end point */
 			listen(fd, SOMAXCONN);
 		} else {
 			if (bind
-			    (fd, (struct sockaddr *)bindaddr->addr.buf,
+			    (fd, (struct sockaddr *)&bindaddr->addr,
 			     (socklen_t) si.si_alen) < 0) {
 				__warnx(TIRPC_DEBUG_FLAG_SVC,
 					"svc_tli_ncreate: could not bind to requested "

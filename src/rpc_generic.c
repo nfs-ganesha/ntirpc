@@ -748,7 +748,7 @@ __rpc_sockinfo2netid(struct __rpc_sockinfo *sip, const char **netid)
 }
 
 char *
-taddr2uaddr(const struct netconfig *nconf, const struct netbuf *nbuf)
+taddr2uaddr(const struct netconfig *nconf, const struct sockaddr_storage *nbuf)
 {
 	struct __rpc_sockinfo si;
 
@@ -757,7 +757,7 @@ taddr2uaddr(const struct netconfig *nconf, const struct netbuf *nbuf)
 	return __rpc_taddr2uaddr_af(si.si_af, nbuf);
 }
 
-struct netbuf *
+struct sockaddr_storage *
 uaddr2taddr(const struct netconfig *nconf, const char *uaddr)
 {
 	struct __rpc_sockinfo si;
@@ -768,20 +768,15 @@ uaddr2taddr(const struct netconfig *nconf, const char *uaddr)
 }
 
 char *
-__rpc_taddr2uaddr_af(int af, const struct netbuf *nbuf)
+__rpc_taddr2uaddr_af(int af, const struct sockaddr_storage *ss)
 {
 	char *ret = NULL;
-	struct sockaddr_in *sin;
-	struct sockaddr_un *sun;
-	char namebuf[INET_ADDRSTRLEN];
 #ifdef INET6
-	struct sockaddr_in6 *sin6;
-	char namebuf6[INET6_ADDRSTRLEN];
+	char namebuf[INET6_ADDRSTRLEN];
+#else
+	char namebuf[INET_ADDRSTRLEN];
 #endif
 	u_int16_t port;
-
-	if (nbuf->len <= 0)
-		goto out;
 
 	/* XXX check (fix) this */
 #define RETURN_SIZE (INET6_ADDRSTRLEN + (2 * 6) + 1)
@@ -789,11 +784,9 @@ __rpc_taddr2uaddr_af(int af, const struct netbuf *nbuf)
 
 	switch (af) {
 	case AF_INET:
-		if (nbuf->len < sizeof(*sin)) {
-			mem_free(ret, RETURN_SIZE);
-			return NULL;
-		}
-		sin = nbuf->buf;
+	{
+		struct sockaddr_in *sin = (struct sockaddr_in *)ss;
+
 		if (inet_ntop(af, &sin->sin_addr, namebuf, sizeof(namebuf))
 		    == NULL) {
 			mem_free(ret, RETURN_SIZE);
@@ -807,32 +800,32 @@ __rpc_taddr2uaddr_af(int af, const struct netbuf *nbuf)
 			return NULL;
 		}
 		break;
+	}
 #ifdef INET6
 	case AF_INET6:
-		if (nbuf->len < sizeof(*sin6)) {
-			mem_free(ret, RETURN_SIZE);
-			return NULL;
-		}
-		sin6 = nbuf->buf;
-		if (inet_ntop(af, &sin6->sin6_addr, namebuf6, sizeof(namebuf6))
+	{
+		struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)ss;
+
+		if (inet_ntop(af, &sin6->sin6_addr, namebuf, sizeof(namebuf))
 		    == NULL) {
 			mem_free(ret, RETURN_SIZE);
 			return NULL;
 		}
 		port = ntohs(sin6->sin6_port);
 		if (sprintf(ret, "%s.%u.%u",
-				namebuf6,
+				namebuf,
 				((u_int32_t) port) >> 8,
 				port & 0xff) < 0) {
 			mem_free(ret, RETURN_SIZE);
 			return NULL;
 		}
 		break;
+	}
 #endif
 #ifdef RPC_VSOCK
 	case AF_VSOCK:
 	{
-		struct sockaddr_vm *svm = nbuf->buf;
+		struct sockaddr_vm *svm = (struct sockaddr_vm *)ss;
 		port = svm->svm_port;
 		if (sprintf
 			(ret, "%d.%u.%u", svm->svm_cid, ((u_int32_t)port) >> 8,
@@ -844,7 +837,9 @@ __rpc_taddr2uaddr_af(int af, const struct netbuf *nbuf)
 	break;
 #endif /* VSOCK */
 	case AF_LOCAL:
-		sun = nbuf->buf;
+	{
+		struct sockaddr_un *sun = (struct sockaddr_un *)ss;
+
 		/* if (asprintf(&ret, "%.*s", (int)(sun->sun_len -
 		   offsetof(struct sockaddr_un, sun_path)),
 		   sun->sun_path) < 0) */
@@ -856,29 +851,23 @@ __rpc_taddr2uaddr_af(int af, const struct netbuf *nbuf)
 			return NULL;
 		}
 		break;
+	}
 	default:
 		mem_free(ret, RETURN_SIZE);
 		return NULL;
 	}
 
- out:
 	return ret;
 }
 
-struct netbuf *
+struct sockaddr_storage *
 __rpc_uaddr2taddr_af(int af, const char *uaddr)
 {
-	struct netbuf *ret = NULL;
+	struct sockaddr_storage *ret = mem_zalloc(sizeof(*ret));
 	char *addrstr, *p;
 	unsigned port, portlo, porthi;
-	struct sockaddr_in *sin;
-#ifdef INET6
-	struct sockaddr_in6 *sin6;
-#endif
-	struct sockaddr_un *sun;
 
 	port = 0;
-	sin = NULL;
 	if (uaddr == NULL)
 		return NULL;
 	addrstr = mem_strdup(uaddr);
@@ -902,73 +891,59 @@ __rpc_uaddr2taddr_af(int af, const char *uaddr)
 		port = (porthi << 8) | portlo;
 	}
 
-	ret = (struct netbuf *)mem_zalloc(sizeof(*ret));
-
 	switch (af) {
 	case AF_INET:
-		sin = (struct sockaddr_in *)mem_zalloc(sizeof(*sin));
+	{
+		struct sockaddr_in *sin = (struct sockaddr_in *)ret;
 
 		sin->sin_family = AF_INET;
 		sin->sin_port = htons(port);
 		if (inet_pton(AF_INET, addrstr, &sin->sin_addr) <= 0) {
-			mem_free(sin, sizeof(*sin));
 			mem_free(ret, sizeof(*ret));
 			ret = NULL;
 			goto out;
 		}
-		ret->maxlen = ret->len = sizeof(*sin);
-		ret->buf = sin;
 		break;
+	}
 #ifdef INET6
 	case AF_INET6:
-		sin6 = (struct sockaddr_in6 *)mem_zalloc(sizeof(*sin6));
+	{
+		struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)ret;
 
 		sin6->sin6_family = AF_INET6;
 		sin6->sin6_port = htons(port);
 		if (inet_pton(AF_INET6, addrstr, &sin6->sin6_addr) <= 0) {
-			mem_free(sin6, sizeof(*sin6));
 			mem_free(ret, sizeof(*ret));
 			ret = NULL;
 			goto out;
 		}
-		ret->maxlen = ret->len = sizeof(*sin6);
-		ret->buf = sin6;
 		break;
+	}
 #endif
 #ifdef RPC_VSOCK
 	case AF_VSOCK:
 	{
 		struct sockaddr_in sin;
-		struct sockaddr_vm *svm;
-		svm = (struct sockaddr_vm *) mem_zalloc(
-			sizeof(struct sockaddr_vm));
-		if (svm == NULL)
-			goto out;
-		svm->svm_family = AF_VSOCK;
+		struct sockaddr_vm *svm = (struct sockaddr_vm *)ret;
+
 		memset(&sin, 0, sizeof(sin));
 		sin.sin_family = AF_INET;
 		sin.sin_port = htons(port);
 		if (inet_pton(AF_INET, addrstr, &sin.sin_addr) <= 0) {
-			mem_free(svm, 0);
-			mem_free(ret, 0);
+			mem_free(ret, sizeof(*ret));
 			ret = NULL;
 			goto out;
 		}
 		svm->svm_cid = sin.sin_addr.s_addr;
 		svm->svm_port = port;
-		ret->maxlen = ret->len = sizeof(struct sockaddr_vm);
-		ret->buf = svm;
 	}
 	break;
 #endif /* VSOCK */
 	case AF_LOCAL:
-		sun = (struct sockaddr_un *)mem_zalloc(sizeof(*sun));
+		struct sockaddr_un *sun = (struct sockaddr_un *)ret;
 
 		sun->sun_family = AF_LOCAL;
 		strlcpy(sun->sun_path, addrstr, sizeof(sun->sun_path));
-		ret->len = SUN_LEN(sun);
-		ret->maxlen = sizeof(struct sockaddr_un);
-		ret->buf = sun;
 		break;
 	default:
 		mem_free(ret, sizeof(*ret));
@@ -1022,19 +997,16 @@ __rpc_socktype2seman(int socktype)
  * the scope id of the server address over to the service address.
  */
 int
-__rpc_fixup_addr(struct netbuf *new, const struct netbuf *svc)
+__rpc_fixup_addr(struct sockaddr_storage *new,
+		 const struct sockaddr_storage *svc)
 {
 #ifdef INET6
-	struct sockaddr *sa_new, *sa_svc;
 	struct sockaddr_in6 *sin6_new, *sin6_svc;
 
-	sa_svc = (struct sockaddr *)svc->buf;
-	sa_new = (struct sockaddr *)new->buf;
-
-	if (sa_new->sa_family == sa_svc->sa_family
-	    && sa_new->sa_family == AF_INET6) {
-		sin6_new = (struct sockaddr_in6 *)new->buf;
-		sin6_svc = (struct sockaddr_in6 *)svc->buf;
+	if (new->ss_family == svc->ss_family
+	    && new->ss_family == AF_INET6) {
+		sin6_new = (struct sockaddr_in6 *)new;
+		sin6_svc = (struct sockaddr_in6 *)svc;
 
 		if ((IN6_IS_ADDR_LINKLOCAL(&sin6_new->sin6_addr)
 		     && IN6_IS_ADDR_LINKLOCAL(&sin6_svc->sin6_addr))
@@ -1087,20 +1059,4 @@ int __rpc_sockisbound(int fd)
 	}
 
 	return 0;
-}
-
-/*
- * Helper function to set up a netbuf
- */
-struct netbuf *
-__rpc_set_netbuf(struct netbuf *nb, const void *ptr, size_t len)
-{
-	if (nb->len != len) {
-		if (nb->len)
-			mem_free(nb->buf, nb->len);
-		nb->buf = mem_zalloc(len);
-		nb->maxlen = nb->len = len;
-	}
-	memcpy(nb->buf, ptr, len);
-	return nb;
 }

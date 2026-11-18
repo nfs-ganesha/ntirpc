@@ -354,6 +354,7 @@ struct svc_xprt {
 	int xp_type;		/* xprt type */
 	char *xp_ip;		/* remote ip */
 	int xp_port;		/* remote port */
+	int xp_local_port;	/* local port */
 
 	int32_t xp_refcnt;	/* handle reference count */
 	uint16_t xp_flags;	/* flags */
@@ -449,8 +450,6 @@ struct svc_req {
 /*
  *  Approved way of getting addresses
  */
-#define svc_getcaller_netbuf(x) (&(x)->xp_remote.nb)
-#define svc_getlocal_netbuf(x) (&(x)->xp_local.nb)
 #define svc_getrpccaller(x) (&(x)->xp_remote.ss)
 #define svc_getrpclocal(x) (&(x)->xp_local.ss)
 
@@ -741,8 +740,7 @@ extern void svc_unreg(const rpcprog_t, const rpcvers_t);
 __END_DECLS
 /*
  * This is used to set local and remote addresses in a way legacy
- * apps can deal with, at the same time setting up a corresponding
- * netbuf -- with no alloc/free needed.
+ * apps can deal with.
  */
 __BEGIN_DECLS
 extern u_int __rpc_address_port(struct rpc_address *);
@@ -751,9 +749,7 @@ extern void __rpc_address_set_length(struct rpc_address *, socklen_t);
 static inline void
 __rpc_address_setup(struct rpc_address *rpca)
 {
-	rpca->nb.buf = &rpca->ss;
-	rpca->nb.len =
-	rpca->nb.maxlen = sizeof(struct sockaddr_storage);
+	rpca->len = sizeof(struct sockaddr_storage);
 }
 __END_DECLS
 /*

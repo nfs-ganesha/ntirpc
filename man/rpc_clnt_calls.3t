@@ -179,7 +179,7 @@ this routine calls
 .Fn eachresult ,
 whose form is:
 .Ft bool_t
-.Fn eachresult "void *out" "const struct netbuf *addr" "const struct netconfig *netconf"
+.Fn eachresult "void *out" "const struct sockaddr_storage *addr" "const struct netconfig *netconf"
 where
 .Fa out
 is the same as
