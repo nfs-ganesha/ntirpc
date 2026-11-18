@@ -172,6 +172,15 @@ typedef struct svc_init_params {
 	/* TCP zerocopy parameters (Linux MSG_ZEROCOPY) */
 	bool tcp_zerocopy_enabled;	/* enable/disable TCP MSG_ZEROCOPY, non-dynamic */
 	uint32_t tcp_zerocopy_min_bytes; /* minimum send size for ZC in bytes, dynamic */
+	uint32_t tcp_zerocopy_max_pending; /* max outstanding ZC bytes/xprt; 0=64MiB */
+
+	/*
+	 * Ganesha / FSAL-facing aliases (same values as tcp_zerocopy_*).
+	 * Prefer tcp_* in new ntirpc code; socket_* kept for existing callers.
+	 */
+	bool socket_zerocopy;		/* dynamic alias of tcp_zerocopy_enabled */
+	u_int socket_zerocopy_threshold;	/* alias of tcp_zerocopy_min_bytes */
+	u_int socket_zerocopy_max_pending;	/* alias of tcp_zerocopy_max_pending */
 } svc_init_params;
 
 /* Svc param flags */
@@ -492,6 +501,24 @@ extern void svc_resume(struct svc_req *req);
 
 /** Enable/disable fine-grained IO stage stamps in ntirpc (runtime). */
 extern void svc_set_stage_timing(bool enable);
+/** Enable/disable socket TX zerocopy at runtime (affects new accepts + sends). */
+extern void svc_set_socket_zerocopy(bool enable);
+
+/** Snapshot of MSG_ZEROCOPY counters (atomically read; best-effort). */
+struct svc_socket_zerocopy_stats {
+	bool enabled;
+	u_int threshold;
+	u_int max_pending;
+	uint64_t sends;
+	uint64_t completions;
+	uint64_t copied; /* SO_EE_CODE_ZEROCOPY_COPIED */
+	uint64_t enobufs;
+	uint64_t fallback;
+};
+
+extern void svc_get_socket_zerocopy_stats(struct svc_socket_zerocopy_stats *out);
+extern void svc_reset_socket_zerocopy_stats(void);
+
 
 extern void svc_rqst_qos_suspend_socket(struct svc_xprt *xprt);
 

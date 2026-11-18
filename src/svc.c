@@ -277,13 +277,20 @@ svc_init(svc_init_params *params)
 /* TCP zerocopy parameters (Linux MSG_ZEROCOPY) */
 #if defined(HAVE_TCP_ZEROCOPY) || (defined(__linux__) && defined(MSG_ZEROCOPY) && defined(SO_ZEROCOPY))
 	if (!update) {
+		/* Prefer Ganesha socket_* aliases when set; else tcp_*. */
 		__svc_params->tcp_zerocopy_enabled =
-			params->tcp_zerocopy_enabled;
+			params->socket_zerocopy || params->tcp_zerocopy_enabled;
+	} else if (params->socket_zerocopy !=
+		   __svc_params->tcp_zerocopy_enabled) {
+		/* Allow runtime toggle via socket_* / svc_set_socket_zerocopy. */
+		__svc_params->tcp_zerocopy_enabled = params->socket_zerocopy;
 	}
 	{
-		uint32_t min_bytes = (params->tcp_zerocopy_min_bytes > 0)
-			? params->tcp_zerocopy_min_bytes
-			: (update ? 0 : 16384); /* 16 KiB default */
+		uint32_t min_bytes = params->socket_zerocopy_threshold
+			? params->socket_zerocopy_threshold
+			: (params->tcp_zerocopy_min_bytes > 0)
+				? params->tcp_zerocopy_min_bytes
+				: (update ? 0 : 16384); /* 16 KiB default */
 		if (min_bytes > 0) {
 			/* Round up to the next page-aligned size so that
 			 * MSG_ZEROCOPY zero-copy is always triggered on a
@@ -294,6 +301,15 @@ svc_init(svc_init_params *params)
 				min_bytes = (min_bytes + page_size - 1) &
 					    ~(page_size - 1);
 			__svc_params->tcp_zerocopy_min_bytes = min_bytes;
+		}
+		{
+			uint32_t max_pend = params->socket_zerocopy_max_pending
+				? params->socket_zerocopy_max_pending
+				: (params->tcp_zerocopy_max_pending > 0)
+					? params->tcp_zerocopy_max_pending
+					: (update ? 0 : (64 * 1024 * 1024));
+			if (max_pend > 0)
+				__svc_params->tcp_zerocopy_max_pending = max_pend;
 		}
 	}
 #endif
@@ -321,6 +337,47 @@ void svc_set_stage_timing(bool enable)
 {
 	__svc_params->stage_timing = enable;
 }
+
+void svc_set_socket_zerocopy(bool enable)
+{
+#if defined(__linux__) && defined(MSG_ZEROCOPY) && defined(SO_ZEROCOPY)
+	__svc_params->tcp_zerocopy_enabled = enable;
+#else
+	(void)enable;
+#endif
+}
+
+void svc_get_socket_zerocopy_stats(struct svc_socket_zerocopy_stats *out)
+{
+	if (!out)
+		return;
+#if defined(__linux__) && defined(MSG_ZEROCOPY) && defined(SO_ZEROCOPY)
+	out->enabled = __svc_params->tcp_zerocopy_enabled;
+	out->threshold = __svc_params->tcp_zerocopy_min_bytes;
+	out->max_pending = __svc_params->tcp_zerocopy_max_pending;
+	out->sends = __sync_fetch_and_add(&__svc_params->zc_stats.sends, 0);
+	out->completions =
+	    __sync_fetch_and_add(&__svc_params->zc_stats.completions, 0);
+	out->copied = __sync_fetch_and_add(&__svc_params->zc_stats.copied, 0);
+	out->enobufs = __sync_fetch_and_add(&__svc_params->zc_stats.enobufs, 0);
+	out->fallback =
+	    __sync_fetch_and_add(&__svc_params->zc_stats.fallback, 0);
+#else
+	memset(out, 0, sizeof(*out));
+#endif
+}
+
+void svc_reset_socket_zerocopy_stats(void)
+{
+#if defined(__linux__) && defined(MSG_ZEROCOPY) && defined(SO_ZEROCOPY)
+	__sync_lock_test_and_set(&__svc_params->zc_stats.sends, 0);
+	__sync_lock_test_and_set(&__svc_params->zc_stats.completions, 0);
+	__sync_lock_test_and_set(&__svc_params->zc_stats.copied, 0);
+	__sync_lock_test_and_set(&__svc_params->zc_stats.enobufs, 0);
+	__sync_lock_test_and_set(&__svc_params->zc_stats.fallback, 0);
+#endif
+}
+
 
 /* ***************  SVCXPRT related stuff **************** */
 

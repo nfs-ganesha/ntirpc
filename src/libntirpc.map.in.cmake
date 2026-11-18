@@ -140,6 +140,9 @@ NTIRPC_${NTIRPC_VERSION_BASE} {
     svc_fd_ncreatef;
     svc_init;
     svc_set_stage_timing;
+    svc_set_socket_zerocopy;
+    svc_get_socket_zerocopy_stats;
+    svc_reset_socket_zerocopy_stats;
     svc_ncreate;
     svc_raw_ncreate;
     svc_reg;

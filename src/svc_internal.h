@@ -92,6 +92,15 @@ struct svc_params {
 #if defined(__linux__) && defined(MSG_ZEROCOPY) && defined(SO_ZEROCOPY)
 	bool tcp_zerocopy_enabled;	/* enable/disable TCP MSG_ZEROCOPY */
 	uint32_t tcp_zerocopy_min_bytes; /* minimum send size for ZC in bytes */
+	uint32_t tcp_zerocopy_max_pending; /* max outstanding ZC bytes per xprt */
+	/* Socket ZC metrics (atomically updated; best-effort) */
+	struct {
+		uint64_t sends;
+		uint64_t completions;
+		uint64_t copied;	/* SO_EE_CODE_ZEROCOPY_COPIED */
+		uint64_t enobufs;
+		uint64_t fallback;
+	} zc_stats;
 #endif
 };
 
