@@ -1676,14 +1676,31 @@ tls_dpr:
 		 * already disarmed this registration — rearm the same side
 		 * or recv/send stays hung forever. Lone EPOLLHUP is left to
 		 * the unhandled path (connection is going away).
+		 *
+		 * Without ZC interest, EPOLLERR is a real socket error —
+		 * destroy instead of rearming (avoids work-pool storms).
 		 */
 		const bool is_send =
 			(ev_data.data.unique_id & SVC_EPOLL_SEND_FLAG) != 0;
 		uint16_t rearm_flag = is_send ? SVC_XPRT_FLAG_ADDED_SEND
 					      : SVC_XPRT_FLAG_ADDED_RECV;
 		uint16_t xp_flags;
+		bool zc_active;
 
 		if (ev->events & EPOLLHUP) {
+			SVC_RELEASE(&rec->xprt, SVC_RELEASE_FLAG_NONE);
+			return NULL;
+		}
+
+		zc_active = rec->zc_sock_ok ||
+			     atomic_fetch_uint32_t(&rec->zc_inflight) > 0 ||
+			     atomic_fetch_uint32_t(&rec->zc_pending_bytes) > 0;
+		if (!zc_active) {
+			__warnx(TIRPC_DEBUG_FLAG_EVENT,
+				"%s: %p fd %d EPOLLERR without ZC (ev %08x); destroying",
+				__func__, &rec->xprt, rec->xprt.xp_fd,
+				ev->events);
+			SVC_DESTROY(&rec->xprt);
 			SVC_RELEASE(&rec->xprt, SVC_RELEASE_FLAG_NONE);
 			return NULL;
 		}
