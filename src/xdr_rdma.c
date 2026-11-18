@@ -1582,7 +1582,8 @@ xdr_rdma_svc_recv(struct rpc_rdma_cbc *cbc, u_int32_t xid)
 	/* Both sendq and recvq (xdrs)->x_lib[1] points to xprt */
 	rdma_xprt = x_rdma_xprt(cbc->recvq.xdrs);
 
-	(void)clock_gettime(CLOCK_MONOTONIC_FAST, &rdma_xprt->sm_dr.recv.ts);
+	/* Fine CLOCK_MONOTONIC: feeds rq_stime; must match Ganesha now_mono(). */
+	(void)clock_gettime(CLOCK_MONOTONIC, &rdma_xprt->sm_dr.recv.ts);
 
 	if (rdma_xprt->sm_dr.xprt.xp_flags & SVC_XPRT_FLAG_DESTROYED) {
 		__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA | TIRPC_DEBUG_FLAG_ERROR, " %s rdma_xprt %p cbc %p "

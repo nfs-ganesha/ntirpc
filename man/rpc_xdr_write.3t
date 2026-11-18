@@ -1,0 +1,310 @@
+.\" Copyright (c) 2026 NFS-Ganesha / ntirpc contributors
+.Dd November 18, 2026
+.Dt RPC_XDR_WRITE 3
+.Os ntirpc
+.Sh NAME
+.Nm rpc_xdr_write ,
+.Nm xdr_ioq_donate_iovs ,
+.Nm xdr_ioq_donate_cancel ,
+.Nm xdr_ioq_donate_deleter ,
+.Nm xdr_ioq_set_payload_alloc ,
+.Nm xdr_ioq_has_payload_alloc ,
+.Nm xdr_ioq_fill_payload ,
+.Nm svc_vc_set_payload_defer ,
+.Nm svc_vc_body_remain ,
+.Nm svc_vc_readv_body ,
+.Nm svc_vc_drain_body_remain
+.Nd upper-layer ownership of NFS WRITE decode buffers
+.Sh LIBRARY
+.Lb libntirpc
+.Sh SYNOPSIS
+.In rpc/rpc.h
+.In rpc/xdr_ioq.h
+.Ft "struct xdr_donate_cookie *"
+.Fn xdr_ioq_donate_iovs "XDR *xdrs" "const struct iovec *iov" "int iovcnt"
+.Ft void
+.Fn xdr_ioq_donate_cancel "struct xdr_donate_cookie *cookie"
+.Ft void
+.Fn xdr_ioq_donate_deleter "void *buf" "size_t len" "void *priv"
+.Ft void
+.Fn xdr_ioq_set_payload_alloc "XDR *xdrs" "xdr_payload_alloc_fn fn" "void *ctx"
+.Ft bool
+.Fn xdr_ioq_has_payload_alloc "XDR *xdrs"
+.Ft bool
+.Fn xdr_ioq_fill_payload "XDR *xdrs" "u_int start" "u_int data_len" "struct iovec **iov_out" "int *iovcnt_out" "void **cookie_out" "void (**release_out)(void *cookie)"
+.Ft void
+.Fn svc_vc_set_payload_defer "SVCXPRT *xprt" "bool enable" "u_int hdr_stage_max"
+.Ft uint32_t
+.Fn svc_vc_body_remain "SVCXPRT *xprt"
+.Ft ssize_t
+.Fn svc_vc_readv_body "SVCXPRT *xprt" "struct iovec *iov" "int iovcnt" "size_t iov_off" "size_t nbytes"
+.Ft bool
+.Fn svc_vc_drain_body_remain "SVCXPRT *xprt"
+.Sh DESCRIPTION
+By default, TCP recv fills the full RPC LAST_FRAG into ntirpc-owned
+.Dv UIO_FLAG_FREE
+buffers before upper-layer WRITE decode knows the length.
+That forces a later copy (or an unsafe claim) into FSAL / Ceph pages.
+.Pp
+ntirpc offers two complementary zero-copy recv paths for WRITE:
+.Bl -enum
+.It
+.Em Donate
+already-buffered FREE pages after decode knows the iov layout
+.Pq claim style .
+.It
+.Em Allocate-own
+pages from the upper layer, optionally staging only a header window on the
+socket and
+.Fn readv Ns -ing
+the body straight into those pages.
+.El
+.Pp
+These APIs are independent of TCP transmit
+.Dv MSG_ZEROCOPY
+.Pq see Xr rpc_svc_zerocopy 3 ;
+both layers can be used together for end-to-end savings.
+.Ss Path 1: donate recv buffers (claim_iov)
+Use when the WRITE opaque already sits in ntirpc FREE UVs and the backend can
+take ownership of those pages.
+.Bl -enum
+.It
+Build an
+.Vt iovec
+describing the payload slices (as
+.Dv XDR_FILLBUFS
+/
+.Dv XDR_IOVCOUNT
+would expose).
+.It
+Call
+.Fn xdr_ioq_donate_iovs
+with that iov.
+On success, matching UVs are marked
+.Dv UIO_FLAG_DONATED
+(FREE cleared) so
+.Dv XDR_DESTROY
+will not
+.Fn free_buffer
+them.
+.It
+Pass the returned cookie as
+.Fa priv
+to the claim deleter
+.Fn xdr_ioq_donate_deleter
+when the FSAL / Ceph path releases each slice.
+The deleter frees each underlying UV base when its last donated slice is
+released, then frees the cookie.
+.It
+If claim / submit never takes the buffers, call
+.Fn xdr_ioq_donate_cancel
+before destroy to restore FREE and free the cookie.
+.El
+.Pp
+.Fn xdr_ioq_donate_iovs
+returns
+.Dv NULL
+(and changes nothing) if
+.Fa xdrs
+is not an ioq stream or any iov cannot be mapped to a FREE UV
+.Pq all-or-nothing .
+.Ss Path 2: upper-layer alloc + fill_payload
+Use when the export wants the FSAL to own pages from the first payload byte
+.Pq for example Ceph allocate_own_write_buffer .
+.Pp
+Register an allocator on the decode stream before filling the opaque:
+.Bd -literal -offset indent
+typedef bool (*xdr_payload_alloc_fn)(void *ctx, u_int data_len,
+    struct iovec **iov_out, int *iovcnt_out,
+    void **cookie_out,
+    void (**release_out)(void *cookie));
+.Ed
+.Pp
+.Fa data_len
+is the exact payload byte count (no XDR pad).
+On success the callback returns an iovec array owned with
+.Fa cookie_out ;
+.Fa release_out
+is invoked as
+.Fn release cookie
+if fill fails after alloc, or by the FSAL if it declines ownership.
+.Bd -literal -offset indent
+xdr_ioq_set_payload_alloc(xdrs, my_alloc, my_ctx);
+if (!xdr_ioq_fill_payload(xdrs, start, data_len,
+			  &iov, &iovcnt, &cookie, &release)) {
+	/* Do NOT fall back to XDR_FILLBUFS when a callback is set:
+	 * deferred socket body is invisible to IOVCOUNT. */
+	return NFS4ERR_INVAL;
+}
+/* Hand iov/cookie to the FSAL write path, or release(cookie). */
+.Ed
+.Pp
+.Fn xdr_ioq_fill_payload
+then:
+.Bl -bullet
+.It
+Calls the registered
+.Fn payload_alloc
+for
+.Fa data_len
+bytes.
+.It
+Copies any body already buffered at
+.Fa start
+into those pages.
+.It
+.Fn readv Ns s
+any VC-deferred remainder from the socket into the same pages.
+.It
+Appends
+.Dv UIO_FLAG_UPPER
+UVs for deferred bytes so
+.Dv XDR_SETPOS
+past
+.Fn RNDUP data_len
+succeeds.
+.It
+Pulls any trailing deferred bytes (compound ops after WRITE) into a FREE UV
+for continued decode.
+.El
+.Pp
+On success,
+.Fa iov_out ,
+.Fa cookie_out ,
+and
+.Fa release_out
+are owned by the caller; do not
+.Fn free_buffer
+the iov bases.
+.Fn xdr_ioq_has_payload_alloc
+reports whether a callback is installed.
+.Ss Optional VC header staging (payload defer)
+Without defer, recv still pulls the entire LAST_FRAG into FREE UVs before
+decode.
+For large WRITEs, enable staging at TCP accept
+.Em before
+the first recv:
+.Bd -literal -offset indent
+/* e.g. in the accept / new-xprt hook */
+svc_vc_set_payload_defer(xprt, true, 0);  /* 0 => default 256 KiB */
+.Ed
+.Pp
+When enabled, a large LAST_FRAG stages only
+.Fa hdr_stage_max
+bytes into a FREE UV; the remainder stays on the socket as
+.Va sx_body_remain
+until
+.Fn xdr_ioq_fill_payload
+(or a drain) consumes it.
+EPOLLIN is not rearmed until after
+.Fn svc_request
+returns so a concurrent recv cannot steal the body.
+.Pp
+.Sy Important :
+enable defer at accept time.
+Turning it on mid-request after EPOLLIN was rearmed races a concurrent recv
+into
+.Va body_remain
+and can hang a worker in drain.
+.Pp
+Helpers:
+.Bl -tag -width svc_vc_drain_body_remainXX
+.It Fn svc_vc_body_remain
+Bytes still deferred on the socket for the in-flight call (0 if none).
+.It Fn svc_vc_readv_body
+Read up to
+.Fa nbytes
+of deferred body into
+.Fa iov
+starting at byte
+.Fa iov_off ;
+decrements
+.Va sx_body_remain .
+Returns bytes read, or \-1 on error.
+.It Fn svc_vc_drain_body_remain
+Discard leftover deferred body into a throwaway buffer (stream sync).
+Returns
+.Dv true
+if fully discarded (or none remained);
+.Dv false
+on read failure — leave the xprt for destroy rather than desync the stream.
+.El
+.Pp
+After a failed decode with defer enabled, ntirpc drains leftovers; a failed
+drain destroys the transport (fail-closed).
+.Ss Typical Ganesha / FSAL flow
+.Bl -enum
+.It
+At TCP accept, optionally
+.Fn svc_vc_set_payload_defer
+when the server will use allocate-own WRITE.
+.It
+On COMPOUND / WRITE decode, if the export wants own buffers, call
+.Fn xdr_ioq_set_payload_alloc
+then
+.Fn xdr_ioq_fill_payload
+instead of
+.Dv XDR_FILLBUFS .
+.It
+Otherwise, after classic fillbufs, optionally
+.Fn xdr_ioq_donate_iovs
+and pass
+.Fn xdr_ioq_donate_deleter
+as the claim release.
+.It
+Never mix fill_payload fallback to FILLBUFS when a payload_alloc callback is
+registered.
+.El
+.Ss UV ownership flags
+.Bl -tag -width UIO_FLAG_DONATED
+.It Dv UIO_FLAG_FREE
+ntirpc-owned; destroyed with the ioq.
+.It Dv UIO_FLAG_DONATED
+Ownership transferred via donate; skip
+.Fn free_buffer
+on destroy; release via
+.Fn xdr_ioq_donate_deleter .
+.It Dv UIO_FLAG_UPPER
+Upper-layer pages from
+.Fn fill_payload ;
+skip
+.Fn free_buffer ;
+caller releases via the fill cookie.
+.It Dv UIO_FLAG_REFER
+Gifted reply pages (TX path); unrelated to WRITE donate, but often paired
+with socket
+.Dv MSG_ZEROCOPY
+on the response.
+.El
+.Sh RETURN VALUES
+.Fn xdr_ioq_donate_iovs
+returns a cookie on success, or
+.Dv NULL
+on failure.
+.Fn xdr_ioq_fill_payload
+and
+.Fn xdr_ioq_has_payload_alloc
+return
+.Dv true
+on success / when set,
+.Dv false
+otherwise.
+.Fn svc_vc_body_remain
+returns the deferred byte count.
+.Fn svc_vc_readv_body
+returns a byte count or \-1.
+.Fn svc_vc_drain_body_remain
+returns
+.Dv true
+on full discard,
+.Dv false
+on I/O failure.
+.Sh SEE ALSO
+.Xr rpc 3 ,
+.Xr rpc_svc_create 3 ,
+.Xr rpc_svc_zerocopy 3 ,
+.Xr rpc_xdr 3 ,
+.Xr readv 2
+.Sh HISTORY
+Upper-layer WRITE donate and deferred fill_payload support were added so
+FSALs can own recv pages without an extra copy out of ntirpc FREE buffers.

@@ -1,0 +1,258 @@
+.\" Copyright (c) 2026 NFS-Ganesha / ntirpc contributors
+.Dd November 18, 2026
+.Dt RPC_SVC_ZEROCOPY 3
+.Os ntirpc
+.Sh NAME
+.Nm rpc_svc_zerocopy ,
+.Nm svc_init ,
+.Nm svc_set_socket_zerocopy ,
+.Nm svc_get_socket_zerocopy_stats ,
+.Nm svc_reset_socket_zerocopy_stats
+.Nd TCP transmit zerocopy for large RPC replies
+.Sh LIBRARY
+.Lb libntirpc
+.Sh SYNOPSIS
+.In rpc/rpc.h
+.Ft bool
+.Fn svc_init "svc_init_params *params"
+.Ft void
+.Fn svc_set_socket_zerocopy "bool enable"
+.Ft void
+.Fn svc_get_socket_zerocopy_stats "struct svc_socket_zerocopy_stats *out"
+.Ft void
+.Fn svc_reset_socket_zerocopy_stats "void"
+.Sh DESCRIPTION
+On Linux, ntirpc can send large connection-oriented (TCP) RPC replies with
+.Dv MSG_ZEROCOPY
+after
+.Dv SO_ZEROCOPY
+is set on the accepted socket.
+Eligible sends avoid copying userspace payload into kernel skbuffs.
+The kernel pins the iovec pages until it posts a completion on the socket
+error queue
+.Pq Dv MSG_ERRQUEUE ,
+surfaced as
+.Dv EPOLLERR
+/
+.Dv POLLERR
+(not ordinary
+.Dv EPOLLIN
+/
+.Dv EPOLLOUT ) .
+ntirpc drains those completions and only then destroys the reply XDR,
+including gifted
+.Pq Dv UIO_FLAG_REFER
+buffers.
+.Pp
+The feature is optional and off by default.
+Compile-time support is advertised as
+.Dv SVC_PARAM_HAS_TCP_ZEROCOPY
+when the platform provides
+.Dv SO_ZEROCOPY
+and
+.Dv MSG_ZEROCOPY .
+If
+.Fn setsockopt
+fails at accept time, that transport falls back to classic
+.Fn sendmsg
+for its lifetime.
+.Ss Enabling via svc_init
+Configure fields in
+.Vt svc_init_params
+before calling
+.Fn svc_init .
+Two parallel name sets exist; either may be used:
+.Bl -tag -width tcp_zerocopy_max_pendingXX
+.It Va tcp_zerocopy_enabled / Va socket_zerocopy
+When true, call
+.Dv setsockopt(SO_ZEROCOPY)
+on newly accepted TCP sockets and allow
+.Dv MSG_ZEROCOPY
+on eligible sends.
+Default: false.
+Prefer
+.Va tcp_zerocopy_*
+in new ntirpc code;
+.Va socket_zerocopy*
+aliases are kept for NFS-Ganesha / FSAL callers.
+.It Va tcp_zerocopy_min_bytes / Va socket_zerocopy_threshold
+Minimum reply size in bytes before attempting
+.Dv MSG_ZEROCOPY .
+Zero selects the default (16 KiB).
+The value is rounded up to a page boundary.
+Gifted
+.Dv UIO_FLAG_REFER
+payloads (for example Ceph READ pages) use this threshold as-is;
+other payloads use twice the threshold so small non-refer replies stay on the
+classic path.
+.It Va tcp_zerocopy_max_pending / Va socket_zerocopy_max_pending
+Cap on outstanding uncompleted zerocopy payload bytes per transport.
+Zero selects the default (64 MiB).
+Sends that would exceed the cap fall back to classic
+.Fn sendmsg
+and increment the
+.Va fallback
+counter.
+.El
+.Pp
+Example:
+.Bd -literal -offset indent
+svc_init_params p = { 0 };
+
+p.flags = SVC_INIT_EPOLL;
+#ifdef SVC_PARAM_HAS_TCP_ZEROCOPY
+p.tcp_zerocopy_enabled = true;
+p.tcp_zerocopy_min_bytes = 16384;       /* 0 = default 16 KiB */
+p.tcp_zerocopy_max_pending = 0;         /* 0 = default 64 MiB */
+/* Or Ganesha-style aliases:
+ * p.socket_zerocopy = true;
+ * p.socket_zerocopy_threshold = 16384;
+ * p.socket_zerocopy_max_pending = 0;
+ */
+#endif
+if (!svc_init(&p))
+	err(1, "svc_init");
+.Ed
+.Ss Runtime control
+.Fn svc_set_socket_zerocopy
+toggles the feature after init.
+It updates the process-wide enable flag used by subsequent eligibility checks
+and by accept-time
+.Dv SO_ZEROCOPY
+setup.
+Sockets already accepted keep their existing
+.Va zc_sock_ok
+state until closed; disabling stops new
+.Dv MSG_ZEROCOPY
+sends even on sockets that still have the option set.
+.Ss When MSG_ZEROCOPY is used
+For each TCP reply flush chunk, ntirpc selects
+.Dv MSG_ZEROCOPY
+only when all of the following hold:
+.Bl -bullet
+.It
+.Va tcp_zerocopy_enabled
+is true.
+.It
+Accept-time
+.Dv SO_ZEROCOPY
+succeeded
+.Pq Va zc_sock_ok
+on that transport.
+.It
+Remaining bytes meet the REFER-aware threshold described above.
+.It
+Outstanding zerocopy bytes plus this send fit under
+.Va tcp_zerocopy_max_pending .
+.It
+The send is not going through an established TLS path
+(TLS encrypts into its own buffers; cleartext
+.Dv MSG_ZEROCOPY
+does not apply).
+.El
+.Pp
+.Dv ENOBUFS
+on a zerocopy attempt retries that chunk once without
+.Dv MSG_ZEROCOPY
+and counts
+.Va enobufs
+/
+.Va fallback .
+.Ss Completions and buffer lifetime
+Successful
+.Dv MSG_ZEROCOPY
+sends assign per-socket cookies tracked on the reply ioq.
+The ioq (and any
+.Dv UIO_FLAG_REFER
+pages it holds) stays alive until the kernel reports completion via
+.Dv MSG_ERRQUEUE .
+Callers that gift buffers into the XDR ioq must not free them until ntirpc
+destroys that ioq after completion.
+.Pp
+Loopback and some paths may complete with
+.Dv SO_EE_CODE_ZEROCOPY_COPIED
+(kernel deferred copy).
+After the first such notice on a transport, ntirpc clears
+.Va zc_sock_ok
+so later sends on that socket omit
+.Dv MSG_ZEROCOPY ;
+in-flight completions are still drained.
+.Pp
+.Dv EPOLLERR
+with no active zerocopy interest
+.Pq Va zc_sock_ok
+false and no in-flight / pending ZC
+is treated as a real socket error: the transport is destroyed instead of
+rearmed, to avoid an event storm.
+.Ss Statistics
+.Bd -literal -offset indent
+struct svc_socket_zerocopy_stats {
+	bool enabled;
+	u_int threshold;
+	u_int max_pending;
+	uint64_t sends;
+	uint64_t completions;
+	uint64_t copied;    /* SO_EE_CODE_ZEROCOPY_COPIED */
+	uint64_t enobufs;
+	uint64_t fallback;
+};
+.Ed
+.Pp
+.Fn svc_get_socket_zerocopy_stats
+fills a best-effort atomic snapshot of the counters and the effective
+threshold / max-pending.
+.Fn svc_reset_socket_zerocopy_stats
+clears the counters only
+.Pq not the enable / threshold / max-pending settings .
+On platforms without zerocopy support the getters zero the structure and the
+setters are no-ops.
+.Ss NFS-Ganesha configuration
+When used under NFS-Ganesha, the same knobs are typically mapped from
+.Va NFS_Core_Param
+into
+.Vt svc_init_params
+via the
+.Va socket_zerocopy*
+aliases:
+.Bd -literal -offset indent
+NFS_Core_Param {
+	Enable_Socket_Zerocopy = true;
+	Socket_Zerocopy_Threshold = 16384;   /* 0 = ntirpc default */
+	Socket_Zerocopy_Max_Pending = 0;     /* 0 = ntirpc default */
+}
+.Ed
+.Ss Debugging
+Enable the
+.Dv TIRPC_DEBUG_FLAG_ZEROCOPY_TX
+debug flag to log
+.Dv SO_ZEROCOPY
+setup,
+.Dv MSG_ZEROCOPY
+send decisions, completions, and copied / fallback events.
+.Sh RETURN VALUES
+.Fn svc_init
+returns
+.Dv true
+on success,
+.Dv false
+on failure.
+.Fn svc_set_socket_zerocopy ,
+.Fn svc_get_socket_zerocopy_stats ,
+and
+.Fn svc_reset_socket_zerocopy_stats
+return no value.
+.Sh SEE ALSO
+.Xr sendmsg 2 ,
+.Xr setsockopt 2 ,
+.Xr rpc 3 ,
+.Xr rpc_svc_calls 3 ,
+.Xr rpc_svc_create 3 ,
+.Xr rpc_xdr_write 3
+.Pp
+Linux kernel documentation:
+.Lk https://docs.kernel.org/networking/msg_zerocopy.html MSG_ZEROCOPY
+.Sh HISTORY
+TCP reply zerocopy support was added to ntirpc for large
+.Fn svc_vc_create
+sends with deferred buffer release on ERRQUEUE completion,
+per-transport pending-byte caps, and REFER-aware size thresholds.

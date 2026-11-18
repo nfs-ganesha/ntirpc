@@ -66,6 +66,8 @@ struct svc_params {
 	svc_xprt_fun_t disconnect_cb;
 	svc_xprt_alloc_fun_t alloc_cb;
 	svc_xprt_free_fun_t free_cb;
+	svc_reply_done_fun_t reply_done_cb;
+	bool stage_timing;
 
 	struct {
 		int ctx_hash_partitions;
@@ -90,6 +92,15 @@ struct svc_params {
 #if defined(__linux__) && defined(MSG_ZEROCOPY) && defined(SO_ZEROCOPY)
 	bool tcp_zerocopy_enabled;	/* enable/disable TCP MSG_ZEROCOPY */
 	uint32_t tcp_zerocopy_min_bytes; /* minimum send size for ZC in bytes */
+	uint32_t tcp_zerocopy_max_pending; /* max outstanding ZC bytes per xprt */
+	/* Socket ZC metrics (atomically updated; best-effort) */
+	struct {
+		uint64_t sends;
+		uint64_t completions;
+		uint64_t copied;	/* SO_EE_CODE_ZEROCOPY_COPIED */
+		uint64_t enobufs;
+		uint64_t fallback;
+	} zc_stats;
 #endif
 };
 
@@ -133,6 +144,16 @@ struct svc_dg_xprt {
 struct svc_vc_xprt {
 	struct rpc_dplx_rec sx_dr;	/* SVCXPRT indexed by fd */
 	int32_t sx_fbtbc;		/* fragment bytes to be consumed */
+	/**
+	 * Upper-layer WRITE: bytes of the current LAST_FRAG still on
+	 * the socket after header staging. Consumed by xdr_ioq_fill_payload
+	 * via readv, or drained after svc_request if unused.
+	 */
+	uint32_t sx_body_remain;
+	/** Cap for staging UV when payload defer is enabled (0 = default). */
+	uint32_t sx_hdr_stage_max;
+	/** When true, stage only hdr_stage_max of a large LAST_FRAG. */
+	bool sx_payload_defer;
 };
 #define VC_DR(p) (opr_containerof((p), struct svc_vc_xprt, sx_dr))
 

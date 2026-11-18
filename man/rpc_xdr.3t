@@ -98,4 +98,5 @@ rejection or
 .El
 .Sh SEE ALSO
 .Xr rpc 3 ,
+.Xr rpc_xdr_write 3 ,
 .Xr xdr 3

@@ -313,4 +313,6 @@ service.
 .Xr rpc_svc_calls 3 ,
 .Xr rpc_svc_err 3 ,
 .Xr rpc_svc_reg 3 ,
+.Xr rpc_svc_zerocopy 3 ,
+.Xr rpc_xdr_write 3 ,
 .Xr rpcbind 8
