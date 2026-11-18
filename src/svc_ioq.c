@@ -103,12 +103,16 @@
  * Locking: none (privately accessed by the serialized transmit thread).
  */
 static void
-svc_ioq_zc_note_send(struct rpc_dplx_rec *rec, struct xdr_ioq *xioq)
+svc_ioq_zc_note_send(struct rpc_dplx_rec *rec, struct xdr_ioq *xioq,
+		     uint32_t nbytes)
 {
 	if (xioq->zc_outstanding == 0)
 		xioq->zc_cookie_lo = rec->zc_next_cookie;
 	rec->zc_next_cookie++;
 	xioq->zc_outstanding++;
+	xioq->zc_bytes += nbytes;
+	atomic_add_uint32_t(&rec->zc_pending_bytes, nbytes);
+	__sync_fetch_and_add(&__svc_params->zc_stats.sends, 1);
 }
 
 /*
@@ -183,7 +187,12 @@ svc_ioq_zc_harvest_locked(struct rpc_dplx_rec *rec,
 				"%s: fd %d reap: inflight %"PRIu32"->%"PRIu32,
 				__func__, rec->xprt.xp_fd,
 				_inf + 1, _inf);
+			if (xioq->zc_bytes) {
+				atomic_sub_uint32_t(&rec->zc_pending_bytes, xioq->zc_bytes);
+				xioq->zc_bytes = 0;
+			}
 			xioq->zc_outstanding = 0;
+			__sync_fetch_and_add(&__svc_params->zc_stats.completions, 1);
 			/* Move to caller's list — XDR_DESTROY happens outside mutex */
 			TAILQ_INSERT_TAIL(harvest_list, have, q);
 			count++;
@@ -483,6 +492,7 @@ svc_ioq_zc_drain_collect(SVCXPRT *xprt,
 
 			if (copied && rec->zc_sock_ok) {
 				rec->zc_sock_ok = false;
+				__sync_fetch_and_add(&__svc_params->zc_stats.copied, 1);
 				__warnx(TIRPC_DEBUG_FLAG_ZEROCOPY_TX,
 					"%s: fd %d SO_EE_CODE_ZEROCOPY_COPIED; disabling MSG_ZEROCOPY",
 					__func__, xprt->xp_fd);
@@ -596,12 +606,17 @@ svc_ioq_zc_release_all(SVCXPRT *xprt)
 
 	mutex_lock(&rec->zc_lock);
 	while ((have = TAILQ_FIRST(&rec->zcq)) != NULL) {
+		struct xdr_ioq *xioq = _IOQ(have);
 		uint32_t _inf = atomic_dec_uint32_t(&rec->zc_inflight);
 
 		__warnx(TIRPC_DEBUG_FLAG_ZEROCOPY_TX,
 			"%s: fd %d release_all: inflight %"PRIu32"->%"PRIu32,
 			__func__, xprt->xp_fd,
 			_inf + 1, _inf);
+		if (xioq->zc_bytes) {
+			atomic_sub_uint32_t(&rec->zc_pending_bytes, xioq->zc_bytes);
+			xioq->zc_bytes = 0;
+		}
 		TAILQ_REMOVE(&rec->zcq, have, q);
 		TAILQ_INSERT_TAIL(&harvest_list, have, q);
 		release_count++;
@@ -631,8 +646,40 @@ svc_ioq_zc_release_all(SVCXPRT *xprt)
 }
 #endif /* __linux__ && MSG_ZEROCOPY && SO_ZEROCOPY */
 
-/* Returns 0 on success, EWOULDBLOCK if would block, <0 on error
- */
+void
+svc_ioq_reply_done(struct xdr_ioq *xioq, int status)
+{
+	svc_reply_done_fun_t cb;
+
+	if (!xioq || !xioq->ioq_stats_valid)
+		return;
+
+	xioq->ioq_stats_valid = false;
+	cb = __svc_params->reply_done_cb;
+	if (cb)
+		cb(&xioq->ioq_rq_stime, &xioq->ioq_reply_time,
+		   xioq->ioq_stats_opcode, status, xioq->ioq_stage_t10_ns);
+}
+
+
+#if HAVE_TCP_ZEROCOPY
+/* True if any UV on the ioq is FSAL-referred (Ceph READ gift). */
+static bool
+svc_ioq_has_refer(struct xdr_ioq *xioq)
+{
+	struct poolq_entry *have;
+
+	TAILQ_FOREACH(have, &xioq->ioq_uv.uvqh.qh, q) {
+		struct xdr_ioq_uv *uv = IOQ_(have);
+
+		if (uv->u.uio_flags & UIO_FLAG_REFER)
+			return true;
+	}
+	return false;
+}
+#endif
+
+/* Returns 0 on success, EWOULDBLOCK if would block, <0 on error */
 static inline int
 svc_ioq_flushv(SVCXPRT *xprt, struct xdr_ioq *xioq)
 {
@@ -787,10 +834,25 @@ svc_ioq_flushv(SVCXPRT *xprt, struct xdr_ioq *xioq)
 #if HAVE_TCP_ZEROCOPY
 		use_zc = false;
 		if (__svc_params->tcp_zerocopy_enabled &&
-		    REC_XPRT(xprt)->zc_sock_ok &&
-		    remaining >= __svc_params->tcp_zerocopy_min_bytes) {
-			send_flags |= MSG_ZEROCOPY;
-			use_zc = true;
+		    REC_XPRT(xprt)->zc_sock_ok) {
+			uint32_t threshold = __svc_params->tcp_zerocopy_min_bytes;
+			uint32_t pending =
+			    atomic_fetch_uint32_t(&REC_XPRT(xprt)->zc_pending_bytes);
+			uint32_t max_pend = __svc_params->tcp_zerocopy_max_pending;
+			bool has_refer = svc_ioq_has_refer(xioq);
+
+			/* Gifted REFER pages (Ceph READ): 1x threshold; else 2x. */
+			if (!has_refer)
+				threshold *= 2;
+			if (remaining >= threshold &&
+			    (max_pend == 0 ||
+			     pending + remaining <= max_pend)) {
+				send_flags |= MSG_ZEROCOPY;
+				use_zc = true;
+			} else if (max_pend && pending + remaining > max_pend) {
+				__sync_fetch_and_add(&__svc_params->zc_stats.fallback,
+						     1);
+			}
 		}
 #endif
 
@@ -818,6 +880,8 @@ again:
 #if HAVE_TCP_ZEROCOPY
 		/* ENOBUFS: ZC path unavailable; retry once without it. */
 		if (unlikely(result < 0 && use_zc && errno == ENOBUFS)) {
+			__sync_fetch_and_add(&__svc_params->zc_stats.enobufs, 1);
+			__sync_fetch_and_add(&__svc_params->zc_stats.fallback, 1);
 			send_flags &= ~MSG_ZEROCOPY;
 			use_zc = false;
 			errno = 0;
@@ -856,7 +920,8 @@ again:
 				__func__, xprt->xp_fd,
 				(long)result, remaining,
 				xioq->zc_outstanding);
-			svc_ioq_zc_note_send(REC_XPRT(xprt), xioq);
+			svc_ioq_zc_note_send(REC_XPRT(xprt), xioq,
+					     (uint32_t)result);
 		}
 #endif
 
@@ -1012,6 +1077,7 @@ void svc_ioq_write(SVCXPRT *xprt)
 			atomic_clear_uint16_t_bits(&xioq->ioq_s.qflags,
 						   IOQ_FLAG_WORKING);
 			mutex_unlock(&rec->writeq.qmutex);
+			/* Remaining queued replies are completed in writeq clear */
 			break;
 		} else if (rc == EWOULDBLOCK){
 			__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
@@ -1100,6 +1166,7 @@ void svc_ioq_write(SVCXPRT *xprt)
 		__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
 			"%s: %p fd %d About to release",
 			__func__, xprt, xprt->xp_fd);
+		svc_ioq_reply_done(xioq, 0);
 		SVC_RELEASE(xprt, SVC_RELEASE_FLAG_NONE);
 		XDR_DESTROY(xioq->xdrs);
 
@@ -1162,6 +1229,11 @@ svc_ioq_write_callback(struct work_pool_entry *wpe)
 	struct xdr_ioq *xioq = opr_containerof(wpe, struct xdr_ioq, ioq_wpe);
 
 	svc_ioq_write(xioq->xdrs[0].x_lib[1]);
+	/*
+	 * May already be clear after EWOULDBLOCK (EPOLLOUT owns WORKING).
+	 * Otherwise release so clear_requests can reclaim the reply xioq.
+	 */
+	atomic_clear_uint16_t_bits(&xioq->ioq_s.qflags, IOQ_FLAG_WORKING);
 }
 
 static bool add_ioq_to_write_queue(SVCXPRT *xprt, struct xdr_ioq *xioq,
@@ -1178,6 +1250,7 @@ static bool add_ioq_to_write_queue(SVCXPRT *xprt, struct xdr_ioq *xioq,
 		XPRT_UNIQUE_AUTO_TRACEPOINT(xprt, mutex_unlock,
 			TRACE_DEBUG, "Unlocking mutex");
 		mutex_unlock(&rec->writeq.qmutex);
+		svc_ioq_reply_done(xioq, ECONNABORTED);
 		XDR_DESTROY(xioq->xdrs);
 		return false;
 	}

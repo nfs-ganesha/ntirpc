@@ -78,6 +78,9 @@ struct work_pool_thread {
 
 typedef void (*work_pool_fun_t) (struct work_pool_entry *);
 
+/* pqe.qflags — work-pool queue membership (not IOQ_FLAG_*) */
+#define WORK_POOL_FLAG_QUEUED	0x0001
+
 struct work_pool_entry {
 	struct poolq_entry pqe;		/*** 1st ***/
 	struct work_pool_thread *wpt;

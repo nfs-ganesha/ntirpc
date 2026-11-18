@@ -387,6 +387,12 @@ pages on which they are described:
 .Xr rpc_svc_calls 3
 .It Fn svc_sendreply
 .Xr rpc_svc_reg 3
+.It Fn svc_set_socket_zerocopy
+.Xr rpc_svc_zerocopy 3
+.It Fn svc_get_socket_zerocopy_stats
+.Xr rpc_svc_zerocopy 3
+.It Fn svc_reset_socket_zerocopy_stats
+.Xr rpc_svc_zerocopy 3
 .It Fn svc_tli_create
 .Xr rpc_svc_create 3
 .It Fn svc_tp_create

@@ -205,7 +205,14 @@ work_pool_thread(void *arg)
 			__warnx(TIRPC_DEBUG_FLAG_WORKER,
 				"%s() %s task %p",
 				__func__, wpt->worker_name, wpt->work);
-			wpt->work->fun(wpt->work);
+			if (unlikely(wpt->work->fun == NULL)) {
+				__warnx(TIRPC_DEBUG_FLAG_ERROR,
+					"%s() %s NULL fun on work %p (UAF?)",
+					__func__, wpt->worker_name,
+					wpt->work);
+			} else {
+				wpt->work->fun(wpt->work);
+			}
 			wpt->work = NULL;
 			pthread_mutex_lock(&pool->pqh.qmutex);
 		}
@@ -214,8 +221,26 @@ work_pool_thread(void *arg)
 		 */
 		have = TAILQ_FIRST(&pool->pqh.qh);
 		if (have) {
+			struct work_pool_entry *wpe =
+				(struct work_pool_entry *)have;
+
+			/*
+			 * Freed/zeroed entry still linked as head → UAF.
+			 * Skip rather than TAILQ_REMOVE through NULL tqe_prev.
+			 */
+			if (unlikely(have->q.tqe_prev == NULL ||
+				     !(have->qflags & WORK_POOL_FLAG_QUEUED))) {
+				__warnx(TIRPC_DEBUG_FLAG_ERROR,
+					"%s() %s corrupt work %p prev %p flags %x — draining head",
+					__func__, wpt->worker_name, have,
+					have->q.tqe_prev, have->qflags);
+				TAILQ_INIT(&pool->pqh.qh);
+				wpt->work = NULL;
+				continue;
+			}
 			TAILQ_REMOVE(&pool->pqh.qh, have, q);
-			wpt->work = (struct work_pool_entry *)have;
+			have->qflags &= ~WORK_POOL_FLAG_QUEUED;
+			wpt->work = wpe;
 			continue;
 		}
 
@@ -318,6 +343,18 @@ work_pool_submit(struct work_pool *pool, struct work_pool_entry *work)
 	}
 
 	pthread_mutex_lock(&pool->pqh.qmutex);
+	/*
+	 * Double-insert of the same entry corrupts the TAILQ (segfault in
+	 * TAILQ_REMOVE on a later zeroed/freed head). Refuse if already queued.
+	 */
+	if (unlikely(work->pqe.qflags & WORK_POOL_FLAG_QUEUED)) {
+		__warnx(TIRPC_DEBUG_FLAG_ERROR,
+			"%s() double submit of work %p fun %p — ignored",
+			__func__, work, work->fun);
+		pthread_mutex_unlock(&pool->pqh.qmutex);
+		return EEXIST;
+	}
+	work->pqe.qflags |= WORK_POOL_FLAG_QUEUED;
 	/*
 	 * Insert in work queue so that running thread can
 	 * pickup without scheduling.

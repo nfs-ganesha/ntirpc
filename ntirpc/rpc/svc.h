@@ -134,11 +134,24 @@ typedef enum xprt_stat (*svc_xprt_fun_t) (SVCXPRT *);
 typedef void (*svc_xprt_void_fun_t) (SVCXPRT *);
 typedef struct svc_req *(*svc_xprt_alloc_fun_t) (SVCXPRT *, XDR *);
 typedef void (*svc_xprt_free_fun_t) (struct svc_req *, enum xprt_stat);
+/*
+ * Called when a reply has been fully sent (or abandoned).
+ * @stime / @reply_time are monotonic stamps from the request (T0 / T3).
+ * @opcode is the upper-layer stats opcode (-1 if unset).
+ * @status is 0 on success, errno-style on failure/destroy.
+ */
+typedef void (*svc_reply_done_fun_t)(const struct timespec *stime,
+				     const struct timespec *reply_time,
+				     int opcode, int status,
+				     uint64_t stage_t10_ns);
 
 typedef struct svc_init_params {
 	svc_xprt_fun_t disconnect_cb;	/* no dynamic update */
 	svc_xprt_alloc_fun_t alloc_cb;	/* no dynamic update */
 	svc_xprt_free_fun_t free_cb;	/* no dynamic update */
+	svc_reply_done_fun_t reply_done_cb;	/* no dynamic update */
+	/** When true, stamp fine CLOCK_MONOTONIC stage times on ioq/svc_req */
+	bool stage_timing;		/* dynamic */
 
 	u_long flags;			/* no dynamic update */
 	u_int max_connections;		/* dynamnic, xprts */
@@ -159,6 +172,15 @@ typedef struct svc_init_params {
 	/* TCP zerocopy parameters (Linux MSG_ZEROCOPY) */
 	bool tcp_zerocopy_enabled;	/* enable/disable TCP MSG_ZEROCOPY, non-dynamic */
 	uint32_t tcp_zerocopy_min_bytes; /* minimum send size for ZC in bytes, dynamic */
+	uint32_t tcp_zerocopy_max_pending; /* max outstanding ZC bytes/xprt; 0=64MiB */
+
+	/*
+	 * Ganesha / FSAL-facing aliases (same values as tcp_zerocopy_*).
+	 * Prefer tcp_* in new ntirpc code; socket_* kept for existing callers.
+	 */
+	bool socket_zerocopy;		/* dynamic alias of tcp_zerocopy_enabled */
+	u_int socket_zerocopy_threshold;	/* alias of tcp_zerocopy_min_bytes */
+	u_int socket_zerocopy_max_pending;	/* alias of tcp_zerocopy_max_pending */
 } svc_init_params;
 
 /* Svc param flags */
@@ -443,6 +465,27 @@ struct svc_req {
 	/* blkin tracing */
 	struct blkin_trace bl_trace;
 #endif
+	/*
+	 * Fine CLOCK_MONOTONIC start for this request, copied from the
+	 * transport's recv.ts at svc_request() (set in task_recv before
+	 * SVC_RECV). Same clock as Ganesha now_mono() so FULLV4/e2e latency
+	 * is not inflated by COARSE/FAST resolution. Do not reuse recv.ts
+	 * across the request lifetime (it also tracks xprt idle/activity).
+	 */
+	struct timespec rq_stime;
+	/* Fine CLOCK_MONOTONIC when reply send begins (set by upper layer, T3) */
+	struct timespec rq_reply_time;
+	/* Terminal NFSv4 opcode for reply-done stats; -1 if unset */
+	int32_t rq_stats_opcode;
+	/*
+	 * Fine CLOCK_MONOTONIC stage stamps (ns since epoch of that clock)
+	 * filled when svc_init_params.stage_timing is set. 0 = unset.
+	 */
+	uint64_t rq_stage_t00_ns;
+	uint64_t rq_stage_t01_ns;
+	uint64_t rq_stage_t02_ns;
+	/* T10 at complete_request; copied to ioq for T11 at reply_done */
+	uint64_t rq_stage_t10_ns;
 	uint32_t rq_refcnt;
 };
 
@@ -455,6 +498,27 @@ struct svc_req {
 #define svc_getrpclocal(x) (&(x)->xp_local.ss)
 
 extern void svc_resume(struct svc_req *req);
+
+/** Enable/disable fine-grained IO stage stamps in ntirpc (runtime). */
+extern void svc_set_stage_timing(bool enable);
+/** Enable/disable socket TX zerocopy at runtime (affects new accepts + sends). */
+extern void svc_set_socket_zerocopy(bool enable);
+
+/** Snapshot of MSG_ZEROCOPY counters (atomically read; best-effort). */
+struct svc_socket_zerocopy_stats {
+	bool enabled;
+	u_int threshold;
+	u_int max_pending;
+	uint64_t sends;
+	uint64_t completions;
+	uint64_t copied; /* SO_EE_CODE_ZEROCOPY_COPIED */
+	uint64_t enobufs;
+	uint64_t fallback;
+};
+
+extern void svc_get_socket_zerocopy_stats(struct svc_socket_zerocopy_stats *out);
+extern void svc_reset_socket_zerocopy_stats(void);
+
 
 extern void svc_rqst_qos_suspend_socket(struct svc_xprt *xprt);
 
