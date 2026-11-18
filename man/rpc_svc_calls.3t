@@ -66,4 +66,5 @@ or greater otherwise.
 .Xr rpc 3 ,
 .Xr rpc_svc_create 3 ,
 .Xr rpc_svc_err 3 ,
-.Xr rpc_svc_reg 3
+.Xr rpc_svc_reg 3 ,
+.Xr rpc_svc_zerocopy 3
