@@ -92,6 +92,7 @@ struct rpc_dplx_rec {
 	uint64_t zc_ooo_bits[SVC_ZC_ACK_WORDS];
 	uint32_t zc_window_drops;	/* completions lost past the window */
 	bool zc_sock_ok;		/* SO_ZEROCOPY succeeded on this fd */
+	uint32_t zc_pending_bytes;	/* outstanding ZC payload bytes; atomic */
 	struct opr_rbtree call_replies;
 	struct opr_rbtree rdma_call_expires;	/**< call expiration tree for RDMA */
 	struct opr_rbtree_node fd_node;
@@ -173,6 +174,7 @@ rpc_dplx_rec_init(struct rpc_dplx_rec *rec)
 	memset(rec->zc_ooo_bits, 0, sizeof(rec->zc_ooo_bits));
 	rec->zc_window_drops = 0;
 	rec->zc_sock_ok = false;
+	rec->zc_pending_bytes = 0;
 	/* Stop this xprt being cleaned immediately */
 	(void)clock_gettime(CLOCK_MONOTONIC_FAST, &(rec->recv.ts));
 

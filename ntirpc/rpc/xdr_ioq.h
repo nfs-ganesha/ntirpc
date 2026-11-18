@@ -137,6 +137,7 @@ struct xdr_ioq {
 	uint32_t zc_frag_header;
 	uint32_t zc_cookie_lo;
 	uint32_t zc_outstanding;
+	uint32_t zc_bytes;	/* payload bytes covered by outstanding ZC sends */
 
 	/*
 	 * Reply timing cookie copied from svc_req before async send.
