@@ -421,6 +421,14 @@ pages on which they are described:
 .Xr rpc_xdr 3
 .It Fn xdr_authunix_parms
 .Xr rpc_soc 3
+.It Fn xdr_ioq_donate_iovs
+.Xr rpc_xdr_write 3
+.It Fn xdr_ioq_fill_payload
+.Xr rpc_xdr_write 3
+.It Fn xdr_ioq_set_payload_alloc
+.Xr rpc_xdr_write 3
+.It Fn svc_vc_set_payload_defer
+.Xr rpc_xdr_write 3
 .It Fn xdr_callhdr
 .Xr rpc_xdr 3
 .It Fn xdr_callmsg

@@ -246,7 +246,8 @@ return no value.
 .Xr setsockopt 2 ,
 .Xr rpc 3 ,
 .Xr rpc_svc_calls 3 ,
-.Xr rpc_svc_create 3
+.Xr rpc_svc_create 3 ,
+.Xr rpc_xdr_write 3
 .Pp
 Linux kernel documentation:
 .Lk https://docs.kernel.org/networking/msg_zerocopy.html MSG_ZEROCOPY
