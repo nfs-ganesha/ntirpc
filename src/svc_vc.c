@@ -1366,6 +1366,23 @@ again:
 			return SVC_STAT(xprt);
 		}
 
+		if (unlikely(xd->sx_dr.maxrec > 0
+			&& (u_int32_t)xd->sx_fbtbc
+			> (u_int32_t)xd->sx_dr.maxrec)) {
+			__warnx(TIRPC_DEBUG_FLAG_ERROR,
+				"%s: %p fd %d fragment size %d exceeds maxrec %d (will set dead) - clientip: %s:%u",
+				__func__, xprt, xprt->xp_fd, (int)xd->sx_fbtbc,
+				(int)xd->sx_dr.maxrec, xprt->xp_clnt_addr,
+				xprt->xp_clnt_port);
+			SVC_DESTROY(xprt);
+
+			XPRT_AUTO_TRACEPOINT(xprt, recv_frag_too_big,
+				TRACE_ERR,
+				"Recv fragment size exceeds maxrec (will set dead)");
+
+			return SVC_STAT(xprt);
+		}
+
 		/* one buffer per fragment */
 		uv = xdr_ioq_uv_create(xd->sx_fbtbc, flags);
 		(xioq->ioq_uv.uvqh.qcount)++;
